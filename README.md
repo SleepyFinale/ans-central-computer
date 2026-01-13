@@ -10,6 +10,7 @@ Before proceeding, ensure you have the following installed:
 sudo apt update
 sudo apt install git
 sudo apt install ros-humble-navigation2
+sudo apt install ros-humble-nav2-bringup
 sudo apt install ros-humble-slam-toolbox
 ```
 
@@ -104,18 +105,24 @@ ros2 launch turtlebot3_cartographer cartographer.launch.py configuration_basenam
 
 **Purpose**: Provides navigation and path planning capabilities
 
-**Option A: Standard Nav2 (Recommended for SLAM)**
+**Option A: TurtleBot3 Nav2 (Recommended - includes RViz)**
 ```bash
-source /opt/ros/humble/setup.bash
-export TURTLEBOT3_MODEL=burger
-ros2 launch nav2_bringup navigation_launch.py
-```
+# First install nav2_bringup if not already installed:
+sudo apt install ros-humble-nav2-bringup
 
-**Option B: TurtleBot3 Nav2 (if Option A doesn't work)**
-```bash
+# Then launch:
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
 ros2 launch turtlebot3_navigation2 navigation2.launch.py
+```
+*Note: This launches both Nav2 and RViz. If you use this, you can skip Terminal 4.*
+
+**Option B: Standard Nav2 (if nav2_bringup is installed)**
+```bash
+sudo apt install ros-humble-nav2-bringup  # Install first if needed
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 launch nav2_bringup navigation_launch.py
 ```
 
 ---
@@ -127,9 +134,7 @@ ros2 launch turtlebot3_navigation2 navigation2.launch.py
 **Option A: Explore Lite (Recommended - more robust)**
 ```bash
 cd ~/turtlebot3_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
-ros2 run explore_lite explore
+./start_explorer_simple.sh
 ```
 
 **Option B: Your Custom Explorer**
@@ -146,20 +151,41 @@ ros2 run custom_explorer explorer
 
 **Purpose**: Visualize the map, robot position, and exploration progress
 
+**Option A: Using TurtleBot3 Navigation2 (Recommended)**
 ```bash
 source /opt/ros/humble/setup.bash
-ros2 launch nav2_bringup rviz_launch.py
+export TURTLEBOT3_MODEL=burger
+ros2 launch turtlebot3_navigation2 navigation2.launch.py
 ```
+*Note: This launches both Nav2 and RViz together*
+
+**Option B: Launch RViz directly**
+```bash
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+ros2 run rviz2 rviz2
+```
+*Then manually add displays: Map, TF, LaserScan, RobotModel*
+
+**Option C: Install nav2_bringup (if you want the standard Nav2 RViz)**
+```bash
+sudo apt install ros-humble-nav2-bringup
+```
+*Then you can use: `ros2 launch nav2_bringup rviz_launch.py`*
 
 ---
 
 ## Quick Reference: Complete Sequence
 
+**IMPORTANT**: Start in this exact order and wait between steps:
+
 1. **Robot**: `ros2 launch turtlebot3_bringup robot.launch.py` (on robot)
 2. **Computer Terminal 1**: `ros2 launch slam_toolbox online_async_launch.py`
-3. **Computer Terminal 2**: `ros2 launch nav2_bringup navigation_launch.py`
+   - **Wait 5-10 seconds** for SLAM to initialize (creates `odom` frame)
+3. **Computer Terminal 2**: `ros2 launch turtlebot3_navigation2 navigation2.launch.py`
+   - **Wait 10-30 seconds** for Nav2 to fully initialize
 4. **Computer Terminal 3**: `ros2 run explore_lite explore`
-5. **Computer Terminal 4**: `ros2 launch nav2_bringup rviz_launch.py` (optional)
+5. **Computer Terminal 4**: RViz (optional - already included in Terminal 2 if using turtlebot3_navigation2)
 
 ---
 
@@ -200,10 +226,12 @@ After starting all terminals, check:
   - This is normal - wait for the map to build up first
   - The explorer needs some map data before it can find frontiers
 
-- **TF errors?**
-  - Make sure robot launch is running
-  - Check: `ros2 topic list | grep tf`
-  - Wait a bit - TF tree takes time to build
+- **TF errors? (e.g., "Invalid frame ID 'odom'")**
+  - **Most common**: Nav2 started before SLAM Toolbox
+  - **Solution**: Stop Nav2, make sure SLAM Toolbox is running, wait 10 seconds, then restart Nav2
+  - Check TF tree: `ros2 run tf2_ros tf2_echo map base_link` (should show transforms)
+  - Verify frames exist: `ros2 run tf2_ros tf2_monitor` (should see map, odom, base_link)
+  - **Launch order matters**: Robot → SLAM → Nav2 → Explorer
 
 ---
 
