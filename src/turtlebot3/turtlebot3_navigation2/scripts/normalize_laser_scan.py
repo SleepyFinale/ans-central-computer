@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Laser scan normalizer to fix variable reading counts for slam_toolbox.
-This node normalizes all scans to have a consistent number of readings (226)
+This node normalizes all scans to have a consistent number of readings (default: 228)
 by interpolating or padding/truncating as needed.
 """
 
@@ -15,7 +15,8 @@ class LaserScanNormalizer(Node):
         super().__init__('laser_scan_normalizer')
         
         # Declare parameter for target number of readings
-        self.declare_parameter('target_readings', 226)
+        # Default to 228 to match slam_toolbox's expected count
+        self.declare_parameter('target_readings', 228)
         self.declare_parameter('input_topic', '/scan')
         self.declare_parameter('output_topic', '/scan_normalized')
         
@@ -23,19 +24,20 @@ class LaserScanNormalizer(Node):
         input_topic = self.get_parameter('input_topic').value
         output_topic = self.get_parameter('output_topic').value
         
-        # Subscribe to the original scan
+        # Subscribe to the original scan with sensor QoS (best effort, volatile)
+        from rclpy.qos import qos_profile_sensor_data
         self.subscription = self.create_subscription(
             LaserScan,
             input_topic,
             self.scan_callback,
-            10
+            qos_profile_sensor_data
         )
         
-        # Publish the normalized scan
+        # Publish the normalized scan with sensor QoS
         self.publisher = self.create_publisher(
             LaserScan,
             output_topic,
-            10
+            qos_profile_sensor_data
         )
         
         self.target_readings = target_readings
@@ -57,6 +59,16 @@ class LaserScanNormalizer(Node):
         normalized_msg.scan_time = msg.scan_time
         normalized_msg.range_min = msg.range_min
         normalized_msg.range_max = msg.range_max
+        
+        # Debug: log first few scans to verify normalization is working
+        if not hasattr(self, '_scan_count'):
+            self._scan_count = 0
+        self._scan_count += 1
+        if self._scan_count <= 5:
+            self.get_logger().info(
+                f'Scan {self._scan_count}: received {actual_readings} readings, '
+                f'normalizing to {self.target_readings}'
+            )
         
         if actual_readings == self.target_readings:
             # Already correct size, just copy
@@ -107,11 +119,52 @@ class LaserScanNormalizer(Node):
                         normalized_msg.intensities.append(intensity_val)
                     elif msg.intensities:
                         normalized_msg.intensities.append(msg.intensities[0] if len(msg.intensities) > 0 else 0.0)
+                    else:
+                        normalized_msg.intensities.append(0.0)
+        
+        # Ensure intensities array matches ranges array length
+        if msg.intensities and len(normalized_msg.intensities) != len(normalized_msg.ranges):
+            # Pad or truncate intensities to match
+            if len(normalized_msg.intensities) < len(normalized_msg.ranges):
+                normalized_msg.intensities.extend([0.0] * (len(normalized_msg.ranges) - len(normalized_msg.intensities)))
+            else:
+                normalized_msg.intensities = normalized_msg.intensities[:len(normalized_msg.ranges)]
+        elif not msg.intensities and len(normalized_msg.ranges) > 0:
+            # Create empty intensities array if not present
+            normalized_msg.intensities = []
         
         # Adjust angle_increment to match the new number of readings
         # This ensures the scan geometry is correct
         angle_span = msg.angle_max - msg.angle_min
         normalized_msg.angle_increment = angle_span / (self.target_readings - 1) if self.target_readings > 1 else msg.angle_increment
+        
+        # CRITICAL: Verify we have exactly the target number of readings
+        # This is a safety check - the code above should always produce exactly target_readings
+        if len(normalized_msg.ranges) != self.target_readings:
+            self.get_logger().error(
+                f'CRITICAL: Normalization failed! Expected {self.target_readings} readings, '
+                f'got {len(normalized_msg.ranges)}. Fixing by padding/truncating...'
+            )
+            # Emergency fix: pad or truncate to exact count
+            if len(normalized_msg.ranges) < self.target_readings:
+                # Pad with last value
+                last_val = normalized_msg.ranges[-1] if normalized_msg.ranges else msg.range_max
+                normalized_msg.ranges.extend([last_val] * (self.target_readings - len(normalized_msg.ranges)))
+                if normalized_msg.intensities:
+                    last_int = normalized_msg.intensities[-1] if normalized_msg.intensities else 0.0
+                    normalized_msg.intensities.extend([last_int] * (self.target_readings - len(normalized_msg.intensities)))
+            else:
+                # Truncate
+                normalized_msg.ranges = normalized_msg.ranges[:self.target_readings]
+                if normalized_msg.intensities:
+                    normalized_msg.intensities = normalized_msg.intensities[:self.target_readings]
+        
+        # Debug: log first few normalized scans
+        if self._scan_count <= 5:
+            self.get_logger().info(
+                f'Scan {self._scan_count}: published {len(normalized_msg.ranges)} readings '
+                f'(target: {self.target_readings})'
+            )
         
         # Publish the normalized scan
         self.publisher.publish(normalized_msg)
