@@ -1,0 +1,14 @@
+/**:
+  ros__parameters:
+    robot_base_frame: base_link
+    return_to_init: false  # Disable return to start - focus on exploration first
+    costmap_topic: map
+    costmap_updates_topic: map_updates
+    visualize: true
+    planner_frequency: 0.5  # Plan every 2 seconds - more frequent planning for better exploration and SLAM data gathering
+    progress_timeout: 20.0  # Reduced timeout - try new frontier if stuck for 20 seconds
+    potential_scale: 3.0
+    orientation_scale: 0.0
+    gain_scale: 1.0
+    transform_tolerance: 2.0  # Increased further to handle TF timing issues with SLAM (was 1.0)
+    min_frontier_size: 0.1  # Very small to find frontiers even in narrow maps
