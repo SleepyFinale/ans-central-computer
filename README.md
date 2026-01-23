@@ -85,6 +85,9 @@ sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] http://packages
 sudo apt update
 sudo apt install ros-humble-desktop
 
+# Install Navigation2 packages (required for explore_lite)
+sudo apt install ros-humble-navigation2
+
 # Install development tools
 sudo apt install python3-colcon-common-extensions python3-argcomplete
 
@@ -92,7 +95,7 @@ sudo apt install python3-colcon-common-extensions python3-argcomplete
 source /opt/ros/humble/setup.bash
 ```
 
-**Note:** Theoretically, Ubuntu 22.04 LTS and ROS 2 Humble are all you need to install. Everything else (TurtleBot3 packages, Navigation2, Explore Lite) is included in the GitHub repository.
+**Note:** This workspace uses system Navigation2 packages (installed via apt) rather than building them from source. The workspace contains TurtleBot3 packages and Explore Lite, which depend on Navigation2 being available as system packages.
 
 ---
 
@@ -497,6 +500,47 @@ ros2 topic echo /goal_pose  # Should see goals being published
 ## Troubleshooting
 
 ### Common Issues and Solutions
+
+#### 0. Build Error: "Could not find a package configuration file provided by 'nav2_msgs'"
+
+**Symptoms:**
+
+```text
+CMake Error at CMakeLists.txt:40 (find_package):
+  By not providing "Findnav2_msgs.cmake" in CMAKE_MODULE_PATH this project
+  has asked CMake to find a package configuration file provided by
+  "nav2_msgs", but CMake did not find one.
+```
+
+**Cause:** Navigation2 system packages are not installed. The workspace is configured to use system Navigation2 packages (installed via apt) rather than building them from source.
+
+**Solution:**
+
+Install Navigation2 packages:
+
+```bash
+sudo apt update
+sudo apt install ros-humble-navigation2
+```
+
+This will install all Navigation2 packages including `nav2_msgs`, which is required by `explore_lite`.
+
+**Verification:**
+
+After installing, verify the package is available:
+
+```bash
+source /opt/ros/humble/setup.bash
+ros2 pkg list | grep nav2_msgs
+```
+
+You should see `nav2_msgs` in the list. Then try building again:
+
+```bash
+./clean_rebuild.sh
+```
+
+---
 
 #### 1. ROS_DOMAIN_ID Mismatch (Topics Not Visible)
 
