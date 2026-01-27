@@ -322,9 +322,14 @@ cd ~/turtlebot3_ws
 **What this script does:**
 
 - Starts a laser scan normalizer that fixes variable reading counts (216-230 readings → 228 readings)
-- Launches SLAM Toolbox with fast map update configuration (0.5s intervals)
+- Launches SLAM Toolbox with fast map update configuration (0.2s intervals by default)
 - Automatically remaps scan topic to use normalized scans
 - Prevents "LaserRangeScan contains X range readings, expected Y" errors
+- Defaults to `use_sim_time:=False` (real robot). To use sim time, run:
+
+```bash
+USE_SIM_TIME=1 ./start_slam_with_normalizer.sh
+```
 
 **Alternative (manual setup - not recommended):**
 
@@ -380,7 +385,7 @@ ros2 topic echo /map --once      # Should show map data (may need to wait a few 
 
 ### Terminal 3: Navigation2
 
-**Purpose:** Provides navigation and path planning capabilities, including obstacle avoidance and goal execution.
+**Purpose:** Provides navigation and path planning capabilities (obstacle avoidance + goal execution) while using SLAM Toolbox’s live `/map`.
 
 **Commands:**
 
@@ -395,8 +400,11 @@ cd ~/turtlebot3_ws
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
 
-# Launch Navigation2 (includes RViz)
-ros2 launch turtlebot3_navigation2 navigation2.launch.py
+# Launch Navigation2 for SLAM / exploration (includes RViz)
+# - Does NOT load a static map file
+# - Uses SLAM's live map (/map)
+# - Waits for TF (map->odom and odom->base_*) before starting Nav2
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
 ```
 
 **Expected output (if working correctly):**
@@ -414,26 +422,13 @@ ros2 launch turtlebot3_navigation2 navigation2.launch.py
 
 - Nav2 nodes starting successfully
 - RViz window should open automatically
-- You may see warnings about AMCL needing initial pose (this is normal)
 - After 20-30 seconds, costmap topics should be available
 
 **Important:**
 
 - Wait 20-30 seconds after starting Nav2 before proceeding to Terminal 4
-- **Set the initial pose in RViz** (see below) - this is required for Nav2 to work correctly
-- You may see warnings like "AMCL cannot publish a pose" until you set the initial pose
-
-**Setting Initial Pose in RViz:**
-
-1. In the RViz window that opened, click the **"2D Pose Estimate"** button (or press `P`)
-2. Click on the map where the robot is actually located
-3. Drag to set the robot's orientation (which direction it's facing)
-
-**After setting initial pose:**
-
-- AMCL warnings should stop
-- TF transform `map -> base_link` should work
-- Nav2 should be ready for navigation
+- For SLAM/exploration you generally do **not** set an AMCL initial pose (Nav2 is using SLAM localization).
+- If you see Nav2 waiting on TF (e.g. `base_* frame does not exist`), make sure robot bringup is running and TF is publishing.
 
 **Verification:**
 
@@ -444,8 +439,9 @@ ros2 node list | grep nav2
 # Check costmap topics
 ros2 topic list | grep costmap
 
-# Check TF tree
-ros2 run tf2_ros tf2_echo map base_footprint  # Should work after initial pose is set
+# Check TF chain needed for navigation
+ros2 run tf2_ros tf2_echo map odom
+ros2 run tf2_ros tf2_echo odom base_footprint
 ```
 
 ---
@@ -594,18 +590,77 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 #### 2. AMCL Warning: "AMCL cannot publish a pose or update the transform. Please set the initial pose..."
 
-**Cause:** AMCL (localization) doesn't know where the robot is on the map yet.
+**Note (SLAM/exploration workflow):** If you are running `navigation2_slam.launch.py`, Nav2 uses SLAM localization and you normally will **not** use AMCL initial pose. If you see this warning, you likely launched the non-SLAM Nav2 launch by mistake.
 
 **Solution:**
 
-1. Open RViz (should open automatically with Nav2 launch)
-2. Click **"2D Pose Estimate"** button in RViz toolbar (or press `P`)
-3. Click on the map where the robot is actually located
-4. Drag to set orientation (which direction the robot is facing)
+Use the SLAM Nav2 launch instead:
 
-The warning should stop and AMCL will start localizing the robot.
+```bash
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
+```
 
-**Alternative (command line):**
+---
+
+#### 2. TF Errors: `base_link` / `base_footprint` frame does not exist
+
+**Symptoms:**
+
+```text
+Timed out waiting for transform from base_footprint to odom to become available, tf error:
+Invalid frame ID "base_footprint" ... frame does not exist
+```
+
+**Cause:** Nav2 is starting before it has received the robot TF (`odom -> base_*`), or the Remote PC is not receiving TF from the robot (often a `ROS_DOMAIN_ID` mismatch).
+
+**Solution:**
+
+1. Verify your domain ID matches across all terminals:
+
+```bash
+echo $ROS_DOMAIN_ID
+```
+
+2. Verify the Remote PC can see robot TF:
+
+```bash
+ros2 topic echo /tf --once
+```
+
+You should see at least `map -> odom` (from SLAM) and `odom -> base_*` (from robot bringup / odometry / robot_state_publisher).
+
+3. Verify the specific transforms:
+
+```bash
+ros2 run tf2_ros tf2_echo map odom
+ros2 run tf2_ros tf2_echo odom base_footprint
+```
+
+**Note:** `navigation2_slam.launch.py` includes a TF wait step (`wait_for_tf.py`) to reduce this startup race. If TF never appears, the issue is upstream (robot bringup or networking / DDS).
+
+---
+
+#### 3. RViz errors about Nav2 panels / GLSL
+
+**Symptoms:**
+
+- `nav2_rviz_plugins/Selector` or `nav2_rviz_plugins/Docking` failed to load
+- GLSL error: `active samplers with a different type refer to the same texture image unit`
+
+**Cause:** RViz plugin / GPU driver quirks. These do not usually prevent navigation.
+
+**Workarounds:**
+
+- If the map still renders and Nav2 works, you can ignore these.
+- If RViz rendering is broken, try software rendering:
+
+```bash
+LIBGL_ALWAYS_SOFTWARE=1 rviz2
+```
+
+---
+
+#### 4. (Optional) Manually setting initial pose (only for static-map AMCL workflows)
 
 ```bash
 ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
