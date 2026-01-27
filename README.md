@@ -621,7 +621,7 @@ Invalid frame ID "base_footprint" ... frame does not exist
 echo $ROS_DOMAIN_ID
 ```
 
-2. Verify the Remote PC can see robot TF:
+1. Verify the Remote PC can see robot TF:
 
 ```bash
 ros2 topic echo /tf --once
@@ -629,7 +629,7 @@ ros2 topic echo /tf --once
 
 You should see at least `map -> odom` (from SLAM) and `odom -> base_*` (from robot bringup / odometry / robot_state_publisher).
 
-3. Verify the specific transforms:
+1. Verify the specific transforms:
 
 ```bash
 ros2 run tf2_ros tf2_echo map odom
