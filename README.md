@@ -131,9 +131,9 @@ You can now branch, push, and pull changes as needed for your development workfl
 
 ### Building the Workspace
 
-The workspace includes two build scripts to help you build and source everything:
+The workspace includes two build scripts in the `scripts/` folder to help you build and source everything:
 
-#### `clean_rebuild.sh`
+#### `scripts/clean_rebuild.sh`
 
 Performs a complete clean rebuild of the entire workspace:
 
@@ -146,7 +146,7 @@ Performs a complete clean rebuild of the entire workspace:
 
 ```bash
 cd ~/turtlebot3_ws
-./clean_rebuild.sh
+./scripts/clean_rebuild.sh
 ```
 
 **When to use:**
@@ -156,7 +156,7 @@ cd ~/turtlebot3_ws
 - When experiencing build issues that require a clean slate
 - After pulling significant changes from the repository
 
-#### `minimal_rebuild.sh`
+#### `scripts/minimal_rebuild.sh`
 
 Performs a minimal rebuild of only essential packages:
 
@@ -170,7 +170,7 @@ Performs a minimal rebuild of only essential packages:
 
 ```bash
 cd ~/turtlebot3_ws
-./minimal_rebuild.sh
+./scripts/minimal_rebuild.sh
 ```
 
 **When to use:**
@@ -179,7 +179,7 @@ cd ~/turtlebot3_ws
 - Faster rebuild times during development
 - When you only need to update navigation or exploration components
 
-**Note:** Both scripts automatically source the workspace after building. If you need to manually source the workspace:
+**Note:** Both scripts automatically source the workspace after building. All helper scripts (build, SLAM, explorer) are located in the `scripts/` folder. If you need to manually source the workspace:
 
 ```bash
 cd ~/turtlebot3_ws
@@ -266,8 +266,7 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 export ROS_DOMAIN_ID=30
 
 # SSH into the robot
-ssh ubuntu@172.20.10.8
-# Password: ubuntu
+ssh blinky@192.168.50.193
 
 # After connection, on the robot:
 source /opt/ros/humble/setup.bash
@@ -349,7 +348,7 @@ cd ~/turtlebot3_ws
 
 # Launch SLAM Toolbox with laser scan normalizer (recommended)
 # This automatically handles variable laser scan readings and uses fast map updates
-./start_slam_with_normalizer.sh
+./scripts/start_slam_with_normalizer.sh
 ```
 
 **What this script does:**
@@ -361,7 +360,7 @@ cd ~/turtlebot3_ws
 - Defaults to `use_sim_time:=False` (real robot). To use sim time, run:
 
 ```bash
-USE_SIM_TIME=1 ./start_slam_with_normalizer.sh
+USE_SIM_TIME=1 ./scripts/start_slam_with_normalizer.sh
 ```
 
 **Alternative (manual setup - not recommended):**
@@ -382,7 +381,7 @@ ros2 launch slam_toolbox online_async_launch.py \
   slam_params_file:=$(pwd)/src/turtlebot3/turtlebot3_navigation2/param/humble/mapper_params_online_async_fast.yaml
 ```
 
-**Note:** Without the normalizer, you may see "LaserRangeScan contains X range readings, expected Y" errors, which will prevent the map from updating properly. The `./start_slam_with_normalizer.sh` script is the recommended approach.
+**Note:** Without the normalizer, you may see "LaserRangeScan contains X range readings, expected Y" errors, which will prevent the map from updating properly. The `./scripts/start_slam_with_normalizer.sh` script is the recommended approach.
 
 **Expected output (if working correctly):**
 
@@ -534,7 +533,7 @@ export ROS_DOMAIN_ID=30
 cd ~/turtlebot3_ws
 
 # Start explorer
-./start_explorer_simple.sh
+./scripts/start_explorer_simple.sh
 ```
 
 **Expected output (if working correctly):**
@@ -629,7 +628,7 @@ ros2 pkg list | grep nav2_msgs
 You should see `nav2_msgs` in the list. Then try building again:
 
 ```bash
-./clean_rebuild.sh
+./scripts/clean_rebuild.sh
 ```
 
 **Note:** The build scripts now automatically check for Navigation2 packages and will provide a helpful error message if they're missing.
