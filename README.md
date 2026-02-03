@@ -652,6 +652,7 @@ You should see `nav2_msgs` in the list. Then try building again:
 - Topics from robot not visible on Remote PC (or vice versa)
 - `ros2 topic list` shows different topics on robot vs Remote PC
 - Nodes can't see each other
+- **After running `clean_rebuild.sh` or `minimal_rebuild.sh`:** robot topics disappear on your PC — the build script runs in a subshell, so your terminal never got the workspace or robot environment; new terminals also don't have `ROS_DOMAIN_ID` set
 
 **Fix:**
 
