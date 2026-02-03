@@ -179,7 +179,7 @@ cd ~/turtlebot3_ws
 - Faster rebuild times during development
 - When you only need to update navigation or exploration components
 
-**Note:** Both scripts automatically source the workspace after building. All helper scripts (build, SLAM, explorer) are located in the `scripts/` folder. If you need to manually source the workspace:
+**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/set_robot_env.sh <robot> [ip]`. If you need to manually source the workspace:
 
 ```bash
 cd ~/turtlebot3_ws
@@ -193,36 +193,53 @@ source install/setup.bash
 
 ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and the Remote PC must use the **same** `ROS_DOMAIN_ID` value to communicate.
 
-**Robot Domain IDs:**
+**Robot configuration:**
 
-- **Blinky**: `ROS_DOMAIN_ID=30`
-- **Pinky**: `ROS_DOMAIN_ID=31`
-- **Inky**: `ROS_DOMAIN_ID=32`
-- **Clyde**: `ROS_DOMAIN_ID=33`
+| Robot  | ROS_DOMAIN_ID | Hostname / SSH target     |
+| ------ | ------------- | ------------------------- |
+| Blinky | 30            | blinky@192.168.50.193     |
+| Pinky  | 31            | pinky@192.168.50.219      |
+| Inky   | 32            | inky@\<IP\>               |
+| Clyde  | 33            | clyde@\<IP\>              |
 
-**Setting ROS_DOMAIN_ID:**
+### Recommended: use the setup script
 
-**On Remote PC (for each robot connection):**
+From the workspace root, **source** the script so `ROS_DOMAIN_ID` and `ROBOT_SSH` are set in your current shell:
 
 ```bash
-# For Blinky
-export ROS_DOMAIN_ID=30
+cd ~/turtlebot3_ws
 
-# For Pinky
-export ROS_DOMAIN_ID=31
+# Blinky or Pinky (fixed IPs)
+source scripts/set_robot_env.sh blinky
+# or
+source scripts/set_robot_env.sh pinky
 
-# For Inky
-export ROS_DOMAIN_ID=32
+# Inky or Clyde (pass the robot's IP address)
+source scripts/set_robot_env.sh inky 192.168.50.xxx
+source scripts/set_robot_env.sh clyde 192.168.50.xxx
+```
 
-# For Clyde
-export ROS_DOMAIN_ID=33
+Then connect with:
+
+```bash
+ssh $ROBOT_SSH
+```
+
+**Manual setup (alternative):**
+
+```bash
+# Set ROS_DOMAIN_ID for the robot you're using (see table above)
+export ROS_DOMAIN_ID=30   # Blinky
+# export ROS_DOMAIN_ID=31   # Pinky
+# export ROS_DOMAIN_ID=32   # Inky
+# export ROS_DOMAIN_ID=33   # Clyde
 ```
 
 **To make it permanent (add to `~/.bashrc`):**
 
 ```bash
-# For Blinky (example)
-echo "export ROS_DOMAIN_ID=30" >> ~/.bashrc
+# Example: always use Blinky
+echo "source ~/turtlebot3_ws/scripts/set_robot_env.sh blinky" >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -230,26 +247,27 @@ source ~/.bashrc
 
 ```bash
 echo $ROS_DOMAIN_ID
+echo $ROBOT_SSH   # if you used the script
 ```
 
 **Important:**
 
 - If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0
 - The Remote PC and robot must use the **same** `ROS_DOMAIN_ID` value
-- When switching between robots, make sure to update `ROS_DOMAIN_ID` accordingly
+- When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]` again in each terminal (or open new terminals and source once)
 
 ---
 
 ## Connecting to a Robot
 
-This section describes the steps to connect to a TurtleBot3 robot and start autonomous exploration. The example uses **Blinky** (ROS_DOMAIN_ID=30), but the same process applies to other robots with their respective domain IDs.
+This section describes the steps to connect to a TurtleBot3 robot and start autonomous exploration. You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robot table](#ros-domain-configuration) and `scripts/set_robot_env.sh` so `ROS_DOMAIN_ID` and `ROBOT_SSH` match the robot you want.
 
 **Prerequisites:**
 
 - Robot is powered on and connected to the network
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
-- `ROS_DOMAIN_ID` is set correctly (see [ROS Domain Configuration](#ros-domain-configuration))
+- Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]`
 
 **Startup order is critical:** Start terminals in sequence and wait between steps for proper initialization.
 
@@ -262,11 +280,13 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 **Commands:**
 
 ```bash
-# Set ROS_DOMAIN_ID for Blinky
-export ROS_DOMAIN_ID=30
+# Set environment for the robot you're connecting to (Blinky, Pinky, Inky, or Clyde)
+cd ~/turtlebot3_ws
+source scripts/set_robot_env.sh blinky
+# For Inky/Clyde, pass the IP: source scripts/set_robot_env.sh inky 192.168.50.xxx
 
 # SSH into the robot
-ssh blinky@192.168.50.193
+ssh $ROBOT_SSH
 
 # After connection, on the robot:
 source /opt/ros/humble/setup.bash
@@ -277,7 +297,7 @@ ros2 launch turtlebot3_bringup robot.launch.py
 **Expected output (if working correctly):**
 
 ```text
-[INFO] [launch]: All log files can be found below /home/ubuntu/.ros/log/<date-time>-blinky-<pid>
+[INFO] [launch]: All log files can be found below /home/<user>/.ros/log/<date-time>-<robot>-<pid>
 [INFO] [launch]: Default logging verbosity is set to INFO
 urdf_file_name : turtlebot3_burger.urdf
 [INFO] [robot_state_publisher-1]: process started with pid [<pid>]
@@ -326,7 +346,7 @@ urdf_file_name : turtlebot3_burger.urdf
 **Verification:**
 
 ```bash
-# In a new terminal on Remote PC (with ROS_DOMAIN_ID=30 set)
+# In a new terminal on Remote PC (source set_robot_env.sh for your robot first)
 ros2 topic list | grep -E "(scan|odom|joint_states)"
 ros2 topic echo /scan --once  # Should show laser scan data
 ```
@@ -340,11 +360,9 @@ ros2 topic echo /scan --once  # Should show laser scan data
 **Commands:**
 
 ```bash
-# Set ROS_DOMAIN_ID for Blinky
-export ROS_DOMAIN_ID=30
-
-# Navigate to workspace
+# Set environment for your robot (if not already set in this terminal)
 cd ~/turtlebot3_ws
+source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
 
 # Launch SLAM Toolbox with laser scan normalizer (recommended)
 # This automatically handles variable laser scan readings and uses fast map updates
@@ -368,11 +386,9 @@ USE_SIM_TIME=1 ./scripts/start_slam_with_normalizer.sh
 If you need to run SLAM Toolbox without the normalizer (not recommended due to scan reading issues):
 
 ```bash
-# Set ROS_DOMAIN_ID for Blinky
-export ROS_DOMAIN_ID=30
-
-# Setup ROS 2 environment
+# Set environment for your robot
 cd ~/turtlebot3_ws
+source scripts/set_robot_env.sh blinky   # or your robot
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
 
@@ -405,7 +421,7 @@ Starting SLAM Toolbox with fast config...
 Using normalized scan topic: /scan_normalized
 
 use_sim_time: False
-[INFO] [launch]: All log files can be found below /home/schen08/.ros/log/<date-time>-central-<pid>
+[INFO] [launch]: All log files can be found below /home/<user>/.ros/log/<date-time>-central-<pid>
 [INFO] [launch]: Default logging verbosity is set to INFO
 [INFO] [async_slam_toolbox_node-1]: process started with pid [<pid>]
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: Node using stack size 40000000
@@ -443,13 +459,9 @@ ros2 topic echo /map --once      # Should show map data (may need to wait a few 
 **Commands:**
 
 ```bash
-# Set ROS_DOMAIN_ID for Blinky
-export ROS_DOMAIN_ID=30
-
-# Navigate to workspace
+# Set environment for your robot (if not already set)
 cd ~/turtlebot3_ws
-
-# Setup ROS 2 environment
+source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
 
@@ -463,7 +475,7 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=Fals
 **Expected output (if working correctly):**
 
 ```text
-[INFO] [launch]: All log files can be found below /home/schen08/.ros/log/<date-time>-central-<pid>
+[INFO] [launch]: All log files can be found below /home/<user>/.ros/log/<date-time>-central-<pid>
 [INFO] [launch]: Default logging verbosity is set to INFO
 [INFO] [python3-1]: process started with pid [<pid>]
 [INFO] [component_container_isolated-2]: process started with pid [<pid>]
@@ -526,11 +538,9 @@ ros2 run tf2_ros tf2_echo odom base_footprint
 **Commands:**
 
 ```bash
-# Set ROS_DOMAIN_ID for Blinky
-export ROS_DOMAIN_ID=30
-
-# Navigate to workspace
+# Set environment for your robot (if not already set)
 cd ~/turtlebot3_ws
+source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
 
 # Start explorer
 ./scripts/start_explorer_simple.sh
@@ -657,16 +667,19 @@ You should see `nav2_msgs` in the list. Then try building again:
   echo $ROS_DOMAIN_ID
   ```
 
-- **Step 3**: Set the same value everywhere (example: Blinky = 30).
+- **Step 3**: Set the same value everywhere. Easiest: use the setup script for your robot (see [ROS Domain Configuration](#ros-domain-configuration)).
 
   ```bash
-  export ROS_DOMAIN_ID=30
+  cd ~/turtlebot3_ws
+  source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
   ```
+
+  Or set manually: `export ROS_DOMAIN_ID=30` (Blinky), 31 (Pinky), 32 (Inky), 33 (Clyde).
 
 - **Step 4 (optional)**: Make it persistent.
 
   ```bash
-  echo "export ROS_DOMAIN_ID=30" >> ~/.bashrc
+  echo "source ~/turtlebot3_ws/scripts/set_robot_env.sh blinky" >> ~/.bashrc
   source ~/.bashrc
   ```
 
