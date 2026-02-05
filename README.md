@@ -652,7 +652,6 @@ You should see `nav2_msgs` in the list. Then try building again:
 - Topics from robot not visible on Remote PC (or vice versa)
 - `ros2 topic list` shows different topics on robot vs Remote PC
 - Nodes can't see each other
-- **After running `clean_rebuild.sh` or `minimal_rebuild.sh`:** robot topics disappear on your PC — the build script runs in a subshell, so your terminal never got the workspace or robot environment; new terminals also don't have `ROS_DOMAIN_ID` set
 
 **Fix:**
 
@@ -881,7 +880,48 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 11. Two maps showing in RViz (static map + SLAM map)
+#### 11. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
+
+**Cause:** The planner thinks the robot is inside an obstacle (often due to costmap inflation when the robot is close to a wall or corner). Recovery (spin) then sees inflated obstacles and aborts.
+
+**Symptoms:**
+
+- `GridBased: failed to create plan, invalid use: Starting point in lethal space!`
+- `spin failed` / `Collision Ahead - Exiting Spin`
+- Robot gets close to a corner or doorframe and then stays there, not moving.
+
+**Fix:** The Nav2 params in `turtlebot3_navigation2/param/humble/burger.yaml` are already tuned to reduce this: global costmap uses smaller inflation (0.40 m radius, cost_scaling_factor 4.0) and local costmap inflation is 0.55 m. If it still happens:
+
+- Drive the robot slightly away from the wall/corner so its center is in clearly free space.
+- Optionally reduce `inflation_radius` further in the global costmap (e.g. to 0.35) in the same param file, then restart Nav2.
+
+---
+
+#### 12. Odom TF jumping away from map TF / map at a weird angle / straight walls look curved
+
+**Cause:** The `map`→`odom` transform is published by SLAM Toolbox. When it corrects for odometry drift, that correction can appear as a “jump” if updates are infrequent or large. Curved walls usually mean rotational odometry drift during mapping (robot thinks it’s going straight but odom says it’s turning).
+
+**Symptoms:**
+
+- In RViz, the robot or map seems to jump; odom frame moves away from map then snaps back.
+- Jumps happen more often the farther the robot is from the start.
+- Map looks rotated or straight corridors/walls appear curved.
+
+**What we’ve done:** SLAM params in `mapper_params_online_async_fast.yaml` are tuned for smoother behavior:
+
+- `map_update_interval: 0.1` (was 0.2) — more frequent scan matching so corrections are smaller.
+- `minimum_travel_distance` / `minimum_travel_heading: 0.08` (were 0.15) — match more often so pose updates are smaller.
+- `transform_timeout: 0.1` — keeps map→odom timestamp closer to current time.
+
+**If it still happens:**
+
+- Ensure only **one** node publishes `map`→`odom` (SLAM Toolbox when using SLAM; do not run AMCL at the same time). The Nav2 panel showing “Localization: inactive” is normal when using SLAM.
+- Check odometry: wheel slip, uneven floors, or miscalibrated wheel radius/separation (TurtleBot3: `turtlebot3_node/param/burger.yaml` — `wheels.separation`, `wheels.radius`) can cause drift and curved maps.
+- If the robot has an IMU, ensure `use_imu: true` in the diff_drive/odometry config so orientation drift is reduced.
+
+---
+
+#### 13. Two maps showing in RViz (static map + SLAM map)
 
 **Cause:** Nav2 is loading a default static map file, and SLAM Toolbox is also publishing its live map. Both appear in RViz.
 
@@ -894,7 +934,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 12. Odometry not publishing (`/odom` exists but no data)
+#### 14. Odometry not publishing (`/odom` exists but no data)
 
 **Cause:** Odometry needs robot movement to initialize, or parameters not loaded.
 

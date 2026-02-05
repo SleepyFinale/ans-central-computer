@@ -10,6 +10,9 @@ Why:
     * odom -> base_* (from robot bringup / odometry / robot_state_publisher)
 
 This script blocks until those transforms are available (or times out).
+
+Env: TF_WAIT_ODOM_ONLY=true to only wait for odom->base_* (robot). Use when
+the launch starts SLAM itself so map->odom appears after SLAM Toolbox starts.
 """
 
 import os
@@ -42,19 +45,28 @@ def main() -> int:
     odom_frame = os.environ.get("TF_WAIT_ODOM_FRAME", "odom")
     base_candidates = os.environ.get("TF_WAIT_BASE_FRAMES", "base_footprint,base_link").split(",")
     timeout = float(os.environ.get("TF_WAIT_TIMEOUT_SEC", "30.0"))
+    # When true, only wait for odom->base_* (robot). Use when this launch starts SLAM itself.
+    odom_only = os.environ.get("TF_WAIT_ODOM_ONLY", "false").lower() in ("1", "true", "yes")
 
     rclpy.init()
     node = TfWaiter()
 
     try:
-        node.get_logger().info(
-            f"Waiting for TF. Need {map_frame}->{odom_frame} and {odom_frame}->(one of {base_candidates}). "
-            f"Timeout: {timeout:.1f}s"
-        )
+        if odom_only:
+            node.get_logger().info(
+                f"Waiting for TF (odom only). Need {odom_frame}->(one of {base_candidates}). "
+                f"Timeout: {timeout:.1f}s"
+            )
+        else:
+            node.get_logger().info(
+                f"Waiting for TF. Need {map_frame}->{odom_frame} and {odom_frame}->(one of {base_candidates}). "
+                f"Timeout: {timeout:.1f}s"
+            )
 
-        if not node.wait_for(map_frame, odom_frame, timeout_sec=timeout):
-            node.get_logger().error(f"Timed out waiting for TF {map_frame} -> {odom_frame}")
-            return 1
+        if not odom_only:
+            if not node.wait_for(map_frame, odom_frame, timeout_sec=timeout):
+                node.get_logger().error(f"Timed out waiting for TF {map_frame} -> {odom_frame}")
+                return 1
 
         ok_base = False
         for base in base_candidates:
