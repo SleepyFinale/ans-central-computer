@@ -907,11 +907,11 @@ Adjust x, y, z, w values to match robot's actual position.
 - Jumps happen more often the farther the robot is from the start.
 - Map looks rotated or straight corridors/walls appear curved.
 
-**What we’ve done:** SLAM params in `mapper_params_online_async_fast.yaml` are tuned to use **fewer, larger corrections** so the robot isn’t constantly micro‑adjusting:
+**What we’ve done:** SLAM params in `mapper_params_online_async_fast.yaml` are tuned for smoother behavior:
 
-- `map_update_interval: 0.25` — scan matching runs less often, so pose updates are less frequent (but can be larger).
-- `minimum_travel_distance` / `minimum_travel_heading: 0.15` — SLAM waits for a bit more motion before trying to correct.
-- `transform_timeout: 0.2` — default timeout used by slam_toolbox for the map→odom transform.
+- `map_update_interval: 0.1` (was 0.2) — more frequent scan matching so corrections are smaller.
+- `minimum_travel_distance` / `minimum_travel_heading: 0.08` (were 0.15) — match more often so pose updates are smaller.
+- `transform_timeout: 0.1` — keeps map→odom timestamp closer to current time.
 
 **If it still happens:**
 
