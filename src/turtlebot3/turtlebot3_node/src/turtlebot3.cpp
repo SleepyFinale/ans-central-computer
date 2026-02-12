@@ -222,6 +222,7 @@ void TurtleBot3::run()
 {
   RCLCPP_INFO(this->get_logger(), "Run!");
 
+  // 67 ms ≈ 15 Hz (joint_states + odom + other sensors)
   publish_timer(std::chrono::milliseconds(50));
   heartbeat_timer(std::chrono::milliseconds(100));
 
