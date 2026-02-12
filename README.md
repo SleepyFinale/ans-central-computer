@@ -197,8 +197,8 @@ ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and 
 
 | Robot  | ROS_DOMAIN_ID | Hostname / SSH target     |
 | ------ | ------------- | ------------------------- |
-| Blinky | 30            | blinky@192.168.50.193     |
-| Pinky  | 31            | pinky@192.168.50.219      |
+| Blinky | 30            | blinky@192.168.0.158      |
+| Pinky  | 31            | pinky@192.168.0.194       |
 | Inky   | 32            | inky@\<IP\>               |
 | Clyde  | 33            | clyde@\<IP\>              |
 

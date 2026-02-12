@@ -2,7 +2,7 @@
 # Set ROS_DOMAIN_ID and ROBOT_SSH for the selected robot.
 # Must be sourced so variables apply to the current shell:
 #   source scripts/set_robot_env.sh blinky
-#   source scripts/set_robot_env.sh inky 192.168.50.100
+#   source scripts/set_robot_env.sh inky 192.168.0.100
 
 set_robot_usage() {
   echo "Usage: source scripts/set_robot_env.sh <robot> [ip]"
@@ -12,8 +12,8 @@ set_robot_usage() {
   echo ""
   echo "  Robot   ROS_DOMAIN_ID   SSH target"
   echo "  ------  --------------  -------------------------"
-  echo "  Blinky  30              blinky@192.168.50.193"
-  echo "  Pinky   31              pinky@192.168.50.219"
+  echo "  Blinky  30              blinky@192.168.0.158"
+  echo "  Pinky   31              pinky@192.168.0.194"
   echo "  Inky    32              inky@<IP>  (pass ip as second argument)"
   echo "  Clyde   33              clyde@<IP> (pass ip as second argument)"
 }
@@ -24,12 +24,12 @@ ip="${2:-}"
 case "$robot" in
   blinky)
     export ROS_DOMAIN_ID=30
-    export ROBOT_SSH=blinky@192.168.50.193
+    export ROBOT_SSH=blinky@192.168.0.158
     echo "Robot: Blinky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH"
     ;;
   pinky)
     export ROS_DOMAIN_ID=31
-    export ROBOT_SSH=pinky@192.168.50.219
+    export ROBOT_SSH=pinky@192.168.0.194
     echo "Robot: Pinky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH"
     ;;
   inky)
