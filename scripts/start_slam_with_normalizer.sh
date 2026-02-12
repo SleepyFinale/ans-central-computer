@@ -31,13 +31,33 @@ if [ ! -f "$SLAM_CONFIG" ]; then
     exit 1
 fi
 
+# Wait for /scan to be available (robot must be running and publishing)
+echo "Waiting for /scan topic (start the robot in Terminal 1 first)..."
+SCAN_TIMEOUT=30
+if ! timeout "$SCAN_TIMEOUT" ros2 topic echo /scan --once &>/dev/null; then
+    echo "ERROR: No /scan messages received within ${SCAN_TIMEOUT}s."
+    echo "  - Start the robot in Terminal 1 (SSH, then robot.launch.py)."
+    echo "  - Set ROS_DOMAIN_ID to match the robot (e.g. source scripts/set_robot_env.sh blinky)."
+    exit 1
+fi
+echo "  /scan is available."
+echo ""
+
 # Start normalizer in background
 echo "Starting laser scan normalizer..."
-python3 src/turtlebot3/turtlebot3_navigation2/scripts/normalize_laser_scan.py &
+python3 "$(pwd)/src/turtlebot3/turtlebot3_navigation2/scripts/normalize_laser_scan.py" &
 NORMALIZER_PID=$!
 
-# Wait a moment for normalizer to start
-sleep 2
+# Wait for normalizer to publish at least one /scan_normalized (so SLAM will register immediately)
+echo "Waiting for /scan_normalized..."
+NORM_TIMEOUT=15
+if ! timeout "$NORM_TIMEOUT" ros2 topic echo /scan_normalized --once &>/dev/null; then
+    echo "WARNING: /scan_normalized did not appear within ${NORM_TIMEOUT}s. Killing normalizer and exiting."
+    kill $NORMALIZER_PID 2>/dev/null
+    exit 1
+fi
+echo "  /scan_normalized is available."
+echo ""
 
 # Start SLAM Toolbox with normalized scan
 echo "Starting SLAM Toolbox with fast config..."

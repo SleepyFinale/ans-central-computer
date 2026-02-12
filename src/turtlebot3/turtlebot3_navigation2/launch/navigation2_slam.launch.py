@@ -66,8 +66,15 @@ def generate_launch_description():
 
     # Optional: wait for TF tree before launching Nav2 (prevents costmap activation failures)
     workspace_dir = os.path.expanduser('~/turtlebot3_ws')
-    wait_tf_script = os.path.join(workspace_dir, 'wait_for_tf.py')
+    wait_tf_script = os.path.join(workspace_dir, 'scripts', 'wait_for_tf.py')
     wait_for_tf = LaunchConfiguration('wait_for_tf', default='true')
+
+    # Optional: sensor fusion (robot_localization EKF) for smoother odom->base_footprint
+    use_robot_localization = LaunchConfiguration('use_robot_localization', default='false')
+    ekf_param_dir = ROS_DISTRO if ROS_DISTRO == 'humble' else 'humble'
+    ekf_param_file = os.path.join(
+        get_package_share_directory('turtlebot3_navigation2'),
+        'param', ekf_param_dir, 'ekf.yaml')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -89,6 +96,20 @@ def generate_launch_description():
             'wait_for_tf',
             default_value='true',
             description='Wait for TF tree to be ready before starting Nav2'),
+
+        DeclareLaunchArgument(
+            'use_robot_localization',
+            default_value='false',
+            description='If true, run EKF to fuse /odom + /imu (and use /cmd_vel). Robot must use burger_ekf.yaml (publish_tf: false).'),
+
+        Node(
+            package='robot_localization',
+            executable='ekf_node',
+            name='ekf_filter_node',
+            output='screen',
+            parameters=[ekf_param_file, {'use_sim_time': use_sim_time}],
+            condition=IfCondition(use_robot_localization),
+        ),
 
         ExecuteProcess(
             cmd=['python3', wait_tf_script],

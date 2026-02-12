@@ -16,9 +16,10 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
    - [Terminal 2: SLAM Toolbox](#terminal-2-slam-toolbox)
    - [Terminal 3: Navigation2](#terminal-3-navigation2)
    - [Terminal 4: Explorer](#terminal-4-explorer)
-5. [Troubleshooting](#troubleshooting)
-6. [Diagnostic Commands](#diagnostic-commands)
-7. [Additional Resources](#additional-resources)
+5. [Sensor fusion (optional)](#sensor-fusion-optional)
+6. [Troubleshooting](#troubleshooting)
+7. [Diagnostic Commands](#diagnostic-commands)
+8. [Additional Resources](#additional-resources)
 
 ---
 
@@ -445,6 +446,7 @@ use_sim_time: False
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: Node using stack size 40000000
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[async_slam_toolbox_node-1] Registering sensor: [Custom Described Lidar]
 ```
 
 **What to look for:**
@@ -486,7 +488,11 @@ export TURTLEBOT3_MODEL=burger
 # Launch Navigation2 for SLAM / exploration (includes RViz)
 # - Does NOT load a static map file
 # - Uses SLAM's live map (/map)
-# - Waits for TF (map->odom and odom->base_*) before starting Nav2
+# - Waits for TF (map->odom and odom->base_*) in parallel with Nav2
+#
+# Important: Use the same robot env in this terminal (ROS_DOMAIN_ID) so Nav2
+# can see the robot's odom TF. If you see "odom frame does not exist", see
+# Troubleshooting §4.
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
 ```
 
@@ -618,6 +624,63 @@ ros2 topic echo /goal_pose  # Should see goals being published
 
 ---
 
+## Sensor fusion (optional)
+
+You can fuse **wheel odometry**, **IMU**, and (optionally) **commanded velocity** (`/cmd_vel`) so that the `odom`→`base_footprint` transform is smoother and yaw drifts less when the robot is still. This uses the `robot_localization` EKF and can reduce the jitter and curved-map effects described in [Odom TF jumping / curved walls](#13-odom-tf-jumping-away-from-map-tf--map-at-a-weird-angle--straight-walls-look-curved).
+
+### What gets fused
+
+- **odom0**: `/odom` (wheel encoders + existing IMU use in TurtleBot3 node) — position x,y, yaw, linear x and angular z velocity.
+- **imu0**: `/imu` — orientation yaw and angular velocity (helps correct gyro bias when stationary).
+- **Control (optional)**: `/cmd_vel` is used in the EKF prediction step for a more responsive estimate.
+
+### Steps
+
+1. **On the central computer only:** Install `robot_localization` (the robot does not need it):
+
+   ```bash
+   sudo apt install ros-humble-robot-localization
+   ```
+
+2. **On the robot (Terminal 1 — SSH):** The robot must use a param that sets `publish_tf: false` for odometry so that only the EKF on central publishes `odom`→`base_footprint`. The file `burger_ekf.yaml` lives in your **workspace on central** (under `turtlebot3_bringup/param/humble/`), not on the robot. You have two options:
+
+   **Option A — Copy the param file to the robot once:**
+
+   From the **central** computer (in your workspace):
+
+   ```bash
+   scp src/turtlebot3/turtlebot3_bringup/param/humble/burger_ekf.yaml blinky@192.168.0.158:~/
+   ```
+
+   (Use your robot’s user and host, e.g. `$ROBOT_SSH` after `source scripts/set_robot_env.sh blinky`.) Then on the **robot** (Terminal 1):
+
+   ```bash
+   export TURTLEBOT3_MODEL=burger
+   ros2 launch turtlebot3_bringup robot.launch.py tb3_param_dir:=$HOME/burger_ekf.yaml
+   ```
+
+   **Option B — If the robot has the same workspace built:** Use the installed path there:
+
+   ```bash
+   export TURTLEBOT3_MODEL=burger
+   ros2 launch turtlebot3_bringup robot.launch.py \
+     tb3_param_dir:=$(ros2 pkg prefix turtlebot3_bringup)/share/turtlebot3_bringup/param/humble/burger_ekf.yaml
+   ```
+
+   In both cases the important change is `publish_tf: false` under `diff_drive_controller`/`odometry` so the robot publishes only `/odom` and `/imu`, not the `odom`→`base_footprint` TF.
+
+3. **On the central computer (Terminal 3):** Launch Nav2 with the EKF enabled:
+
+   ```bash
+   ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False use_robot_localization:=true
+   ```
+
+The EKF runs on the central PC, subscribes to `/odom` and `/imu` (and `/cmd_vel` if configured), and publishes the smoothed `odom`→`base_footprint` TF and `/odometry/filtered`. SLAM Toolbox continues to publish `map`→`odom` as before.
+
+**If you don’t use sensor fusion:** On the robot use the normal bringup (no `burger_ekf.yaml`), and on central launch Nav2 without `use_robot_localization:=true`. The robot will publish `odom`→`base_footprint` itself.
+
+---
+
 ## Troubleshooting
 
 ### Common Issues and Solutions
@@ -729,43 +792,95 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 **Symptoms:**
 
-```text
-Timed out waiting for transform from base_footprint to odom to become available, tf error:
-Invalid frame ID "base_footprint" ... frame does not exist
-```
+- **"odom" frame does not exist** (most common):
 
-**Cause:** Nav2 is starting before it has received the robot TF (`odom -> base_*`), or the Remote PC is not receiving TF from the robot (often a `ROS_DOMAIN_ID` mismatch).
+  ```text
+  Timed out waiting for transform from base_footprint to odom ... Invalid frame ID "odom" ... frame does not exist
+  ```
+
+- Or **"base_footprint"** (or **"base_link"**) does not exist:
+
+  ```text
+  Invalid frame ID "base_footprint" ... frame does not exist
+  ```
+
+**Cause:** Nothing on the network visible to the Remote PC is publishing `odom -> base_footprint`. Usually:
+
+1. **Robot (Terminal 1) not running** or not started before Nav2.
+2. **ROS_DOMAIN_ID mismatch**: the terminal where you launch Nav2 (Terminal 3) must use the same domain as the robot. If you never run `source scripts/set_robot_env.sh <robot>` in that terminal, it uses domain 0 and will not see the robot’s TF.
+3. **Sensor fusion setup**: robot is using `burger_ekf.yaml` (robot does not publish odom TF) but Nav2 was started **without** `use_robot_localization:=true`, so the EKF on the central PC is not running and no one publishes `odom`.
 
 **Fix:**
 
-- **Step 1**: Confirm your `ROS_DOMAIN_ID` is correct in the terminal running Nav2/SLAM and in the SSH robot terminal.
+- **Step 1**: Start in order: **Terminal 1 (robot)** → **Terminal 2 (SLAM)** → **Terminal 3 (Nav2)**. In **Terminal 3**, set the same robot environment **before** launching Nav2:
+
+  ```bash
+  source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
+  ```
+
+- **Step 2**: Confirm `ROS_DOMAIN_ID` in the terminal running Nav2 and in the SSH robot terminal:
 
   ```bash
   echo $ROS_DOMAIN_ID
   ```
 
-- **Step 2**: Confirm TF is actually arriving on the Remote PC.
+- **Step 3**: Confirm TF is arriving on the Remote PC:
 
   ```bash
-  ros2 topic echo /tf --once
+  ros2 run tf2_ros tf2_echo odom base_footprint
   ```
 
-  You should see at least:
-  - `map -> odom` (from SLAM Toolbox)
-  - `odom -> base_*` (from robot bringup / odometry / robot_state_publisher)
+  If this fails with “frame does not exist”, the robot’s odom is not visible (robot not running or wrong domain). If using EKF, launch with `use_robot_localization:=true` and ensure the robot is using the EKF bringup param (e.g. `burger_ekf.yaml`) so the central EKF is the single source of `odom -> base_footprint`.
 
-- **Step 3**: Confirm the exact transforms Nav2 needs.
+- **Step 4**: Optional check that all transforms Nav2 needs are present:
 
   ```bash
   ros2 run tf2_ros tf2_echo map odom
   ros2 run tf2_ros tf2_echo odom base_footprint
   ```
 
-**Note:** `navigation2_slam.launch.py` includes a TF wait step (`wait_for_tf.py`) to reduce this startup race. If TF never appears, the issue is upstream (robot bringup or networking / DDS).
+**Note:** The launch runs a TF wait step in parallel with Nav2; if `odom` never appears (robot not up or domain mismatch), Nav2 will still try to activate and report this error.
 
 ---
 
-#### 5. AMCL warning: “Please set the initial pose…” (wrong launch file)
+#### 5. TF NaN: `base_footprint` transform has NaN / SLAM never shows "Registering sensor"
+
+**Symptoms:**
+
+- `TF_NAN_INPUT` or `TF_DENORMALIZED_QUATERNION` for `child_frame_id "base_footprint"`.
+- `ekf_filter_node`: "NaNs were detected in the output state of the filter".
+- SLAM Toolbox never prints "Registering sensor: [Custom Described Lidar]" and may log "Message Filter dropping message" (queue full or timestamp/transform cache).
+- Nav2, RViz, and SLAM all reject the odom→base_footprint transform.
+
+**Cause:** Something is publishing the `odom` → `base_footprint` transform with NaN (translation or quaternion). Commonly:
+
+1. **EKF (robot_localization)** is enabled (`use_robot_localization:=true`) and the filter goes unstable (e.g. poorly conditioned at startup, or bad IMU/odom timing). The EKF then publishes NaN TF.
+2. **Robot** is publishing NaN (faulty odometry or bringup) — less common if `ros2 topic echo /odom --once` on the robot shows valid numbers.
+
+**Fix:**
+
+- **Option A (recommended first):** Do **not** use EKF until the robot's odom is solid. Use the robot's own odom TF:
+  - On the **robot** (Terminal 1): use the default bringup (e.g. standard `burger.yaml`, **not** `burger_ekf.yaml`) so the robot publishes `odom` → `base_footprint`.
+  - On the **central** (Terminal 3): launch Nav2 **without** EKF:
+    ```bash
+    ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False use_robot_localization:=false
+    ```
+  - Then start order: Terminal 1 (robot) → Terminal 2 (SLAM script) → Terminal 3 (Nav2). You should see SLAM print "Registering sensor" once the TF is valid and a scan is processed.
+
+- **Option B:** If you want to use EKF, the workspace EKF params were relaxed (softer `initial_estimate_covariance`, higher `sensor_timeout`) to reduce NaN. Rebuild and try again with `use_robot_localization:=true`. Ensure the **robot** uses `burger_ekf.yaml` (no odom TF from robot) so only the EKF on central publishes odom. If NaN persists, try Option A.
+
+- **Check:** In a terminal where the robot is visible, run:
+  ```bash
+  ros2 topic echo /odom --once
+  ```
+  If the pose/twist values are valid (no NaN), the problem is almost certainly the EKF on central; use Option A.
+
+---
+
+#### 6. AMCL warning: “Please set the initial pose…” (wrong launch file)
 
 **When this happens:** You launched the non-SLAM Nav2 bringup (AMCL/static-map workflow) while expecting SLAM-based exploration.
 
@@ -781,7 +896,7 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=Fals
 
 ---
 
-#### 6. RViz errors about Nav2 panels / GLSL
+#### 7. RViz errors about Nav2 panels / GLSL
 
 **Symptoms:**
 
@@ -801,7 +916,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ---
 
-#### 7. (Optional) Manually set initial pose (static map + AMCL only)
+#### 8. (Optional) Manually set initial pose (static map + AMCL only)
 
 ```bash
 ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
@@ -951,6 +1066,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 **If it still happens:**
 
+- Try enabling [sensor fusion](#sensor-fusion-optional) to fuse wheel odom + IMU (and optionally `/cmd_vel`) for a smoother `odom`→`base_footprint` and less yaw drift.
 - Ensure only **one** node publishes `map`→`odom` (SLAM Toolbox when using SLAM; do not run AMCL at the same time). The Nav2 panel showing “Localization: inactive” is normal when using SLAM.
 - Check odometry: wheel slip, uneven floors, or miscalibrated wheel radius/separation (TurtleBot3: `turtlebot3_node/param/burger.yaml` — `wheels.separation`, `wheels.radius`) can cause drift and curved maps.
 - If the robot has an IMU, ensure `use_imu: true` in the diff_drive/odometry config so orientation drift is reduced.
