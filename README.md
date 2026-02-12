@@ -193,30 +193,44 @@ source install/setup.bash
 
 ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and the Remote PC must use the **same** `ROS_DOMAIN_ID` value to communicate.
 
-**Robot configuration:**
+### Network locations
 
-| Robot  | ROS_DOMAIN_ID | Hostname / SSH target     |
-| ------ | ------------- | ------------------------- |
-| Blinky | 30            | blinky@192.168.0.158      |
-| Pinky  | 31            | pinky@192.168.0.194       |
-| Inky   | 32            | inky@\<IP\>               |
-| Clyde  | 33            | clyde@\<IP\>              |
+**Important:** Your Remote PC and the robot must be on the **same** WiFi network to connect. If the robot is on Lab (SNS) WiFi, your PC must also be on SNS. If the robot is on Azure WiFi, your PC must be on Azure.
+
+### Robot configuration
+
+| Robot  | ROS_DOMAIN_ID | Lab (SSID: SNS)       | Azure (SSID: Azure) |
+| ------ | ------------- | --------------------- | --------------------|
+| Blinky | 30            | blinky@192.168.0.158  | blinky@172.20.10.13 |
+| Pinky  | 31            | pinky@192.168.0.194   | pinky@172.20.10.14  |
+| Inky   | 32            | inky@\<IP\>           | inky@\<IP\>         |
+| Clyde  | 33            | clyde@\<IP\>          | clyde@\<IP\>        |
 
 ### Recommended: use the setup script
 
-From the workspace root, **source** the script so `ROS_DOMAIN_ID` and `ROBOT_SSH` are set in your current shell:
+`scripts/set_robot_env.sh` sets `ROS_DOMAIN_ID` and `ROBOT_SSH` for the selected robot. For **Blinky** and **Pinky**, it **auto-detects** which WiFi your PC is on (SNS or Azure) and picks the correct IP.
+
+**How it works:**
+
+- Detects the current WiFi SSID using `nmcli` or `iwgetid`
+- Maps SSID to network: SNS → Lab, Azure → Azure
+- For Blinky/Pinky: selects the correct SSH target based on robot name + detected network
+- For Inky/Clyde: you must pass the robot's IP (they do not have fixed IPs per network)
+- If WiFi is unknown or not detected: defaults to Lab (SNS) IP and prints a warning
+
+From the workspace root, **source** the script so variables apply to your current shell:
 
 ```bash
 cd ~/turtlebot3_ws
 
-# Blinky or Pinky (fixed IPs)
+# Blinky or Pinky (fixed IPs – script auto-detects SNS vs Azure)
 source scripts/set_robot_env.sh blinky
 # or
 source scripts/set_robot_env.sh pinky
 
-# Inky or Clyde (pass the robot's IP address)
-source scripts/set_robot_env.sh inky 192.168.50.xxx
-source scripts/set_robot_env.sh clyde 192.168.50.xxx
+# Inky or Clyde (pass the robot's IP address for the network you're on)
+source scripts/set_robot_env.sh inky 192.168.0.xxx
+source scripts/set_robot_env.sh clyde 192.168.0.xxx
 ```
 
 Then connect with:
@@ -224,6 +238,8 @@ Then connect with:
 ```bash
 ssh $ROBOT_SSH
 ```
+
+**Script output:** The script prints the detected network (`lab` or `azure`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROS_DOMAIN_ID=30  ROBOT_SSH=blinky@192.168.0.158  (network: lab)`.
 
 **Manual setup (alternative):**
 
@@ -254,6 +270,7 @@ echo $ROBOT_SSH   # if you used the script
 
 - If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0
 - The Remote PC and robot must use the **same** `ROS_DOMAIN_ID` value
+- The Remote PC and robot must be on the **same** WiFi network (both on SNS or both on Azure)
 - When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]` again in each terminal (or open new terminals and source once)
 
 ---
@@ -264,7 +281,8 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 
 **Prerequisites:**
 
-- Robot is powered on and connected to the network
+- Robot is powered on and connected to the network (SNS or Azure WiFi)
+- Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
 - Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]`
@@ -689,7 +707,25 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 ---
 
-#### 3. TF errors: `base_link` / `base_footprint` / `odom` frame does not exist
+#### 3. SSH connection fails or times out (wrong WiFi network)
+
+**Symptoms:**
+
+- `ssh $ROBOT_SSH` hangs, times out, or "Connection refused"
+- Robot is powered on but unreachable
+
+**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS) vs Azure—if the robot is on SNS but your PC is on Azure (or vice versa), you will connect to the wrong IP.
+
+**Fix:**
+
+- **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available).
+- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for Lab, Azure for Azure).
+- **Step 3**: Run `source scripts/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)` or `(network: azure)`.
+- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS or Azure. Connect to the correct network and source the script again.
+
+---
+
+#### 4. TF errors: `base_link` / `base_footprint` / `odom` frame does not exist
 
 **Symptoms:**
 
@@ -729,7 +765,7 @@ Invalid frame ID "base_footprint" ... frame does not exist
 
 ---
 
-#### 4. AMCL warning: “Please set the initial pose…” (wrong launch file)
+#### 5. AMCL warning: “Please set the initial pose…” (wrong launch file)
 
 **When this happens:** You launched the non-SLAM Nav2 bringup (AMCL/static-map workflow) while expecting SLAM-based exploration.
 
@@ -745,7 +781,7 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=Fals
 
 ---
 
-#### 5. RViz errors about Nav2 panels / GLSL
+#### 6. RViz errors about Nav2 panels / GLSL
 
 **Symptoms:**
 
@@ -765,7 +801,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ---
 
-#### 6. (Optional) Manually set initial pose (static map + AMCL only)
+#### 7. (Optional) Manually set initial pose (static map + AMCL only)
 
 ```bash
 ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
@@ -776,7 +812,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 7. Costmap warning: “Sensor origin is out of map bounds”
+#### 8. Costmap warning: “Sensor origin is out of map bounds”
 
 **Cause:** Nav2 doesn't know where the robot is on the map yet, so it can't determine if the sensor is within map bounds.
 
@@ -799,7 +835,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 8. No map appearing in SLAM (`/map` topic missing or not publishing)
+#### 9. No map appearing in SLAM (`/map` topic missing or not publishing)
 
 **Cause:** SLAM Toolbox not receiving scan data, not initialized yet, or needs more time.
 
@@ -840,7 +876,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 9. Explorer waiting for costmap
+#### 10. Explorer waiting for costmap
 
 **Cause:** Nav2 costmap hasn't initialized yet (normal - takes 20-40 seconds).
 
@@ -860,7 +896,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 10. Robot not moving / explorer not finding frontiers
+#### 11. Robot not moving / explorer not finding frontiers
 
 **Cause:** System still initializing, or map too small.
 
@@ -880,7 +916,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 11. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
+#### 12. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
 
 **Cause:** The planner thinks the robot is inside an obstacle (often due to costmap inflation when the robot is close to a wall or corner). Recovery (spin) then sees inflated obstacles and aborts.
 
@@ -897,7 +933,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 12. Odom TF jumping away from map TF / map at a weird angle / straight walls look curved
+#### 13. Odom TF jumping away from map TF / map at a weird angle / straight walls look curved
 
 **Cause:** The `map`→`odom` transform is published by SLAM Toolbox. When it corrects for odometry drift, that correction can appear as a “jump” if updates are infrequent or large. Curved walls usually mean rotational odometry drift during mapping (robot thinks it’s going straight but odom says it’s turning).
 
@@ -921,7 +957,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 13. Two maps showing in RViz (static map + SLAM map)
+#### 14. Two maps showing in RViz (static map + SLAM map)
 
 **Cause:** Nav2 is loading a default static map file, and SLAM Toolbox is also publishing its live map. Both appear in RViz.
 
@@ -934,7 +970,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 14. Odometry not publishing (`/odom` exists but no data)
+#### 15. Odometry not publishing (`/odom` exists but no data)
 
 **Cause:** Odometry needs robot movement to initialize, or parameters not loaded.
 
