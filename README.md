@@ -20,6 +20,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
 6. [Troubleshooting](#troubleshooting)
 7. [Diagnostic Commands](#diagnostic-commands)
 8. [Additional Resources](#additional-resources)
+9. [Workspace Structure](#workspace-structure)
 
 ---
 
@@ -204,8 +205,8 @@ ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and 
 | ------ | ------------- | --------------------- | --------------------|
 | Blinky | 30            | blinky@192.168.0.158  | blinky@172.20.10.13 |
 | Pinky  | 31            | pinky@192.168.0.194   | pinky@172.20.10.14  |
-| Inky   | 32            | inky@\<IP\>           | inky@\<IP\>         |
-| Clyde  | 33            | clyde@\<IP\>          | clyde@\<IP\>        |
+| Inky   | 32            | `inky@<IP>`           | `inky@<IP>`         |
+| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        |
 
 ### Recommended: use the setup script
 
@@ -631,6 +632,8 @@ This section describes how to run **multiple robots** (e.g., Blinky and Pinky) t
 - **Blinky** (domain 30) and **Pinky** (domain 31) run robot bringup on their own domains
 - **Domain bridges** subscribe to each robot's topics and republish to domain 50 with namespaced topics (`/blinky/scan`, `/pinky/scan`, etc.)
 - **TF relay** merges `/blinky/tf` and `/pinky/tf` into `/tf` with frame prefixes (`blinky/odom`, `pinky/odom`)
+- **TF map→odom fallback** publishes static identity transforms `map → blinky/odom` and `map → pinky/odom` so the TF tree connects before SLAM converges
+- **Laser scan normalizers** normalize scan readings (for SLAM) and rewrite `frame_id` to `blinky/base_scan` / `pinky/base_scan` (for Nav2 costmaps)
 - **SLAM instances** (one per robot) produce `/blinky/map` and `/pinky/map`
 - **Map merge** combines them into a single `/map`
 
@@ -650,11 +653,17 @@ This section describes how to run **multiple robots** (e.g., Blinky and Pinky) t
 | `config/domain_bridge/clyde_bridge.yaml` | Bridge: domain 33 → 50, topics → `/clyde/*` |
 | `scripts/start_domain_bridges.sh` | Start both bridges |
 | `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf → /tf with frame prefixes |
+| `scripts/tf_map_odom_fallback.py` | Publish map → blinky/odom, map → pinky/odom (identity) for TF tree connectivity |
+| `scripts/wait_for_tf_multirobot.py` | Wait for map → base_footprint before starting Nav2 (60s timeout, 3s warmup) |
+| `scripts/diagnose_multirobot_tf.py` | Diagnose TF tree, topics, and connectivity |
 | `config/map_merge/multirobot_params.yaml` | Map merge init poses for Blinky and Pinky |
 | `param/humble/mapper_params_blinky.yaml` | SLAM params for Blinky |
 | `param/humble/mapper_params_pinky.yaml` | SLAM params for Pinky |
+| `param/humble/burger_multirobot_blinky.yaml` | Nav2 costmap params (uses `/blinky/scan_normalized`, sensor_frame `blinky/base_scan`) |
+| `param/humble/burger_multirobot_pinky.yaml` | Nav2 costmap params (uses `/pinky/scan_normalized`, sensor_frame `pinky/base_scan`) |
 | `scripts/start_multirobot_slam.sh` | Start multi-robot SLAM + map merge |
-| `launch/multirobot_slam.launch.py` | Launch file for SLAM, normalizers, TF relay, map merge |
+| `scripts/start_multirobot_nav2_explore.sh` | Start Nav2 + Explore for both robots (includes RViz) |
+| `launch/multirobot_slam.launch.py` | Launch file for SLAM, normalizers, TF relay, fallback, map merge |
 
 ### Workflow
 
@@ -696,7 +705,31 @@ Or directly:
 ROS_DOMAIN_ID=50 ros2 launch turtlebot3_navigation2 multirobot_slam.launch.py use_sim_time:=false
 ```
 
-**4. (Optional) Start Nav2 and Explorer** for autonomous exploration on the merged map — use the same workflow as single-robot, but ensure `ROS_DOMAIN_ID=50` so Nav2 sees the merged `/map`.
+**4. Start Nav2 and Explorer** for autonomous exploration on the merged map:
+
+```bash
+cd ~/turtlebot3_ws
+./scripts/start_multirobot_nav2_explore.sh
+```
+
+This script:
+
+- Waits for the TF tree (`map → blinky/base_footprint`, `map → pinky/base_footprint`) with a 60-second timeout
+- Launches Nav2 for Blinky and Pinky (each uses the merged `/map`)
+- Launches Explore Lite for both robots
+- Launches RViz (disable with `use_rviz:=false` if needed)
+
+**Prerequisites:** Domain bridges and multirobot SLAM must be running first. If the TF wait times out, run diagnostics:
+
+```bash
+ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+```
+
+**Single-robot testing:** To run Nav2 + Explore with only one robot (e.g. Blinky):
+
+```bash
+TF_WAIT_BASE_FRAMES=blinky/base_footprint ./scripts/start_multirobot_nav2_explore.sh
+```
 
 ### Map merge init poses
 
@@ -719,10 +752,22 @@ Adjust these so the poses match where each robot starts in the shared space.
 ```bash
 # On central PC (ROS_DOMAIN_ID=50)
 ros2 topic list | grep -E "blinky|pinky|map"
-# Should see: /blinky/scan, /pinky/scan, /blinky/map, /pinky/map, /map
+# Should see: /blinky/scan, /pinky/scan, /blinky/scan_normalized, /pinky/scan_normalized,
+#             /blinky/map, /pinky/map, /map
 
 ros2 topic echo /map --once   # Merged map
 ```
+
+### Multi-robot TF diagnostics
+
+To check the TF tree and topic connectivity before starting Nav2:
+
+```bash
+cd ~/turtlebot3_ws
+ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+```
+
+The script reports critical checks (map→base_footprint for both robots) and optional SLAM local frames. If all critical checks pass, Nav2 and Explore should work.
 
 ---
 
@@ -1098,7 +1143,34 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 16. Measuring pose jumps with `pose_jump_monitor.py`
+#### 16. Multi-robot: TF wait timeout / "Can't update static costmap layer"
+
+**Symptoms:**
+
+- `wait_for_tf_multirobot` times out before starting Nav2
+- Nav2 logs: `Can't update static costmap layer, no map received`
+- Message Filter: `frame 'base_scan'... timestamp earlier than transform cache`
+
+**Causes and fixes:**
+
+1. **TF wait timeout:** Ensure domain bridges and multirobot SLAM are running. Run diagnostics:
+
+   ```bash
+   ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+   ```
+
+2. **No map received:** Map merge publishes `/map` only after SLAM has built initial maps. Wait 20–30 seconds after starting multirobot SLAM before starting Nav2.
+3. **frame 'base_scan':** Fixed by using `scan_normalized` with correct `frame_id` (blinky/base_scan, pinky/base_scan). Ensure multirobot SLAM is rebuilt and restarted after pulling changes.
+
+**Single-robot fallback:** If only one robot is available:
+
+   ```bash
+   TF_WAIT_BASE_FRAMES=blinky/base_footprint ./scripts/start_multirobot_nav2_explore.sh
+   ```
+
+---
+
+#### 17. Measuring pose jumps with `pose_jump_monitor.py`
 
 Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the robot’s reported pose in the map frame is "jumping" during SLAM. This is useful when the robot appears to teleport in RViz or when the explorer seems confused by localization corrections.
 
@@ -1236,6 +1308,15 @@ echo $ROS_DOMAIN_ID
 
 # Both should show the same value (30, 31, 32, or 33)
 ```
+
+### Run multi-robot TF diagnostics
+
+```bash
+cd ~/turtlebot3_ws
+ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+```
+
+Reports topic publishers, TF chain connectivity, and identifies missing transforms. Run when TF wait times out or Nav2 fails to receive the map.
 
 ---
 
