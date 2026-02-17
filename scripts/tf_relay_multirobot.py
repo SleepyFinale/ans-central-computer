@@ -6,7 +6,14 @@ and republishes to /tf with frame ID prefixes so SLAM can see both robots.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from tf2_msgs.msg import TFMessage
+
+TF_STATIC_QOS = QoSProfile(
+    depth=10,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
 
 
 def prefix_frame(frame_id: str, prefix: str) -> str:
@@ -24,44 +31,45 @@ class TFRelayNode(Node):
         self.robot_prefixes = self.get_parameter('robot_prefixes').value
 
         self.tf_pub = self.create_publisher(TFMessage, '/tf', 100)
-        self.tf_static_pub = self.create_publisher(TFMessage, '/tf_static', 10)
+        self.tf_static_pub = self.create_publisher(TFMessage, '/tf_static', TF_STATIC_QOS)
 
-        self.subscriptions = []
         for prefix in self.robot_prefixes:
             # Dynamic TF
-            sub = self.create_subscription(
+            self.create_subscription(
                 TFMessage,
                 f'{prefix}/tf',
                 lambda msg, p=prefix: self.tf_callback(msg, p, is_static=False),
                 100
             )
-            self.subscriptions.append(sub)
-            # Static TF
-            sub_static = self.create_subscription(
+            # Static TF (transient_local to match domain bridge / tf2 listeners)
+            self.create_subscription(
                 TFMessage,
                 f'{prefix}/tf_static',
                 lambda msg, p=prefix: self.tf_callback(msg, p, is_static=True),
-                10
+                TF_STATIC_QOS
             )
-            self.subscriptions.append(sub_static)
 
         self.get_logger().info(
             f'TF relay started: merging {self.robot_prefixes} -> /tf'
         )
 
     def tf_callback(self, msg: TFMessage, prefix: str, is_static: bool):
-        out = TFMessage()
-        for t in msg.transforms:
-            from copy import deepcopy
-            t_out = deepcopy(t)
-            t_out.header.frame_id = prefix_frame(t.header.frame_id, prefix)
-            t_out.child_frame_id = prefix_frame(t.child_frame_id, prefix)
-            out.transforms.append(t_out)
-        if out.transforms:
+        try:
+            if not msg.transforms:
+                return
+            out = TFMessage()
+            for t in msg.transforms:
+                from copy import deepcopy
+                t_out = deepcopy(t)
+                t_out.header.frame_id = prefix_frame(t.header.frame_id, prefix)
+                t_out.child_frame_id = prefix_frame(t.child_frame_id, prefix)
+                out.transforms.append(t_out)
             if is_static:
                 self.tf_static_pub.publish(out)
             else:
                 self.tf_pub.publish(out)
+        except Exception as e:
+            self.get_logger().warning(f"TF callback error (skipping): {e}")
 
 
 def main(args=None):
@@ -69,11 +77,17 @@ def main(args=None):
     node = TFRelayNode()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, RuntimeError):
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':

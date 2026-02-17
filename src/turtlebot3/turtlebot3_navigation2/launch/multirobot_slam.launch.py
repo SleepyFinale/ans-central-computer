@@ -21,31 +21,40 @@ def generate_launch_description():
         'param', 'humble')
     map_merge_params = os.path.join(workspace_dir, 'config', 'map_merge', 'multirobot_params.yaml')
     tf_relay_script = os.path.join(workspace_dir, 'scripts', 'tf_relay_multirobot.py')
+    tf_fallback_script = os.path.join(workspace_dir, 'scripts', 'tf_map_odom_fallback.py')
     normalizer_script = os.path.join(
         workspace_dir, 'src', 'turtlebot3', 'turtlebot3_navigation2',
         'scripts', 'normalize_laser_scan.py')
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
-    # Blinky normalizer: /blinky/scan -> /blinky/scan_normalized
+    # Blinky normalizer: /blinky/scan -> /blinky/scan_normalized, frame_id -> blinky/base_scan
     blinky_normalizer = ExecuteProcess(
         cmd=['python3', normalizer_script,
              '--ros-args', '-p', 'input_topic:=/blinky/scan',
-             '-p', 'output_topic:=/blinky/scan_normalized'],
+             '-p', 'output_topic:=/blinky/scan_normalized',
+             '-p', 'frame_id_prefix:=blinky'],
         output='screen',
     )
 
-    # Pinky normalizer: /pinky/scan -> /pinky/scan_normalized
+    # Pinky normalizer: /pinky/scan -> /pinky/scan_normalized, frame_id -> pinky/base_scan
     pinky_normalizer = ExecuteProcess(
         cmd=['python3', normalizer_script,
              '--ros-args', '-p', 'input_topic:=/pinky/scan',
-             '-p', 'output_topic:=/pinky/scan_normalized'],
+             '-p', 'output_topic:=/pinky/scan_normalized',
+             '-p', 'frame_id_prefix:=pinky'],
         output='screen',
     )
 
     # TF relay: blinky/tf, pinky/tf -> /tf with frame prefixes
     tf_relay = ExecuteProcess(
         cmd=['python3', tf_relay_script],
+        output='screen',
+    )
+
+    # TF fallback: map -> blinky/odom, map -> pinky/odom (identity) so full tree connects
+    tf_map_odom_fallback = ExecuteProcess(
+        cmd=['python3', tf_fallback_script],
         output='screen',
     )
 
@@ -98,6 +107,7 @@ def generate_launch_description():
         blinky_normalizer,
         pinky_normalizer,
         tf_relay,
+        tf_map_odom_fallback,
         blinky_slam,
         pinky_slam,
         map_merge,

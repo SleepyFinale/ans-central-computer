@@ -19,8 +19,10 @@ class LaserScanNormalizer(Node):
         self.declare_parameter('target_readings', 228)
         self.declare_parameter('input_topic', '/scan')
         self.declare_parameter('output_topic', '/scan_normalized')
+        self.declare_parameter('frame_id_prefix', '')
         
         target_readings = self.get_parameter('target_readings').value
+        self._frame_id_prefix = self.get_parameter('frame_id_prefix').value
         input_topic = self.get_parameter('input_topic').value
         output_topic = self.get_parameter('output_topic').value
         
@@ -50,8 +52,12 @@ class LaserScanNormalizer(Node):
         actual_readings = len(msg.ranges)
         
         # Create a copy of the message
+        import copy
         normalized_msg = LaserScan()
-        normalized_msg.header = msg.header
+        normalized_msg.header = copy.deepcopy(msg.header)
+        if self._frame_id_prefix and msg.header.frame_id:
+            if not msg.header.frame_id.startswith(self._frame_id_prefix + '/'):
+                normalized_msg.header.frame_id = f"{self._frame_id_prefix}/{msg.header.frame_id}"
         normalized_msg.angle_min = msg.angle_min
         normalized_msg.angle_max = msg.angle_max
         normalized_msg.angle_increment = msg.angle_increment
@@ -179,8 +185,14 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
