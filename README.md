@@ -991,6 +991,61 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
+#### 16. Measuring pose jumps with `pose_jump_monitor.py`
+
+Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the robot’s reported pose in the map frame is "jumping" during SLAM. This is useful when the robot appears to teleport in RViz or when the explorer seems confused by localization corrections.
+
+**How it works:**
+
+- Subscribes to TF and repeatedly looks up the transform from `map` → `base_footprint` (configurable).
+- Computes the linear distance between successive poses and logs when the distance is greater than or equal to a threshold.
+- Tracks basic statistics (total jumps, max jump, average jump) and prints a summary when you stop it with Ctrl+C.
+
+**Default behavior:**
+
+- Map frame: `map`
+- Base frame: `base_footprint`
+- Polling rate: 10 Hz
+- Minimum jump distance to log: 0.10 m
+
+**Usage (on Remote PC):**
+
+```bash
+cd ~/turtlebot3_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+source scripts/set_robot_env.sh blinky   # or pinky / inky <IP> / clyde <IP>
+
+python3 scripts/pose_jump_monitor.py
+```
+
+Leave this running while SLAM + Nav2 + explorer are active. When you press Ctrl+C, it will print a short summary such as:
+
+```text
+===== Pose Jump Summary =====
+  Total jumps:     42
+  Min distance:    0.300 m
+  Max jump:        0.380 m
+  Avg jump:        0.215 m
+```
+
+**Tuning via environment variables (optional):**
+
+You can adjust frames, threshold, and rate before launching the script:
+
+```bash
+export POSE_JUMP_MAP_FRAME=map
+export POSE_JUMP_BASE_FRAME=base_footprint
+export POSE_JUMP_MIN_DISTANCE_M=0.3   # only log jumps >= 30 cm
+export POSE_JUMP_RATE_HZ=5.0          # poll TF at 5 Hz
+
+python3 scripts/pose_jump_monitor.py
+```
+
+These settings help you focus on larger corrections that are more likely to confuse exploration and navigation.
+
+---
+
 ## Diagnostic Commands
 
 Use these commands to diagnose issues and verify system status:
