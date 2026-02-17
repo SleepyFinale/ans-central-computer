@@ -747,6 +747,37 @@ Edit `config/map_merge/multirobot_params.yaml` to set the initial relative poses
 
 Adjust these so the poses match where each robot starts in the shared space.
 
+**SLAM Toolbox and multi-robot:** This setup runs two SLAM Toolbox instances (one per robot) with topic remapping (`/map` → `/blinky/map` and `/pinky/map`). That is the standard way to use [slam_toolbox](https://github.com/SteveMacenski/slam_toolbox) for multi-robot; no experimental branch is required. The [m-explore-ros2](https://github.com/robo-friends/m-explore-ros2) README mentions an experimental slam_toolbox branch mainly for optional map_merge/unknown-poses workflows; with **known initial poses** (as configured here), the stock ROS 2 Humble `slam_toolbox` package works with map_merge.
+
+### Unknown initial poses (experimental)
+
+If you want the robots to start in **unknown** relative positions (no manual init poses), map_merge can estimate poses using feature matching between the individual maps.
+
+**What to change:**
+
+1. Either use the provided param file for unknown poses, or edit the default one.
+   - **Option A:** Launch with the unknown-poses param file:
+
+     ```bash
+     ROS_DOMAIN_ID=50 ros2 launch turtlebot3_navigation2 multirobot_slam.launch.py \
+       map_merge_params_file:=/home/$(whoami)/turtlebot3_ws/config/map_merge/multirobot_params_unknown_poses.yaml
+     ```
+
+   - **Option B:** In `config/map_merge/multirobot_params.yaml` set `known_init_poses: false` and remove or comment out the `init_pose_x/y/z/yaw` entries for each robot (they are ignored when `known_init_poses` is false).
+
+2. **Practical tips** (from [m-explore-ros2](https://github.com/robo-friends/m-explore-ros2)):
+   - Estimation works best if robots start **close together** (e.g. &lt; 3 m) so the maps overlap enough for the algorithm to find correspondences.
+   - Give each robot time to build a small map before the merge converges (move slightly if needed).
+
+**Current limitation (TF):** With known poses, the launch uses a static TF fallback that publishes `map` → `blinky/odom` and `map` → `pinky/odom` (identity), which is correct because the merge is aligned with those frames. With **unknown** poses, map_merge estimates the relative positions and publishes the merged `/map`, but it does **not** publish TF (e.g. `map` → `blinky/map`, `map` → `pinky/map`). So the current identity fallback is wrong for unknown poses, and Nav2/Explorer would not see the correct robot positions on the merged map until the TF tree is fixed.
+
+**To support unknown poses fully** you would need one of:
+
+- **Option A:** Extend map_merge (or add a small node) to publish the **estimated transforms** as TF: `map` → `blinky/map` and `map` → `pinky/map` (using the pipeline’s estimated transforms). Then the existing `blinky/map` → `blinky/odom` and `pinky/map` → `pinky/odom` from each SLAM would complete the tree.
+- **Option B:** Use a SLAM/map-merge stack that already publishes TF for the merged frame (e.g. some variants or experimental branches that expose the merge result as a transform).
+
+Until then, use **known initial poses** for reliable Nav2 + Explorer on the merged map.
+
 ### Verification
 
 ```bash
@@ -967,24 +998,27 @@ Adjust x, y, z, w values to match robot's actual position.
 
 #### 8. Costmap warning: “Sensor origin is out of map bounds”
 
-**Cause:** Nav2 doesn't know where the robot is on the map yet, so it can't determine if the sensor is within map bounds.
+**Cause:** The global costmap's static layer uses the merged map; if the map bounds start at (0, 0), the lidar (sensor) at about (-0.03, 0) in the robot frame can fall outside the map when the robot is near the origin, so Nav2 warns that it cannot raytrace for it.
 
 **Symptoms:**
 
 ```text
-[WARN] [global_costmap.global_costmap]: Sensor origin at (-0.03, -0.00) is out of map bounds (0.00, 0.00) to (4.98, 4.98)
+[WARN] [blinky.global_costmap.global_costmap]: Sensor origin at (-0.03, -0.00) is out of map bounds (0.00, 0.00) to (4.98, 4.98)
+[WARN] [pinky.global_costmap.global_costmap]: Sensor origin at (-0.03, -0.00) is out of map bounds (0.00, 0.00) to (4.98, 4.98)
 ```
 
-**Fix:**
+**Fix (multi-robot / map_merge):**
 
-- Ensure SLAM is publishing a map:
-  - `ros2 topic echo /map --once`
-- Ensure TF is valid:
-  - `ros2 run tf2_ros tf2_echo map odom`
-  - `ros2 run tf2_ros tf2_echo odom base_footprint`
-- If you are using a static-map + AMCL workflow, set the initial pose in RViz (or use the manual initial pose command above).
+- The workspace configures **map_merge** with `origin_margin: 0.05` (in `config/map_merge/multirobot_params.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
+  - `./scripts/minimal_rebuild.sh` (or `clean_rebuild.sh`), then
+  - `./scripts/start_multirobot_slam.sh`, then
+  - `./scripts/start_multirobot_nav2_explore.sh`
+- You can increase the margin if needed (e.g. `origin_margin: 0.1`).
 
-**Note:** This warning is normal and expected until you set the initial pose. It doesn't prevent Nav2 from working, but you should set the initial pose to resolve it.
+**Fix (single-robot):**
+
+- Ensure SLAM is publishing a map (`ros2 topic echo /map --once`) and TF is valid (`tf2_echo map base_footprint`). If using static map + AMCL, set the initial pose in RViz.
+- This warning can be normal until the initial pose is set; it may not prevent Nav2 from working once the robot is localized.
 
 ---
 

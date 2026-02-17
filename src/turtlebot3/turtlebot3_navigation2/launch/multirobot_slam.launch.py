@@ -19,7 +19,11 @@ def generate_launch_description():
     param_dir = os.path.join(
         get_package_share_directory('turtlebot3_navigation2'),
         'param', 'humble')
-    map_merge_params = os.path.join(workspace_dir, 'config', 'map_merge', 'multirobot_params.yaml')
+    default_map_merge_params = os.path.join(
+        workspace_dir, 'config', 'map_merge', 'multirobot_params.yaml')
+    map_merge_params = LaunchConfiguration(
+        'map_merge_params_file',
+        default=default_map_merge_params)
     tf_relay_script = os.path.join(workspace_dir, 'scripts', 'tf_relay_multirobot.py')
     tf_fallback_script = os.path.join(workspace_dir, 'scripts', 'tf_map_odom_fallback.py')
     normalizer_script = os.path.join(
@@ -104,6 +108,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument(
+            'map_merge_params_file',
+            default_value=default_map_merge_params,
+            description='Path to map_merge params YAML (e.g. multirobot_params_unknown_poses.yaml for unknown poses)'),
         blinky_normalizer,
         pinky_normalizer,
         tf_relay,

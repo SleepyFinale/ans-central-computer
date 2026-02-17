@@ -1,0 +1,21 @@
+# Map merge params for Blinky + Pinky with UNKNOWN initial poses
+# Pose estimation uses feature matching; works best if robots start close (< 3 m).
+# Expects /blinky/map and /pinky/map from SLAM instances.
+#
+# Note: Nav2/Explorer need map->robot/map TF from merge; map_merge does not
+# publish that yet. Use this for merged /map only until TF support is added.
+# See README "Unknown initial poses (experimental)".
+
+map_merge:
+  ros__parameters:
+    merging_rate: 4.0
+    discovery_rate: 0.05
+    estimation_rate: 0.5
+    estimation_confidence: 0.6
+    robot_map_topic: map
+    robot_map_updates_topic: map_updates
+    robot_namespace: ""
+    merged_map_topic: map
+    world_frame: map
+    known_init_poses: false
+    origin_margin: 0.05

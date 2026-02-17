@@ -36,6 +36,7 @@
  *
  *********************************************************************/
 
+#include <cmath>
 #include <thread>
 
 #include <map_merge/map_merge.h>
@@ -65,6 +66,7 @@ logger_(this->get_logger())
   if (!this->has_parameter("robot_namespace")) this->declare_parameter<std::string>("robot_namespace", "");
   if (!this->has_parameter("merged_map_topic")) this->declare_parameter<std::string>("merged_map_topic", "map");
   if (!this->has_parameter("world_frame")) this->declare_parameter<std::string>("world_frame", "world");
+  if (!this->has_parameter("origin_margin")) this->declare_parameter<double>("origin_margin", 0.05);
 
   this->get_parameter("merging_rate", merging_rate_);
   this->get_parameter("discovery_rate", discovery_rate_);
@@ -76,6 +78,7 @@ logger_(this->get_logger())
   this->get_parameter("robot_namespace", robot_namespace_);
   this->get_parameter("merged_map_topic", merged_map_topic);
   this->get_parameter("world_frame", world_frame_);
+  this->get_parameter("origin_margin", origin_margin_);
 
 
   /* publishing */
@@ -197,6 +200,43 @@ void MapMerge::topicSubscribing()
 }
 
 /*
+ * applyOriginMargin()
+ * Pads the grid so map bounds extend by origin_margin_ on all sides (avoids
+ * Nav2 "sensor origin out of map bounds" when robot is near map origin).
+ */
+void MapMerge::applyOriginMargin(nav_msgs::msg::OccupancyGrid::SharedPtr& grid)
+{
+  if (origin_margin_ <= 0.0 || grid->info.resolution <= 0.f) {
+    return;
+  }
+  const int margin_cells = static_cast<int>(std::ceil(origin_margin_ / grid->info.resolution));
+  if (margin_cells <= 0) {
+    return;
+  }
+  const uint32_t w = grid->info.width;
+  const uint32_t h = grid->info.height;
+  const uint32_t new_w = w + 2u * static_cast<uint32_t>(margin_cells);
+  const uint32_t new_h = h + 2u * static_cast<uint32_t>(margin_cells);
+
+  nav_msgs::msg::OccupancyGrid::SharedPtr padded(new nav_msgs::msg::OccupancyGrid());
+  padded->header = grid->header;
+  padded->info = grid->info;
+  padded->info.width = new_w;
+  padded->info.height = new_h;
+  padded->info.origin.position.x -= margin_cells * grid->info.resolution;
+  padded->info.origin.position.y -= margin_cells * grid->info.resolution;
+  padded->data.resize(static_cast<size_t>(new_w * new_h), -1);
+
+  for (uint32_t row = 0; row < h; ++row) {
+    for (uint32_t col = 0; col < w; ++col) {
+      padded->data[(row + margin_cells) * new_w + (col + margin_cells)] =
+          grid->data[row * w + col];
+    }
+  }
+  grid = padded;
+}
+
+/*
  * mapMerging()
  */
 void MapMerge::mapMerging()
@@ -247,6 +287,9 @@ void MapMerge::mapMerging()
   merged_map->header.frame_id = world_frame_;
 
   rcpputils::assert_true(merged_map->info.resolution > 0.f);
+  if (origin_margin_ > 0.0) {
+    applyOriginMargin(merged_map);
+  }
   merged_map_publisher_->publish(*merged_map);
 }
 

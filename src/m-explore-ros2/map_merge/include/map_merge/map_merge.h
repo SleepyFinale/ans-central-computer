@@ -82,6 +82,8 @@ private:
   std::string robot_namespace_;
   std::string world_frame_;
   bool have_initial_poses_;
+  /** Origin margin in meters; adds padding so map bounds extend beyond (0,0) to avoid Nav2 "sensor out of map bounds" (e.g. 0.05). */
+  double origin_margin_;
 
   // publishing
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr merged_map_publisher_;
@@ -106,6 +108,8 @@ private:
   bool isRobotMapTopic(const std::string topic, std::string type);
   bool getInitPose(const std::string& name, geometry_msgs::msg::Transform& pose);
 
+  /** Pad merged grid by origin_margin_ so map bounds include negative coords (fixes Nav2 sensor origin warning). */
+  void applyOriginMargin(nav_msgs::msg::OccupancyGrid::SharedPtr& grid);
   void fullMapUpdate(const nav_msgs::msg::OccupancyGrid::SharedPtr msg,
                      MapSubscription& map);
   void partialMapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr msg,
