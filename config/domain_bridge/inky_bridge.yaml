@@ -1,0 +1,23 @@
+# Domain bridge: Inky (ROS_DOMAIN_ID 32) -> Central (domain 50)
+# Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
+# Ensure robot bringup is running on Inky with ROS_DOMAIN_ID=32
+
+name: inky_bridge
+from_domain: 32
+to_domain: 50
+topics:
+  scan:
+    type: sensor_msgs/msg/LaserScan
+    remap: inky/scan
+  odom:
+    type: nav_msgs/msg/Odometry
+    remap: inky/odom
+  joint_states:
+    type: sensor_msgs/msg/JointState
+    remap: inky/joint_states
+  tf:
+    type: tf2_msgs/msg/TFMessage
+    remap: inky/tf
+  tf_static:
+    type: tf2_msgs/msg/TFMessage
+    remap: inky/tf_static

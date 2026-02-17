@@ -1,0 +1,23 @@
+# Domain bridge: Clyde (ROS_DOMAIN_ID 33) -> Central (domain 50)
+# Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
+# Ensure robot bringup is running on Clyde with ROS_DOMAIN_ID=33
+
+name: clyde_bridge
+from_domain: 33
+to_domain: 50
+topics:
+  scan:
+    type: sensor_msgs/msg/LaserScan
+    remap: clyde/scan
+  odom:
+    type: nav_msgs/msg/Odometry
+    remap: clyde/odom
+  joint_states:
+    type: sensor_msgs/msg/JointState
+    remap: clyde/joint_states
+  tf:
+    type: tf2_msgs/msg/TFMessage
+    remap: clyde/tf
+  tf_static:
+    type: tf2_msgs/msg/TFMessage
+    remap: clyde/tf_static

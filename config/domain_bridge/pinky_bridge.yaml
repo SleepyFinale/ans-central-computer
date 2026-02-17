@@ -1,0 +1,23 @@
+# Domain bridge: Pinky (ROS_DOMAIN_ID 31) -> Central (domain 50)
+# Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
+# Ensure robot bringup is running on Pinky with ROS_DOMAIN_ID=31
+
+name: pinky_bridge
+from_domain: 31
+to_domain: 50
+topics:
+  scan:
+    type: sensor_msgs/msg/LaserScan
+    remap: pinky/scan
+  odom:
+    type: nav_msgs/msg/Odometry
+    remap: pinky/odom
+  joint_states:
+    type: sensor_msgs/msg/JointState
+    remap: pinky/joint_states
+  tf:
+    type: tf2_msgs/msg/TFMessage
+    remap: pinky/tf
+  tf_static:
+    type: tf2_msgs/msg/TFMessage
+    remap: pinky/tf_static

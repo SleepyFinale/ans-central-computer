@@ -16,9 +16,10 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
    - [Terminal 2: SLAM Toolbox](#terminal-2-slam-toolbox)
    - [Terminal 3: Navigation2](#terminal-3-navigation2)
    - [Terminal 4: Explorer](#terminal-4-explorer)
-5. [Troubleshooting](#troubleshooting)
-6. [Diagnostic Commands](#diagnostic-commands)
-7. [Additional Resources](#additional-resources)
+5. [Multi-Robot SLAM (Blinky + Pinky)](#multi-robot-slam-blinky--pinky)
+6. [Troubleshooting](#troubleshooting)
+7. [Diagnostic Commands](#diagnostic-commands)
+8. [Additional Resources](#additional-resources)
 
 ---
 
@@ -266,6 +267,8 @@ echo $ROS_DOMAIN_ID
 echo $ROBOT_SSH   # if you used the script
 ```
 
+**Default domain for central PC:** The workspace configures `ROS_DOMAIN_ID=50` by default (in `~/.bashrc`) for multi-robot aggregation. For **single-robot** sessions, run `source scripts/set_robot_env.sh <robot>` to switch to that robot's domain (e.g., 30 for Blinky).
+
 **Important:**
 
 - If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0
@@ -285,7 +288,7 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
-- Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]`
+- Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]` — this overrides the default `ROS_DOMAIN_ID=50` with the robot's domain (30 for Blinky, etc.)
 
 **Startup order is critical:** Start terminals in sequence and wait between steps for proper initialization.
 
@@ -615,6 +618,110 @@ ros2 node list | grep explore
 ros2 topic echo /goal_pose  # Should see goals being published
 
 # Robot should be moving autonomously
+```
+
+---
+
+## Multi-Robot SLAM (Blinky + Pinky)
+
+This section describes how to run **multiple robots** (e.g., Blinky and Pinky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot uses a different `ROS_DOMAIN_ID`, so the setup uses **domain bridges** to forward topics into a common aggregation domain (50).
+
+### Overview
+
+- **Blinky** (domain 30) and **Pinky** (domain 31) run robot bringup on their own domains
+- **Domain bridges** subscribe to each robot's topics and republish to domain 50 with namespaced topics (`/blinky/scan`, `/pinky/scan`, etc.)
+- **TF relay** merges `/blinky/tf` and `/pinky/tf` into `/tf` with frame prefixes (`blinky/odom`, `pinky/odom`)
+- **SLAM instances** (one per robot) produce `/blinky/map` and `/pinky/map`
+- **Map merge** combines them into a single `/map`
+
+### Multi-robot prerequisites
+
+- `ros-humble-domain-bridge` installed: `sudo apt install ros-humble-domain-bridge`
+- Workspace built
+- Central PC uses `ROS_DOMAIN_ID=50` (default in `~/.bashrc`)
+
+### Files added for multi-robot
+
+| File | Purpose |
+| ---- | ------- |
+| `config/domain_bridge/blinky_bridge.yaml` | Bridge: domain 30 → 50, topics → `/blinky/*` |
+| `config/domain_bridge/pinky_bridge.yaml` | Bridge: domain 31 → 50, topics → `/pinky/*` |
+| `config/domain_bridge/inky_bridge.yaml` | Bridge: domain 32 → 50, topics → `/inky/*` |
+| `config/domain_bridge/clyde_bridge.yaml` | Bridge: domain 33 → 50, topics → `/clyde/*` |
+| `scripts/start_domain_bridges.sh` | Start both bridges |
+| `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf → /tf with frame prefixes |
+| `config/map_merge/multirobot_params.yaml` | Map merge init poses for Blinky and Pinky |
+| `param/humble/mapper_params_blinky.yaml` | SLAM params for Blinky |
+| `param/humble/mapper_params_pinky.yaml` | SLAM params for Pinky |
+| `scripts/start_multirobot_slam.sh` | Start multi-robot SLAM + map merge |
+| `launch/multirobot_slam.launch.py` | Launch file for SLAM, normalizers, TF relay, map merge |
+
+### Workflow
+
+**1. Start robot bringup on each robot (SSH to Blinky and Pinky):**
+
+```bash
+# On Blinky (ROS_DOMAIN_ID=30)
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+export ROS_DOMAIN_ID=30
+ros2 launch turtlebot3_bringup robot.launch.py
+```
+
+```bash
+# On Pinky (ROS_DOMAIN_ID=31)
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+export ROS_DOMAIN_ID=31
+ros2 launch turtlebot3_bringup robot.launch.py
+```
+
+**2. Start domain bridges on central PC:**
+
+```bash
+cd ~/turtlebot3_ws
+./scripts/start_domain_bridges.sh
+```
+
+**3. Start multi-robot SLAM on central PC:**
+
+```bash
+cd ~/turtlebot3_ws
+./scripts/start_multirobot_slam.sh
+```
+
+Or directly:
+
+```bash
+ROS_DOMAIN_ID=50 ros2 launch turtlebot3_navigation2 multirobot_slam.launch.py use_sim_time:=false
+```
+
+**4. (Optional) Start Nav2 and Explorer** for autonomous exploration on the merged map — use the same workflow as single-robot, but ensure `ROS_DOMAIN_ID=50` so Nav2 sees the merged `/map`.
+
+### Map merge init poses
+
+Edit `config/map_merge/multirobot_params.yaml` to set the initial relative poses of Blinky and Pinky:
+
+```yaml
+/blinky/map_merge/init_pose_x: 0.0
+/blinky/map_merge/init_pose_y: 0.0
+/blinky/map_merge/init_pose_yaw: 0.0
+
+/pinky/map_merge/init_pose_x: -2.0
+/pinky/map_merge/init_pose_y: 0.0
+/pinky/map_merge/init_pose_yaw: 0.0
+```
+
+Adjust these so the poses match where each robot starts in the shared space.
+
+### Verification
+
+```bash
+# On central PC (ROS_DOMAIN_ID=50)
+ros2 topic list | grep -E "blinky|pinky|map"
+# Should see: /blinky/scan, /pinky/scan, /blinky/map, /pinky/map, /map
+
+ros2 topic echo /map --once   # Merged map
 ```
 
 ---

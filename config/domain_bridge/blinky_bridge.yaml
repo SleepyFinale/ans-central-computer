@@ -1,0 +1,23 @@
+# Domain bridge: Blinky (ROS_DOMAIN_ID 30) -> Central (domain 50)
+# Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
+# Ensure robot bringup is running on Blinky with ROS_DOMAIN_ID=30
+
+name: blinky_bridge
+from_domain: 30
+to_domain: 50
+topics:
+  scan:
+    type: sensor_msgs/msg/LaserScan
+    remap: blinky/scan
+  odom:
+    type: nav_msgs/msg/Odometry
+    remap: blinky/odom
+  joint_states:
+    type: sensor_msgs/msg/JointState
+    remap: blinky/joint_states
+  tf:
+    type: tf2_msgs/msg/TFMessage
+    remap: blinky/tf
+  tf_static:
+    type: tf2_msgs/msg/TFMessage
+    remap: blinky/tf_static
