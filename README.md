@@ -445,6 +445,7 @@ use_sim_time: False
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: Node using stack size 40000000
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
 [async_slam_toolbox_node-1] [INFO] [...] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[async_slam_toolbox_node-1] Registering sensor: [Custom Described Lidar]
 ```
 
 **What to look for:**

@@ -22,7 +22,11 @@ echo ""
 
 # Use SLAM map directly (better for exploration when map is small/narrow)
 # The costmap might be too restrictive - using SLAM map gives better frontier detection
-# Set use_sim_time to match Nav2 configuration (global_costmap uses True)
+# use_sim_time must match Nav2/SLAM: False for real robot, True for simulation
+USE_SIM_TIME_VALUE="False"
+if [ "${USE_SIM_TIME}" = "1" ] || [ "${USE_SIM_TIME}" = "true" ] || [ "${USE_SIM_TIME}" = "True" ]; then
+    USE_SIM_TIME_VALUE="True"
+fi
 ros2 run explore_lite explore --ros-args \
     --params-file src/m-explore-ros2/explore/config/params.yaml \
-    -p use_sim_time:=True
+    -p use_sim_time:=${USE_SIM_TIME_VALUE}
