@@ -488,6 +488,7 @@ export TURTLEBOT3_MODEL=burger
 # - Does NOT load a static map file
 # - Uses SLAM's live map (/map)
 # - Waits for TF (map->odom and odom->base_*) before starting Nav2
+# - Runs laser scan normalizer (/scan -> /scan_normalized) to avoid variable scan-count errors
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
 ```
 
@@ -789,16 +790,32 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=Fals
 - `nav2_rviz_plugins/Selector` or `nav2_rviz_plugins/Docking` failed to load
 - GLSL error: `active samplers with a different type refer to the same texture image unit`
 
-**Cause:** RViz plugin / GPU driver quirks. These do not usually prevent navigation.
+**Cause:** RViz plugin / GPU driver quirks. The workspace RViz config has been updated to remove the Selector and Docking panels (they are not provided by the installed `nav2_rviz_plugins` on some setups), so those plugin errors should no longer appear after a rebuild.
 
 **Workarounds:**
 
-- If the map still renders and Nav2 works, you can ignore these.
+- If the map still renders and Nav2 works, you can ignore any remaining messages.
 - If RViz rendering is broken, try software rendering:
 
 ```bash
 LIBGL_ALWAYS_SOFTWARE=1 rviz2
 ```
+
+---
+
+#### 6b. RViz exit code -11 (SIGSEGV) or nav2_container slow to terminate on Ctrl+C
+
+**Symptoms:**
+
+- After pressing Ctrl+C to stop the launch: `[ERROR] [rviz2-6]: process has died [pid ..., exit code -11]`
+- `component_container_isolated-2` fails to terminate within 5–10 seconds and is killed with SIGTERM then SIGKILL
+
+**Cause:** Known quirks: RViz2 can segfault on shutdown on some GPU/driver combinations; the composed Nav2 container can take a long time to deactivate all lifecycle nodes.
+
+**Workarounds:**
+
+- These do not affect normal operation. You can ignore the exit-code messages after Ctrl+C.
+- To avoid waiting, close RViz’s window first, then Ctrl+C the terminal; the rest of the processes usually stop more quickly.
 
 ---
 
