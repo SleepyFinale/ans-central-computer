@@ -390,9 +390,10 @@ source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
 **What this script does:**
 
 - Starts a laser scan normalizer that fixes variable reading counts (216-230 readings → 228 readings)
-- Launches SLAM Toolbox with fast map update configuration (0.2s intervals by default)
-- Automatically remaps scan topic to use normalized scans
-- Prevents "LaserRangeScan contains X range readings, expected Y" errors
+- Launches SLAM Toolbox with fast map update configuration (0.35s map update interval).
+- Automatically remaps scan topic to use normalized scans (`/scan_normalized`).
+- Prevents "LaserRangeScan contains X range readings, expected Y" errors.
+- To change how often the normalizer publishes, set the param when running the normalizer (e.g. after install: `ros2 run turtlebot3_navigation2 normalize_laser_scan.py --ros-args -p publish_every_n_scans:=6` for every 6th scan).
 - Defaults to `use_sim_time:=False` (real robot). To use sim time, run:
 
 ```bash
@@ -434,7 +435,6 @@ Starting laser scan normalizer...
 [INFO] [...] [laser_scan_normalizer]: Laser scan normalizer started: /scan -> /scan_normalized (normalizing to 228 readings)
 [INFO] [...] [laser_scan_normalizer]: Scan <N>: received <N_readings> readings, normalizing to 228
 [INFO] [...] [laser_scan_normalizer]: Scan <N>: published 228 readings (target: 228)
-... (repeats for each incoming scan; received counts may vary) ...
 Starting SLAM Toolbox with fast config...
 Using normalized scan topic: /scan_normalized
 
@@ -485,10 +485,10 @@ source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
 
 # Launch Navigation2 for SLAM / exploration (includes RViz)
-# - Does NOT load a static map file
-# - Uses SLAM's live map (/map)
-# - Waits for TF (map->odom and odom->base_*) before starting Nav2
-# - Runs laser scan normalizer (/scan -> /scan_normalized) to avoid variable scan-count errors
+# - Does NOT load a static map or start AMCL; uses only the navigation stack (planner, controller, BT navigator).
+# - Uses SLAM's live map (/map) and map->odom from SLAM Toolbox (run SLAM in Terminal 2 first).
+# - Waits for TF (map->odom and odom->base_*) before starting Nav2.
+# - Does NOT run the laser scan normalizer — run ./scripts/start_slam_with_normalizer.sh in Terminal 2 for that.
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
 ```
 
@@ -498,29 +498,20 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=Fals
 [INFO] [launch]: All log files can be found below /home/<user>/.ros/log/<date-time>-central-<pid>
 [INFO] [launch]: Default logging verbosity is set to INFO
 [INFO] [python3-1]: process started with pid [<pid>]
-[INFO] [component_container_isolated-2]: process started with pid [<pid>]
-[INFO] [map_saver_server-3]: process started with pid [<pid>]
-[INFO] [lifecycle_manager-4]: process started with pid [<pid>]
-[INFO] [sync_slam_toolbox_node-5]: process started with pid [<pid>]
-[INFO] [rviz2-6]: process started with pid [<pid>]
-[rviz2-6] Warning: Ignoring XDG_SESSION_TYPE=wayland on Gnome. Use QT_QPA_PLATFORM=wayland to run on Wayland anyway.
-[sync_slam_toolbox_node-5] [INFO] [...] [slam_toolbox]: Node using stack size 40000000
-[lifecycle_manager-4] [INFO] [...] [lifecycle_manager_slam]: Starting managed nodes bringup...
-[map_saver_server-3] [INFO] [...] [map_saver]: Creating
-[map_saver_server-3] [INFO] [...] [map_saver]: Configuring
-[lifecycle_manager-4] [INFO] [...] [lifecycle_manager_slam]: Managed nodes are active
-[sync_slam_toolbox_node-5] [INFO] [...] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[INFO] [rviz2-2]: process started with pid [<pid>]
 [python3-1] [INFO] [...] [wait_for_tf]: Waiting for TF. Need map->odom and odom->(one of ['base_footprint', 'base_link']). Timeout: 30.0s
 [python3-1] [INFO] [...] [wait_for_tf]: TF ready: odom -> base_footprint
 [python3-1] [INFO] [...] [wait_for_tf]: TF tree looks ready.
 [INFO] [python3-1]: process has finished cleanly [pid <pid>]
-[component_container_isolated-2] [INFO] [...] [lifecycle_manager_navigation]: Managed nodes are active
-[component_container_isolated-2] [INFO] [...] [lifecycle_manager_navigation]: Creating bond timer...
+[INFO] [controller_server-3]: process started with pid [<pid>]
+[INFO] [planner_server-5]: process started with pid [<pid>]
+[INFO] [bt_navigator-7]: process started with pid [<pid>]
+...
+[lifecycle_manager-10] [INFO] [...] [lifecycle_manager_navigation]: Managed nodes are active
 
-# Optional (may appear depending on RViz / drivers / installed plugins):
-[rviz2-6] [ERROR] [...] [rviz2]: PluginlibFactory: The plugin for class 'nav2_rviz_plugins/Selector' failed to load. (plugin not installed)
-[rviz2-6] [ERROR] [...] [rviz2]: PluginlibFactory: The plugin for class 'nav2_rviz_plugins/Docking' failed to load. (plugin not installed)
-[rviz2-6] [ERROR] [...] [rviz2]: ... GLSL link result: active samplers with a different type refer to the same texture image unit
+# Optional (harmless):
+[controller_server-3] [WARN] [...] No goal checker was specified in parameter 'current_goal_checker'. Server will use only plugin loaded general_goal_checker. This warning will appear once.
+[rviz2-2] [ERROR] [...] [rviz2]: ... GLSL link result: active samplers with a different type refer to the same texture image unit
 ```
 
 **What to look for:**
@@ -936,18 +927,27 @@ Adjust x, y, z, w values to match robot's actual position.
 
 #### 12. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
 
-**Cause:** The planner thinks the robot is inside an obstacle (often due to costmap inflation when the robot is close to a wall or corner). Recovery (spin) then sees inflated obstacles and aborts.
+**Cause:** The planner thinks the robot is inside an obstacle (often due to costmap inflation when the robot is close to a wall or corner). During SLAM the map and costmap update continuously, so this can happen even in open space briefly. Recovery (spin/backup) may also see inflated obstacles and abort.
 
 **Symptoms:**
 
 - `GridBased: failed to create plan, invalid use: Starting point in lethal space!`
-- `spin failed` / `Collision Ahead - Exiting Spin`
+- `spin failed` / `Collision Ahead - Exiting Spin` / `backup failed`
 - Robot gets close to a corner or doorframe and then stays there, not moving.
 
-**Fix:** The Nav2 params in `turtlebot3_navigation2/param/humble/burger.yaml` are already tuned to reduce this: global costmap uses smaller inflation (0.40 m radius, cost_scaling_factor 4.0) and local costmap inflation is 0.55 m. If it still happens:
+**Fix:** The Nav2 params in `turtlebot3_navigation2/param/humble/burger.yaml` are already tuned to reduce this: global costmap uses smaller inflation (0.32 m radius, cost_scaling_factor 5.0) and local costmap inflation is 0.45 m. If it still happens:
 
+- Wait for recovery (wait → backup → spin) to move the robot into free space; often the next plan then succeeds.
 - Drive the robot slightly away from the wall/corner so its center is in clearly free space.
-- Optionally reduce `inflation_radius` further in the global costmap (e.g. to 0.35) in the same param file, then restart Nav2.
+- Optionally reduce `inflation_radius` further in the global/local costmap in the same param file, then rebuild and restart Nav2.
+
+---
+
+#### 12a. Nav2: "No goal checker was specified in parameter 'current_goal_checker'"
+
+**Cause:** The default Nav2 behavior tree does not set `goal_checker_id` on the FollowPath node, so the controller server reports that it’s using the only loaded goal checker (e.g. `general_goal_checker`).
+
+**Fix:** None required. The warning appears **once** and is harmless; the server uses the correct goal checker. You can ignore it.
 
 ---
 
@@ -963,9 +963,9 @@ Adjust x, y, z, w values to match robot's actual position.
 
 **What we’ve done:** SLAM params in `mapper_params_online_async_fast.yaml` are tuned for smoother behavior:
 
-- `map_update_interval: 0.1` (was 0.2) — more frequent scan matching so corrections are smaller.
-- `minimum_travel_distance` / `minimum_travel_heading: 0.08` (were 0.15) — match more often so pose updates are smaller.
-- `transform_timeout: 0.1` — keeps map→odom timestamp closer to current time.
+- `map_update_interval: 0.35` — balance between update frequency and stability.
+- `minimum_travel_distance` / `minimum_travel_heading: 0.18` — match often enough so pose updates are smaller.
+- `transform_timeout: 0.2` — keeps map→odom timestamp closer to current time.
 
 **If it still happens:**
 
