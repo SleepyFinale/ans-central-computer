@@ -609,6 +609,15 @@ ros2 topic echo /goal_pose  # Should see goals being published
 # Robot should be moving autonomously
 ```
 
+**Explorer configuration:**
+
+Explorer parameters are in `src/m-explore-ros2/explore/config/params.yaml`. Notable options:
+
+- **Periodic revisit (drift reduction):** To help SLAM correct odometry drift in long or repetitive corridors, the explorer can periodically navigate back toward the start pose to create loop-closure opportunities. Configure with:
+  - `revisit_enabled`: `true` to enable periodic revisits; `false` (default) to disable.
+  - `revisit_after_n_goals`: After this many successfully reached frontier goals, the robot navigates back to the start pose, then resumes exploration. Default is `5`. Only used when `revisit_enabled` is `true`.
+- When revisit is enabled, the explorer logs how many goals have been completed since the last revisit and when it starts or finishes a revisit. The 30-second watchdog does not cancel revisit goals.
+
 ---
 
 ## Troubleshooting
@@ -972,6 +981,7 @@ Adjust x, y, z, w values to match robot's actual position.
 - Ensure only **one** node publishes `map`→`odom` (SLAM Toolbox when using SLAM; do not run AMCL at the same time). The Nav2 panel showing “Localization: inactive” is normal when using SLAM.
 - Check odometry: wheel slip, uneven floors, or miscalibrated wheel radius/separation (TurtleBot3: `turtlebot3_node/param/burger.yaml` — `wheels.separation`, `wheels.radius`) can cause drift and curved maps.
 - If the robot has an IMU, ensure `use_imu: true` in the diff_drive/odometry config so orientation drift is reduced.
+- **Periodic revisit:** In long or similar-looking corridors, enabling the explorer's periodic revisit can create loop-closure opportunities and reduce drift. In `src/m-explore-ros2/explore/config/params.yaml` set `revisit_enabled: true` and adjust `revisit_after_n_goals` (e.g. 3–5). The robot will return toward the start every N reached goals, then resume exploration.
 
 ---
 

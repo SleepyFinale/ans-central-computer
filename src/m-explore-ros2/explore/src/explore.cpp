@@ -72,6 +72,8 @@ Explore::Explore()
   this->declare_parameter<float>("gain_scale", 1.0);
   this->declare_parameter<float>("min_frontier_size", 0.5);
   this->declare_parameter<bool>("return_to_init", false);
+  this->declare_parameter<bool>("revisit_enabled", false);
+  this->declare_parameter<int>("revisit_after_n_goals", 5);
 
   this->get_parameter("planner_frequency", planner_frequency_);
   this->get_parameter("progress_timeout", timeout);
@@ -82,6 +84,8 @@ Explore::Explore()
   this->get_parameter("min_frontier_size", min_frontier_size);
   this->get_parameter("return_to_init", return_to_init_);
   this->get_parameter("robot_base_frame", robot_base_frame_);
+  this->get_parameter("revisit_enabled", revisit_enabled_);
+  this->get_parameter("revisit_after_n_goals", revisit_after_n_goals_);
 
   progress_timeout_ = timeout;
   move_base_client_ =
@@ -109,7 +113,7 @@ Explore::Explore()
   move_base_client_->wait_for_action_server();
   RCLCPP_INFO(logger_, "Connected to move_base nav2 server");
 
-  if (return_to_init_) {
+  if (return_to_init_ || revisit_enabled_) {
     RCLCPP_INFO(logger_, "Getting initial pose of the robot");
     geometry_msgs::msg::TransformStamped transformStamped;
     std::string map_frame = costmap_client_.getGlobalFrameID();
@@ -123,6 +127,7 @@ Explore::Explore()
       RCLCPP_ERROR(logger_, "Couldn't find transform from %s to %s: %s",
                    map_frame.c_str(), robot_base_frame_.c_str(), ex.what());
       return_to_init_ = false;
+      revisit_enabled_ = false;
     }
   }
 
@@ -727,6 +732,12 @@ void Explore::makePlan()
   // However, if Nav2 never reports a result (rare, but happens when the stack is stressed),
   // we must recover, otherwise exploration will appear "stuck" forever.
   if (goal_in_progress_) {
+    // When revisiting start, do not run the 30 s watchdog—revisit can take much longer (drive home).
+    if (revisit_in_progress_) {
+      RCLCPP_INFO_THROTTLE(logger_, *this->get_clock(), 10000,
+                           "Revisit to start in progress (watchdog disabled for revisit).");
+      return;
+    }
     // If we don't have bookkeeping yet (e.g., after restart), initialize it.
     if (!has_active_goal) {
       has_active_goal = true;
@@ -819,6 +830,38 @@ void Explore::returnToInitialPose()
   move_base_client_->async_send_goal(goal, send_goal_options);
 }
 
+void Explore::sendRevisitGoal()
+{
+  RCLCPP_INFO(logger_, "Revisit: navigating to start at (%.2f, %.2f) for loop-closure opportunity.",
+              initial_pose_.position.x, initial_pose_.position.y);
+  revisit_in_progress_ = true;
+  auto goal = nav2_msgs::action::NavigateToPose::Goal();
+  goal.pose.pose.position = initial_pose_.position;
+  goal.pose.pose.orientation = initial_pose_.orientation;
+  goal.pose.header.frame_id = costmap_client_.getGlobalFrameID();
+  goal.pose.header.stamp = this->now();
+
+  auto send_goal_options =
+      rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SendGoalOptions();
+  send_goal_options.goal_response_callback =
+      [this](const NavigationGoalHandle::SharedPtr& goal_handle) {
+        if (!goal_handle) {
+          RCLCPP_WARN(logger_, "Revisit goal was rejected by Nav2!");
+          goal_in_progress_ = false;
+          revisit_in_progress_ = false;
+          makePlan();
+          return;
+        }
+        goal_in_progress_ = true;
+      };
+  send_goal_options.result_callback =
+      [this](const NavigationGoalHandle::WrappedResult& result) {
+        reachedGoal(result, initial_pose_.position);
+      };
+  move_base_client_->async_send_goal(goal, send_goal_options);
+  goal_in_progress_ = true;
+}
+
 bool Explore::goalOnBlacklist(const geometry_msgs::msg::Point& goal)
 {
   // Increased tolerance to 0.3m (was 5 cells * 0.05m = 0.25m)
@@ -843,6 +886,17 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
                           const geometry_msgs::msg::Point& frontier_goal)
 {
   goal_in_progress_ = false;
+  if (revisit_in_progress_) {
+    revisit_in_progress_ = false;
+    if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+      goals_since_revisit_ = 0;
+      RCLCPP_INFO(logger_, "Revisit to start completed. Resuming exploration.");
+    } else {
+      RCLCPP_WARN(logger_, "Revisit goal ended with code %d. Resuming exploration.", static_cast<int>(result.code));
+    }
+    makePlan();
+    return;
+  }
   switch (result.code) {
     case rclcpp_action::ResultCode::SUCCEEDED:
       RCLCPP_INFO(logger_, "Goal reached successfully at (%.2f, %.2f). Planning next frontier...",
@@ -850,8 +904,20 @@ void Explore::reachedGoal(const NavigationGoalHandle::WrappedResult& result,
       // If the map isn't updating quickly (or the frontier doesn't disappear),
       // blacklist this reached frontier so we move on.
       frontier_blacklist_.push_back(frontier_goal);
+      goals_since_revisit_++;
       RCLCPP_INFO(logger_, "Blacklisting reached frontier (%.2f, %.2f). Blacklist size: %zu",
                   frontier_goal.x, frontier_goal.y, frontier_blacklist_.size());
+      if (revisit_enabled_) {
+        RCLCPP_INFO(logger_, "Goals since last revisit: %d (revisit every %d).",
+                    goals_since_revisit_, revisit_after_n_goals_);
+      }
+      if (revisit_enabled_ && goals_since_revisit_ >= revisit_after_n_goals_) {
+        RCLCPP_INFO(logger_, "Going for periodic revisit: %d goals since last revisit (threshold %d). Navigating to start at (%.2f, %.2f).",
+                    goals_since_revisit_, revisit_after_n_goals_,
+                    initial_pose_.position.x, initial_pose_.position.y);
+        sendRevisitGoal();
+        return;
+      }
       break;
     case rclcpp_action::ResultCode::ABORTED:
       RCLCPP_DEBUG(logger_, "Goal was aborted");
