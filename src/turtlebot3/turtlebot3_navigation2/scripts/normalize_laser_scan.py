@@ -8,6 +8,8 @@ by interpolating or padding/truncating as needed.
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from rclpy.executors import ExternalShutdownException
+from rclpy.exceptions import RCLError
 
 
 class LaserScanNormalizer(Node):
@@ -172,8 +174,13 @@ class LaserScanNormalizer(Node):
                 f'(target: {self.target_readings})'
             )
         
-        # Publish the normalized scan
-        self.publisher.publish(normalized_msg)
+        # Publish the normalized scan. On shutdown the publisher's context can
+        # become invalid; ignore that case so we exit cleanly.
+        try:
+            self.publisher.publish(normalized_msg)
+        except RCLError:
+            # Context is shutting down; safe to ignore.
+            pass
 
 
 def main(args=None):
@@ -182,7 +189,7 @@ def main(args=None):
     
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         try:

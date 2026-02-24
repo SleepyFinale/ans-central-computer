@@ -486,6 +486,7 @@ ros2 topic echo /map --once      # Should show map data (may need to wait a few 
 cd ~/turtlebot3_ws
 source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
 source /opt/ros/humble/setup.bash
+source install/setup.bash
 export TURTLEBOT3_MODEL=burger
 
 # Launch Navigation2 for SLAM / exploration (includes RViz)
