@@ -132,6 +132,7 @@ private:
 
   geometry_msgs::msg::Pose initial_pose_;
   void returnToInitialPose(void);
+  void sendRevisitGoal(void);
 
   // parameters
   double planner_frequency_;
@@ -141,6 +142,12 @@ private:
   bool return_to_init_;
   std::string robot_base_frame_;
   bool resuming_ = false;
+
+  // Periodic revisit (return toward start every N goals to create loop-closure opportunities)
+  bool revisit_enabled_{false};
+  int revisit_after_n_goals_{5};
+  int goals_since_revisit_{0};
+  bool revisit_in_progress_{false};
 };
 }  // namespace explore
 

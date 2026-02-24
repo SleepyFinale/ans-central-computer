@@ -2,6 +2,9 @@
   ros__parameters:
     robot_base_frame: base_link
     return_to_init: false  # Disable return to start - focus on exploration first
+    # Periodic revisit: return toward start every N reached goals to create loop-closure opportunities (reduces drift)
+    revisit_enabled: false
+    revisit_after_n_goals: 5
     costmap_topic: map
     costmap_updates_topic: map_updates
     visualize: true
