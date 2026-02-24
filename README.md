@@ -85,8 +85,8 @@ sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] http://packages
 sudo apt update
 sudo apt install ros-humble-desktop
 
-# Install Navigation2 packages (required - workspace uses system packages)
-sudo apt install ros-humble-navigation2
+# Install Navigation2 and SLAM Toolbox packages (required - workspace uses system packages)
+sudo apt install ros-humble-navigation2 ros-humble-slam-toolbox
 
 # Install development tools
 sudo apt install python3-colcon-common-extensions python3-argcomplete
