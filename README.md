@@ -16,6 +16,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
    - [Terminal 2: SLAM Toolbox](#terminal-2-slam-toolbox)
    - [Terminal 3: Navigation2](#terminal-3-navigation2)
    - [Terminal 4: Explorer](#terminal-4-explorer)
+   - [Nav2 on Robot (Offloaded Navigation)](#nav2-on-robot-offloaded-navigation)
 5. [Multi-Robot SLAM (Blinky + Pinky)](#multi-robot-slam-blinky--pinky)
 6. [Troubleshooting](#troubleshooting)
 7. [Diagnostic Commands](#diagnostic-commands)
@@ -622,6 +623,78 @@ Explorer parameters are in `src/m-explore-ros2/explore/config/params.yaml`. Nota
   - `revisit_enabled`: `true` to enable periodic revisits; `false` (default) to disable.
   - `revisit_after_n_goals`: After this many successfully reached frontier goals, the robot navigates back to the start pose, then resumes exploration. Default is `5`. Only used when `revisit_enabled` is `true`.
 - When revisit is enabled, the explorer logs how many goals have been completed since the last revisit and when it starts or finishes a revisit. The 30-second watchdog does not cancel revisit goals.
+
+---
+
+### Nav2 on Robot (Offloaded Navigation)
+
+In the default setup above, Navigation2 runs on the **central PC** (Terminal 3) and sends velocity commands directly to the robot. If you want to offload path planning and control to the **robot SBC** and keep only SLAM + RViz + explorer on the central PC, you can run Navigation2 on the robot instead.
+
+This mode is useful when the central PC is managing multiple robots or when you want each robot to handle its own local planning while the central PC focuses on mapping and high-level coordination.
+
+#### 5-terminal layout (Nav2 on robot, SLAM + RViz + Explorer on central)
+
+- **Terminal 1 – Robot SBC: bringup**
+
+  ```bash
+  # On the robot (e.g., Blinky SBC)
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_bringup robot.launch.py
+  ```
+
+- **Terminal 2 – Central PC: SLAM (with laser scan normalizer)**
+
+  ```bash
+  # On central PC
+  cd ~/turtlebot3_ws
+  source scripts/set_robot_env.sh blinky   # or pinky/inky/clyde; sets ROS_DOMAIN_ID and ROBOT_SSH
+
+  ./scripts/start_slam_with_normalizer.sh
+  ```
+
+  This starts the laser scan normalizer and SLAM Toolbox on the central PC but uses `/scan` data from the robot to build the `/map` topic.
+
+- **Terminal 3 – Robot SBC: Navigation2**
+
+  ```bash
+  # On the robot, in a second terminal
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
+  ```
+
+  This runs the full Nav2 stack (planner, controller, BT navigator, costmaps) **on the robot**, using the live `/map` from SLAM Toolbox. Nav2 publishes `/cmd_vel` locally on the SBC.
+
+- **Terminal 4 – Central PC: RViz**
+
+  ```bash
+  # On central PC
+  cd ~/turtlebot3_ws
+  source scripts/set_robot_env.sh blinky
+
+  rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
+  ```
+
+  RViz on the central PC visualizes the `/map` from SLAM, the robot's TF tree, and Nav2's costmaps and paths coming from the Nav2 instance on the robot.
+
+- **Terminal 5 – Central PC: Explorer**
+
+  ```bash
+  # On central PC
+  cd ~/turtlebot3_ws
+  source scripts/set_robot_env.sh blinky
+
+  ./scripts/start_explorer_simple.sh
+  ```
+
+  Explorer runs on the central PC, but its goals are sent to the Nav2 stack running on the robot (same ROS_DOMAIN_ID). The overall behavior is:
+
+  - **Robot SBC:** hardware interfaces + Nav2 (planning, control, `/cmd_vel`).
+  - **Central PC:** SLAM Toolbox + laser scan normalizer, RViz visualization, and Explore Lite for frontier selection.
+
+In this configuration, you get the same autonomous exploration behavior as the default setup, but with Nav2's CPU load moved off the central PC and onto the robot.
 
 ---
 
