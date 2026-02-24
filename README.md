@@ -13,7 +13,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
 3. [ROS Domain Configuration](#ros-domain-configuration)
 4. [Connecting to a Robot](#connecting-to-a-robot)
    - [Terminal 1: SSH Connection and Robot Launch](#terminal-1-ssh-connection-and-robot-launch)
-   - [Terminal 2: SLAM Toolbox](#terminal-2-slam-toolbox)
+   - [Terminal 2: SLAM Toolbox (manual / optional)](#terminal-2-slam-toolbox-manual--optional)
    - [Terminal 3: Navigation2](#terminal-3-navigation2)
    - [Terminal 4: Explorer](#terminal-4-explorer)
    - [Nav2 on Robot (Offloaded Navigation)](#nav2-on-robot-offloaded-navigation)
@@ -314,8 +314,15 @@ ssh $ROBOT_SSH
 # After connection, on the robot:
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
+
+# Default: bringup + SLAM with laser scan normalizer
 ros2 launch turtlebot3_bringup robot.launch.py
+
+# Optional: disable automatic SLAM + normalizer (for manual control/debugging)
+# ros2 launch turtlebot3_bringup robot.launch.py start_slam_with_normalizer:=false
 ```
+
+When launched with the default arguments, `robot.launch.py` now also starts SLAM Toolbox with the laser scan normalizer using the same configuration as `./scripts/start_slam_with_normalizer.sh`. You only need to run `./scripts/start_slam_with_normalizer.sh` manually if you launch `robot.launch.py` with `start_slam_with_normalizer:=false` and want to start SLAM from the central PC for debugging or custom workflows.
 
 **Expected output (if working correctly):**
 
@@ -376,11 +383,16 @@ ros2 topic echo /scan --once  # Should show laser scan data
 
 ---
 
-### Terminal 2: SLAM Toolbox
+### Terminal 2: SLAM Toolbox (manual / optional)
 
 **Purpose:** Creates the map as the robot explores using SLAM (Simultaneous Localization and Mapping).
 
-**Commands:**
+In the **default** configuration, SLAM Toolbox and the laser scan normalizer are started automatically as part of `ros2 launch turtlebot3_bringup robot.launch.py` (see [Terminal 1](#terminal-1-ssh-connection-and-robot-launch)). You only need this terminal if you:
+
+- Launch `robot.launch.py` with `start_slam_with_normalizer:=false`, or
+- Want to run / debug the SLAM + normalizer pipeline manually from the central PC.
+
+**Commands (manual SLAM start from central PC):**
 
 ```bash
 # Set environment for your robot (if not already set in this terminal)
@@ -632,34 +644,33 @@ In the default setup above, Navigation2 runs on the **central PC** (Terminal 3) 
 
 This mode is useful when the central PC is managing multiple robots or when you want each robot to handle its own local planning while the central PC focuses on mapping and high-level coordination.
 
-#### 5-terminal layout (Nav2 on robot, SLAM + RViz + Explorer on central)
+#### 4-terminal layout (Nav2 on robot, SLAM + RViz + Explorer on central)
 
-- **Terminal 1 – Robot SBC: bringup**
+- **Terminal 1 – Robot SBC: bringup + SLAM with normalizer**
 
   ```bash
-  # On the robot (e.g., Blinky SBC)
+  # On the robot (e.g., Pinky SBC)
   source /opt/ros/humble/setup.bash
+  export ROS_DOMAIN_ID=31          # Use the robot's domain
   export TURTLEBOT3_MODEL=burger
+
+  # Default: bringup + SLAM + laser scan normalizer
   ros2 launch turtlebot3_bringup robot.launch.py
+
+  # Optional: disable automatic SLAM + normalizer if you want to run it manually
+  # ros2 launch turtlebot3_bringup robot.launch.py start_slam_with_normalizer:=false
   ```
 
-- **Terminal 2 – Central PC: SLAM (with laser scan normalizer)**
+  With the default arguments, `robot.launch.py` starts the hardware bringup and the SLAM + laser scan normalizer pipeline, using the same configuration as `./scripts/start_slam_with_normalizer.sh`.
 
-  ```bash
-  # On central PC
-  cd ~/turtlebot3_ws
-  source scripts/set_robot_env.sh blinky   # or pinky/inky/clyde; sets ROS_DOMAIN_ID and ROBOT_SSH
-
-  ./scripts/start_slam_with_normalizer.sh
-  ```
-
-  This starts the laser scan normalizer and SLAM Toolbox on the central PC but uses `/scan` data from the robot to build the `/map` topic.
-
-- **Terminal 3 – Robot SBC: Navigation2**
+- **Terminal 2 – Robot SBC: Navigation2**
 
   ```bash
   # On the robot, in a second terminal
+  cd ~/turtlebot3_ws
   source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  export ROS_DOMAIN_ID=31          # Same domain as central PC for this robot
   export TURTLEBOT3_MODEL=burger
 
   ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
@@ -667,24 +678,28 @@ This mode is useful when the central PC is managing multiple robots or when you 
 
   This runs the full Nav2 stack (planner, controller, BT navigator, costmaps) **on the robot**, using the live `/map` from SLAM Toolbox. Nav2 publishes `/cmd_vel` locally on the SBC.
 
-- **Terminal 4 – Central PC: RViz**
+- **Terminal 3 – Central PC: RViz**
 
   ```bash
   # On central PC
   cd ~/turtlebot3_ws
-  source scripts/set_robot_env.sh blinky
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  source scripts/set_robot_env.sh pinky   # ensure ROS_DOMAIN_ID matches the robot
 
   rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
   ```
 
   RViz on the central PC visualizes the `/map` from SLAM, the robot's TF tree, and Nav2's costmaps and paths coming from the Nav2 instance on the robot.
 
-- **Terminal 5 – Central PC: Explorer**
+- **Terminal 4 – Central PC: Explorer**
 
   ```bash
   # On central PC
   cd ~/turtlebot3_ws
-  source scripts/set_robot_env.sh blinky
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+  source scripts/set_robot_env.sh pinky   # same ROS_DOMAIN_ID as above
 
   ./scripts/start_explorer_simple.sh
   ```

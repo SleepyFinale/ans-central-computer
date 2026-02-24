@@ -6,9 +6,9 @@ name: blinky_bridge
 from_domain: 30
 to_domain: 50
 topics:
-  scan:
+  scan_normalized:
     type: sensor_msgs/msg/LaserScan
-    remap: blinky/scan
+    remap: blinky/scan_normalized
   odom:
     type: nav_msgs/msg/Odometry
     remap: blinky/odom
@@ -21,3 +21,12 @@ topics:
   tf_static:
     type: tf2_msgs/msg/TFMessage
     remap: blinky/tf_static
+  map:
+    type: nav_msgs/msg/OccupancyGrid
+    remap: blinky/map
+  map_metadata:
+    type: nav_msgs/msg/MapMetaData
+    remap: blinky/map_metadata
+  map_updates:
+    type: map_msgs/msg/OccupancyGridUpdate
+    remap: blinky/map_updates

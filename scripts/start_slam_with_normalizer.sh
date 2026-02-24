@@ -3,8 +3,8 @@
 
 # Set ROS_DOMAIN_ID if not already set
 if [ -z "$ROS_DOMAIN_ID" ]; then
-    export ROS_DOMAIN_ID=30
-    echo "Note: ROS_DOMAIN_ID not set, using default: 30"
+    export ROS_DOMAIN_ID=50
+    echo "Note: ROS_DOMAIN_ID not set, using default: 50"
 fi
 
 cd ~/turtlebot3_ws

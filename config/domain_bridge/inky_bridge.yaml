@@ -6,9 +6,9 @@ name: inky_bridge
 from_domain: 32
 to_domain: 50
 topics:
-  scan:
+  scan_normalized:
     type: sensor_msgs/msg/LaserScan
-    remap: inky/scan
+    remap: inky/scan_normalized
   odom:
     type: nav_msgs/msg/Odometry
     remap: inky/odom
@@ -21,3 +21,12 @@ topics:
   tf_static:
     type: tf2_msgs/msg/TFMessage
     remap: inky/tf_static
+  map:
+    type: nav_msgs/msg/OccupancyGrid
+    remap: inky/map
+  map_metadata:
+    type: nav_msgs/msg/MapMetaData
+    remap: inky/map_metadata
+  map_updates:
+    type: map_msgs/msg/OccupancyGridUpdate
+    remap: inky/map_updates
