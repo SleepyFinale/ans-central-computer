@@ -649,9 +649,8 @@ This mode is useful when the central PC is managing multiple robots or when you 
 - **Terminal 1 – Robot SBC: bringup + SLAM with normalizer**
 
   ```bash
-  # On the robot (e.g., Pinky SBC)
+  # On the robot (e.g., Blinky SBC)
   source /opt/ros/humble/setup.bash
-  export ROS_DOMAIN_ID=31          # Use the robot's domain
   export TURTLEBOT3_MODEL=burger
 
   # Default: bringup + SLAM + laser scan normalizer
@@ -667,10 +666,7 @@ This mode is useful when the central PC is managing multiple robots or when you 
 
   ```bash
   # On the robot, in a second terminal
-  cd ~/turtlebot3_ws
   source /opt/ros/humble/setup.bash
-  source install/setup.bash
-  export ROS_DOMAIN_ID=31          # Same domain as central PC for this robot
   export TURTLEBOT3_MODEL=burger
 
   ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
@@ -683,9 +679,7 @@ This mode is useful when the central PC is managing multiple robots or when you 
   ```bash
   # On central PC
   cd ~/turtlebot3_ws
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
-  source scripts/set_robot_env.sh pinky   # ensure ROS_DOMAIN_ID matches the robot
+  source scripts/set_robot_env.sh blinky
 
   rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
   ```
@@ -697,9 +691,7 @@ This mode is useful when the central PC is managing multiple robots or when you 
   ```bash
   # On central PC
   cd ~/turtlebot3_ws
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
-  source scripts/set_robot_env.sh pinky   # same ROS_DOMAIN_ID as above
+  source scripts/set_robot_env.sh blinky
 
   ./scripts/start_explorer_simple.sh
   ```
