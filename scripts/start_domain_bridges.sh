@@ -1,37 +1,51 @@
 #!/bin/bash
-# Start domain bridges for Blinky and Pinky (multi-robot SLAM)
-# Bridges: Blinky (domain 30), Pinky (domain 31), Inky (domain 32), Clyde (domain 33) -> domain 50
-# Aggregation domain: 50. Run SLAM/map_merge with ROS_DOMAIN_ID=50
+# Start domain bridges for multi-robot operation.
+#
+# Bridges robot data TO the central computer (maps, TF)
+# and exploration waypoints FROM the central computer TO robots (goal_pose).
+#
+# Robot domains:  Blinky=30  Pinky=31
+# Central domain: 50
 
-cd ~/turtlebot3_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
+CONFIG_DIR="${WORKSPACE_DIR}/config/domain_bridge"
 
-CONFIG_DIR="$(pwd)/config/domain_bridge"
-
-if [ ! -f "${CONFIG_DIR}/blinky_bridge.yaml" ] || [ ! -f "${CONFIG_DIR}/pinky_bridge.yaml" ]; then
-    echo "ERROR: Bridge configs not found in ${CONFIG_DIR}"
-    exit 1
-fi
+source /opt/ros/humble/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash 2>/dev/null
 
 echo "=========================================="
-echo "Starting Domain Bridges                   "
+echo "Starting Domain Bridges"
 echo "=========================================="
 echo ""
-echo "  Blinky: domain 30 -> 50  (blinky/scan, blinky/odom, ...)"
-echo "  Pinky:  domain 31 -> 50  (pinky/scan, pinky/odom, ...)"
-echo "  Inky:   domain 32 -> 50  (inky/scan, inky/odom, ...)"
-echo "  Clyde:  domain 33 -> 50  (clyde/scan, clyde/odom, ...)"
+echo "  Robot → Central:"
+echo "    Blinky (domain 30 → 50): map, TF"
+echo "    Pinky  (domain 31 → 50): map, TF"
 echo ""
-echo "Aggregation domain: 50. Set ROS_DOMAIN_ID=50 for SLAM/Nav2."
-echo "Press Ctrl+C to stop both bridges."
+echo "  Central → Robot (waypoints):"
+echo "    Blinky (domain 50 → 30): goal_pose"
+echo "    Pinky  (domain 50 → 31): goal_pose"
 echo ""
+echo "Press Ctrl+C to stop all bridges."
+echo ""
+
+PIDS=()
 
 ros2 run domain_bridge domain_bridge "${CONFIG_DIR}/blinky_bridge.yaml" &
-BLINKY_PID=$!
-
+PIDS+=($!)
 ros2 run domain_bridge domain_bridge "${CONFIG_DIR}/pinky_bridge.yaml" &
-PINKY_PID=$!
+PIDS+=($!)
+ros2 run domain_bridge domain_bridge "${CONFIG_DIR}/blinky_goals_bridge.yaml" &
+PIDS+=($!)
+ros2 run domain_bridge domain_bridge "${CONFIG_DIR}/pinky_goals_bridge.yaml" &
+PIDS+=($!)
 
-trap "kill $BLINKY_PID $PINKY_PID 2>/dev/null; exit" SIGINT SIGTERM
+cleanup() {
+    echo ""
+    echo "Stopping bridges..."
+    for pid in "${PIDS[@]}"; do
+        kill "$pid" 2>/dev/null
+    done
+    wait
+}
+trap cleanup SIGINT SIGTERM
 wait
