@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import ndimage
 
 import rclpy
 from rclpy.node import Node
@@ -75,6 +74,42 @@ UNKNOWN = -1
 OCCUPIED_THRESH = 50  # cells >= this are considered occupied
 
 
+def _label_frontiers_8c(mask: np.ndarray):
+    """Connected-component labelling for frontier regions (8-connectivity).
+
+    Returns (labelled_array, n_labels) similar to scipy.ndimage.label.
+    """
+    h, w = mask.shape
+    labels = np.zeros_like(mask, dtype=np.int32)
+    current = 0
+
+    neighbours = [
+        (-1, -1), (-1, 0), (-1, 1),
+        (0, -1),           (0, 1),
+        (1, -1),  (1, 0),  (1, 1),
+    ]
+
+    for y in range(h):
+        for x in range(w):
+            if not mask[y, x] or labels[y, x] != 0:
+                continue
+
+            current += 1
+            labels[y, x] = current
+            q = deque([(y, x)])
+
+            while q:
+                cy, cx = q.popleft()
+                for dy, dx in neighbours:
+                    ny, nx = cy + dy, cx + dx
+                    if 0 <= ny < h and 0 <= nx < w:
+                        if mask[ny, nx] and labels[ny, nx] == 0:
+                            labels[ny, nx] = current
+                            q.append((ny, nx))
+
+    return labels, current
+
+
 def detect_frontiers(
     map_data: List[int],
     width: int,
@@ -108,9 +143,8 @@ def detect_frontiers(
     if not np.any(frontier_mask):
         return []
 
-    # cluster with 8-connectivity
-    structure = ndimage.generate_binary_structure(2, 2)  # 8-connected
-    labelled, n_labels = ndimage.label(frontier_mask, structure=structure)
+    # cluster with 8-connectivity (pure NumPy implementation)
+    labelled, n_labels = _label_frontiers_8c(frontier_mask)
 
     min_cells = max(1, int(min_size_m / resolution))
     frontiers: List[Frontier] = []

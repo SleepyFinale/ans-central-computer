@@ -903,7 +903,7 @@ ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
 **Full multi-robot startup sequence:**
 
 | Step | Terminal | Command |
-|------|----------|---------|
+| ---- | -------- | ------- |
 | 1 | Robot bringup | SSH to each robot, run `robot.launch.py` |
 | 2 | Domain bridges | `./scripts/start_domain_bridges.sh` |
 | 3 | Multi-robot SLAM | `./scripts/start_multirobot_slam.sh` |
