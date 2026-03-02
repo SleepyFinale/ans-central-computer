@@ -98,29 +98,27 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   good_indices = cv::detail::leaveBiggestComponent(
       image_features, pairwise_matches, static_cast<float>(confidence));
 
-  // no match found. try set first non-empty grid as reference frame. we try to
-  // avoid setting empty grid as reference frame, in case some maps never
-  // arrive. If all is empty just set null transforms.
-  if (good_indices.size() == 1) {
+  // no match found between any pair of maps.
+  if (good_indices.size() <= 1) {
     transforms_.clear();
     transforms_.resize(images_.size());
+    matched_.assign(images_.size(), false);
 
-    // Making some tests to see if it is better to just return false if no match is found
-    // and not clear the last good transforms found
-    // if (images_.size() != transforms_.size()) {
-    //   transforms_.clear();
-    //   transforms_.resize(images_.size());
-    // }
-    // return false;
-
+    // set identity for the first non-empty grid (reference frame)
     for (size_t i = 0; i < images_.size(); ++i) {
       if (!images_[i].empty()) {
-        // set identity
         transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
         break;
       }
     }
-    // RCLCPP_INFO(logger, "[estimateTransforms] No match found between maps, setting first non-empty grid as reference frame");
+
+    // place remaining grids at non-overlapping positions
+    assignFallbackTransforms();
+
+    RCLCPP_DEBUG(logger,
+                 "[estimateTransforms] No overlap detected between %zu maps; "
+                 "all maps placed independently",
+                 images_.size());
     return true;
   }
 
@@ -162,11 +160,25 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
 
   transforms_.clear();
   transforms_.resize(images_.size());
+  matched_.assign(images_.size(), false);
+
   size_t i = 0;
   for (auto& j : good_indices) {
     // we want to work with transforms as doubles
     transforms[i].R.convertTo(transforms_[static_cast<size_t>(j)], CV_64F);
+    matched_[static_cast<size_t>(j)] = true;
     ++i;
+  }
+
+  // place any unmatched grids at non-overlapping fallback positions
+  assignFallbackTransforms();
+
+  size_t n_matched = matchedCount();
+  if (n_matched < images_.size()) {
+    RCLCPP_INFO(logger,
+                "[estimateTransforms] %zu of %zu maps matched by features; "
+                "%zu placed independently",
+                n_matched, images_.size(), images_.size() - n_matched);
   }
 
   return true;
@@ -242,6 +254,44 @@ nav_msgs::msg::OccupancyGrid::SharedPtr MergingPipeline::composeGrids(rclcpp::Lo
   result->info.origin.orientation.w = 1.0;
 
   return result;
+}
+
+size_t MergingPipeline::matchedCount() const
+{
+  size_t count = 0;
+  for (bool m : matched_) {
+    if (m) ++count;
+  }
+  return count;
+}
+
+void MergingPipeline::assignFallbackTransforms()
+{
+  // Gap between independent maps in pixels.  At 0.05 m/pixel this is 5 m,
+  // large enough to keep maps visually separate in the merged grid.
+  constexpr int GAP_PIXELS = 100;
+
+  // find the rightmost edge of any grid that already has a transform
+  double max_right = 0.0;
+  for (size_t i = 0; i < transforms_.size(); ++i) {
+    if (!transforms_[i].empty() && !images_[i].empty()) {
+      double tx = transforms_[i].at<double>(0, 2);
+      double right = tx + static_cast<double>(images_[i].cols);
+      if (right > max_right) {
+        max_right = right;
+      }
+    }
+  }
+
+  // place every grid that still has an empty transform to the right
+  double offset_x = max_right + GAP_PIXELS;
+  for (size_t i = 0; i < transforms_.size(); ++i) {
+    if (transforms_[i].empty() && !images_[i].empty()) {
+      transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+      transforms_[i].at<double>(0, 2) = offset_x;
+      offset_x += static_cast<double>(images_[i].cols) + GAP_PIXELS;
+    }
+  }
 }
 
 std::vector<geometry_msgs::msg::Transform> MergingPipeline::getTransforms() const

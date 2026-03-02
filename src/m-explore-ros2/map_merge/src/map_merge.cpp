@@ -483,6 +483,26 @@ void MapMerge::poseEstimation()
   //                              confidence_threshold_);
   if (!success) {
     RCLCPP_INFO(logger_, "No grid poses estimated");
+  } else {
+    // log merge-state transitions
+    size_t matched = pipeline_.matchedCount();
+    size_t total = grids.size();
+    if (matched != last_matched_count_ || total != last_total_grids_) {
+      if (matched == total && total > 1) {
+        RCLCPP_INFO(logger_,
+                    "All %zu robot maps merged via feature matching", total);
+      } else if (matched > 1) {
+        RCLCPP_INFO(logger_,
+                    "%zu of %zu robot maps merged; %zu placed independently",
+                    matched, total, total - matched);
+      } else if (total > 1) {
+        RCLCPP_INFO(logger_,
+                    "%zu robot maps placed independently (no overlap detected yet)",
+                    total);
+      }
+      last_matched_count_ = matched;
+      last_total_grids_ = total;
+    }
   }
 }
 

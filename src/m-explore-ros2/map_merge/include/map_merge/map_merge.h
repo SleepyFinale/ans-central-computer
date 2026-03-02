@@ -101,6 +101,10 @@ private:
 
   rclcpp::Logger logger_;
 
+  // merge-state tracking (for logging transitions)
+  size_t last_matched_count_ = 0;
+  size_t last_total_grids_ = 0;
+
   // timers
   rclcpp::TimerBase::SharedPtr map_merging_timer_;
   rclcpp::TimerBase::SharedPtr topic_subscribing_timer_;

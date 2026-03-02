@@ -865,8 +865,8 @@ The legacy `tf_map_odom_fallback.py` (which published identity `map` → `blinky
 
 **Practical tips** for unknown poses:
 
-- Estimation works best if robots start **close together** (e.g. < 3 m) or explore into each other's territory, so the maps overlap enough for AKAZE feature matching.
-- Until maps overlap, only the first discovered robot gets a valid TF (identity). Other robots' TF will appear once estimation succeeds.
+- **No overlap needed to start.** All robot maps appear in the global map immediately. Maps without feature overlap are placed side-by-side; each robot gets valid TF and can navigate independently.
+- When robots explore into each other's territory, AKAZE feature matching detects the overlap and the maps are merged at the correct relative position automatically.
 - The `estimation_confidence` parameter (default 0.6) controls the minimum match quality. Lower = more permissive but noisier.
 - To disable TF publishing (e.g. for debugging), set `publish_tf: false` in the map_merge params.
 

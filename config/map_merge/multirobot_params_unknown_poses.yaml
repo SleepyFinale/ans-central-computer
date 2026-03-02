@@ -1,10 +1,16 @@
 # Map merge params for Blinky + Pinky with UNKNOWN initial poses
-# Pose estimation uses feature matching; works best if robots start close (< 3 m).
 # Expects /blinky/map and /pinky/map from SLAM instances.
 #
-# map_merge now publishes TF (world_frame -> <robot>/map) automatically when
-# publish_tf is true (default). This completes the TF tree for Nav2/Explorer:
-#   map -> blinky/map -> blinky/odom -> blinky/base_footprint
+# How it works:
+#   - Pose estimation uses AKAZE feature matching to detect map overlap.
+#   - When maps overlap, they are merged at the correct relative position.
+#   - When maps do NOT overlap, they are placed side-by-side in the global
+#     map so all robots remain visible and navigable.
+#   - As robots explore and their maps start to overlap, the merge
+#     transitions automatically from independent to feature-matched.
+#
+# TF: map_merge publishes world_frame -> <robot>/map for every robot.
+# Full chain: map -> blinky/map -> blinky/odom -> blinky/base_footprint
 # No tf_map_odom_fallback needed.
 
 map_merge:

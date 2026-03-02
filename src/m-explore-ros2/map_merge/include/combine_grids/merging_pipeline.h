@@ -69,11 +69,29 @@ public:
   template <typename InputIt>
   bool setTransforms(InputIt transforms_begin, InputIt transforms_end);
 
+  /**
+   * @brief Per-grid flag: true if the transform was computed by feature
+   *        matching, false if it is a fallback (independent placement).
+   * @details Valid after estimateTransforms().  Empty before first call.
+   */
+  const std::vector<bool>& getMatchedFlags() const { return matched_; }
+
+  /** Number of grids whose transforms come from feature matching. */
+  size_t matchedCount() const;
+
 private:
   std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> grids_;
   std::vector<cv::Mat> images_;
   std::vector<cv::Mat> transforms_;
+  std::vector<bool> matched_;
   double max_confidence_achieved_ = 0.0;
+
+  /**
+   * @brief Assign fallback transforms for grids that have no feature-matched
+   *        transform, placing them at non-overlapping positions to the right
+   *        of any already-transformed grids.
+   */
+  void assignFallbackTransforms();
 };
 
 template <typename InputIt>
