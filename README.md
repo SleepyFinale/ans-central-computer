@@ -870,6 +870,44 @@ The legacy `tf_map_odom_fallback.py` (which published identity `map` → `blinky
 - The `estimation_confidence` parameter (default 0.6) controls the minimum match quality. Lower = more permissive but noisier.
 - To disable TF publishing (e.g. for debugging), set `publish_tf: false` in the map_merge params.
 
+### Multi-Robot Explorer
+
+Once multi-robot SLAM and Nav2 are running, start the centralized frontier explorer:
+
+```bash
+ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
+```
+
+**What it does:**
+
+1. Subscribes to the merged global map (from `map_merge`).
+2. Detects frontier regions (boundaries between explored and unexplored space).
+3. Assigns one frontier to each idle robot, optimising for:
+   - **Proximity:** robots go to nearby frontiers (less travel time).
+   - **Information gain:** larger frontiers are preferred (more area to map).
+   - **Overlap penalty:** frontiers near another robot’s active goal are penalised (less redundant coverage).
+4. Sends `NavigateToPose` goals to each robot’s Nav2 instance via `/<robot>/navigate_to_pose`.
+5. Re-plans when a goal is reached, fails, or times out.
+
+**Coordinate frame handling:**
+
+- Frontiers are detected in the `map` (world) frame on the merged grid.
+- Goals are sent in the `map` frame. Nav2 uses TF (`map` → `<robot>/map` → `<robot>/odom` → `<robot>/base_footprint`) to transform goals into each robot’s local frame.
+- When maps are independent (no overlap yet), each robot sees frontiers on its own portion of the merged map and explores independently.
+- When overlap is detected and maps merge, the explorer automatically re-detects frontiers on the unified map and coordinates both robots.
+
+**Configuration:** `config/multi_robot_explorer.yaml` (robot names, cost weights, planning frequency, etc.).
+
+**Full multi-robot startup sequence:**
+
+| Step | Terminal | Command |
+|------|----------|---------|
+| 1 | Robot bringup | SSH to each robot, run `robot.launch.py` |
+| 2 | Domain bridges | `./scripts/start_domain_bridges.sh` |
+| 3 | Multi-robot SLAM | `./scripts/start_multirobot_slam.sh` |
+| 4 | Nav2 (per robot) | `./scripts/start_multirobot_nav2.sh` |
+| 5 | Explorer | `./scripts/start_multirobot_explorer.sh` |
+
 ### Verification
 
 ```bash

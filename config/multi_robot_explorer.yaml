@@ -1,0 +1,39 @@
+# Multi-robot frontier explorer parameters
+# Runs on the central computer alongside map_merge and multi-robot SLAM.
+# Detects frontiers on the merged global map and assigns waypoints to
+# each robot's Nav2 instance.
+
+multi_robot_explorer:
+  ros__parameters:
+    # Robot names (must match Nav2 namespaces and TF frame prefixes)
+    robot_names: ['blinky', 'pinky']
+
+    # Merged map topic (from map_merge)
+    map_topic: map
+
+    # TF world frame (must match map_merge world_frame)
+    world_frame: map
+
+    # How often to replan (Hz). Lower = less CPU, higher = more responsive.
+    explore_frequency: 0.33
+
+    # Minimum frontier size (metres) to consider. Filters tiny frontiers
+    # that aren't worth navigating to.
+    min_frontier_size: 0.15
+
+    # Cost function weights (same semantics as explore_lite):
+    #   cost = potential_scale * distance - gain_scale * frontier_size
+    # Higher potential_scale  = prefer closer frontiers
+    # Higher gain_scale       = prefer larger frontiers
+    potential_scale: 3.0
+    gain_scale: 1.0
+
+    # Seconds before a goal is considered stale and cancelled.
+    progress_timeout: 30.0
+
+    # Distance (m) at which a frontier near another robot's active goal
+    # gets a penalty (discourages sending robots to the same area).
+    nearby_penalty_dist: 2.0
+
+    # Publish frontier markers on /explore/frontiers for RViz
+    visualize: true
