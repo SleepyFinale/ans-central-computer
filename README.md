@@ -853,7 +853,7 @@ If you want the robots to start in **unknown** relative positions (no manual ini
 
 **TF support:** The `map_merge` node now publishes TF transforms (`world_frame` → `<robot>/map`) automatically when `publish_tf: true` (the default in both config files). This completes the TF tree for Nav2 and Explorer:
 
-```
+```bash
 map → blinky/map → blinky/odom → blinky/base_footprint
 map → pinky/map → pinky/odom → pinky/base_footprint
 ```
