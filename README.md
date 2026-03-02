@@ -709,6 +709,8 @@ In this configuration, you get the same autonomous exploration behavior as the d
 
 This section describes how to run **multiple robots** (e.g., Blinky and Pinky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot uses a different `ROS_DOMAIN_ID`, so the setup uses **domain bridges** to forward topics into a common aggregation domain (50).
 
+For a “boxes in boxes” system diagram (functions → programs → ROS2 topics/TF/actions), see `docs/architecture.md`.
+
 ### Overview
 
 - **Blinky** (domain 30) and **Pinky** (domain 31) run robot bringup on their own domains
