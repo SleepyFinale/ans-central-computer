@@ -49,6 +49,7 @@
 #include <map_msgs/msg/occupancy_grid_update.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include <boost/thread.hpp>
 
@@ -82,11 +83,13 @@ private:
   std::string robot_namespace_;
   std::string world_frame_;
   bool have_initial_poses_;
+  bool publish_tf_;
   /** Origin margin in meters; adds padding so map bounds extend beyond (0,0) to avoid Nav2 "sensor out of map bounds" (e.g. 0.05). */
   double origin_margin_;
 
   // publishing
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr merged_map_publisher_;
+  std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
   // maps robots namespaces to maps. does not own
   std::unordered_map<std::string, MapSubscription*> robots_;
   // owns maps -- iterator safe
@@ -110,6 +113,19 @@ private:
 
   /** Pad merged grid by origin_margin_ so map bounds include negative coords (fixes Nav2 sensor origin warning). */
   void applyOriginMargin(nav_msgs::msg::OccupancyGrid::SharedPtr& grid);
+
+  /**
+   * @brief Publish TF from world_frame to each robot's map frame.
+   * @details For known poses, publishes the user-provided init_pose directly.
+   *          For estimated poses, converts pixel-space pipeline transforms to
+   *          metric TF using grid origins and resolution.
+   * @param merged_origin_x  X origin of the merged grid (pre-margin), in meters
+   * @param merged_origin_y  Y origin of the merged grid (pre-margin), in meters
+   * @param resolution       Resolution of the merged grid (meters/pixel)
+   */
+  void publishTransforms(double merged_origin_x, double merged_origin_y,
+                         float resolution);
+
   void fullMapUpdate(const nav_msgs::msg::OccupancyGrid::SharedPtr msg,
                      MapSubscription& map);
   void partialMapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr msg,

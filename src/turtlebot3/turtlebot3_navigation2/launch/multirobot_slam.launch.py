@@ -10,7 +10,8 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -31,6 +32,7 @@ def generate_launch_description():
         'scripts', 'normalize_laser_scan.py')
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
+    use_tf_fallback = LaunchConfiguration('use_tf_fallback', default='false')
 
     # Blinky normalizer: /blinky/scan -> /blinky/scan_normalized, frame_id -> blinky/base_scan
     blinky_normalizer = ExecuteProcess(
@@ -56,10 +58,14 @@ def generate_launch_description():
         output='screen',
     )
 
-    # TF fallback: map -> blinky/odom, map -> pinky/odom (identity) so full tree connects
+    # Legacy TF fallback: map -> blinky/odom, map -> pinky/odom (identity).
+    # Only launched when use_tf_fallback:=true. Normally map_merge publishes
+    # the correct TF (map -> <robot>/map) via its publish_tf parameter, so
+    # the fallback is no longer needed. Keep it as an escape hatch.
     tf_map_odom_fallback = ExecuteProcess(
         cmd=['python3', tf_fallback_script],
         output='screen',
+        condition=IfCondition(use_tf_fallback),
     )
 
     # Blinky SLAM
@@ -94,7 +100,7 @@ def generate_launch_description():
         ],
     )
 
-    # Map merge
+    # Map merge (publishes TF by default via publish_tf:=true)
     map_merge = Node(
         package='multirobot_map_merge',
         executable='map_merge',
@@ -112,6 +118,11 @@ def generate_launch_description():
             'map_merge_params_file',
             default_value=default_map_merge_params,
             description='Path to map_merge params YAML (e.g. multirobot_params_unknown_poses.yaml for unknown poses)'),
+        DeclareLaunchArgument(
+            'use_tf_fallback',
+            default_value='false',
+            description='Launch legacy tf_map_odom_fallback (identity map->odom). '
+                        'Not needed when map_merge publish_tf is enabled (default).'),
         blinky_normalizer,
         pinky_normalizer,
         tf_relay,

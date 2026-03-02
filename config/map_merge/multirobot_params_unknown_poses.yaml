@@ -2,9 +2,10 @@
 # Pose estimation uses feature matching; works best if robots start close (< 3 m).
 # Expects /blinky/map and /pinky/map from SLAM instances.
 #
-# Note: Nav2/Explorer need map->robot/map TF from merge; map_merge does not
-# publish that yet. Use this for merged /map only until TF support is added.
-# See README "Unknown initial poses (experimental)".
+# map_merge now publishes TF (world_frame -> <robot>/map) automatically when
+# publish_tf is true (default). This completes the TF tree for Nav2/Explorer:
+#   map -> blinky/map -> blinky/odom -> blinky/base_footprint
+# No tf_map_odom_fallback needed.
 
 map_merge:
   ros__parameters:
@@ -19,3 +20,5 @@ map_merge:
     world_frame: map
     known_init_poses: false
     origin_margin: 0.05
+    # Publish TF: world_frame -> <robot>/map (converts estimated pixel transforms to metric TF)
+    publish_tf: true

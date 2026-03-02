@@ -67,6 +67,7 @@ logger_(this->get_logger())
   if (!this->has_parameter("merged_map_topic")) this->declare_parameter<std::string>("merged_map_topic", "map");
   if (!this->has_parameter("world_frame")) this->declare_parameter<std::string>("world_frame", "world");
   if (!this->has_parameter("origin_margin")) this->declare_parameter<double>("origin_margin", 0.05);
+  if (!this->has_parameter("publish_tf")) this->declare_parameter<bool>("publish_tf", true);
 
   this->get_parameter("merging_rate", merging_rate_);
   this->get_parameter("discovery_rate", discovery_rate_);
@@ -79,6 +80,7 @@ logger_(this->get_logger())
   this->get_parameter("merged_map_topic", merged_map_topic);
   this->get_parameter("world_frame", world_frame_);
   this->get_parameter("origin_margin", origin_margin_);
+  this->get_parameter("publish_tf", publish_tf_);
 
 
   /* publishing */
@@ -86,6 +88,12 @@ logger_(this->get_logger())
   merged_map_publisher_ =
       this->create_publisher<nav_msgs::msg::OccupancyGrid>(merged_map_topic,
       rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+
+  if (publish_tf_) {
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+    RCLCPP_INFO(logger_, "TF broadcasting enabled: %s -> <robot>/map",
+                world_frame_.c_str());
+  }
 
   // Timers
   map_merging_timer_ = this->create_wall_timer(
@@ -237,6 +245,147 @@ void MapMerge::applyOriginMargin(nav_msgs::msg::OccupancyGrid::SharedPtr& grid)
 }
 
 /*
+ * publishTransforms()
+ *
+ * Broadcasts TF: world_frame -> <robot>/map for each discovered robot.
+ *
+ * For known initial poses the user-provided init_pose is published directly.
+ *
+ * For estimated (unknown) poses the pipeline transforms are in pixel space.
+ * A point P_robot in robot i's map frame relates to pixel coords by:
+ *   px = (P_robot.x - origin_i.x) / res_i
+ *   py = (P_robot.y - origin_i.y) / res_i
+ * The pipeline transform T maps robot pixels to merged pixels:
+ *   [mx, my]^T = R * [px, py]^T + [tx, ty]^T
+ * And merged pixels relate to the world frame by:
+ *   P_world.x = mx * res_m + origin_m.x
+ *   P_world.y = my * res_m + origin_m.y
+ *
+ * Combining (assuming equal resolution r):
+ *   P_world = R * (P_robot - O_i) + T*r + O_m
+ *           = R * P_robot + (-R * O_i + T*r + O_m)
+ *
+ * So the TF translation from world_frame to robot/map is:
+ *   t = -R * O_i + T_pixels * res + O_merged
+ * And the rotation is the same theta from the affine matrix.
+ */
+void MapMerge::publishTransforms(double merged_origin_x,
+                                 double merged_origin_y,
+                                 float resolution)
+{
+  auto now = this->now();
+  std::vector<geometry_msgs::msg::TransformStamped> tf_msgs;
+
+  if (have_initial_poses_) {
+    // Known poses: publish the user-provided init_pose directly as TF.
+    for (auto& subscription : subscriptions_) {
+      std::string name;
+      for (auto& [rname, ptr] : robots_) {
+        if (ptr == &subscription) {
+          name = rname;
+          break;
+        }
+      }
+      if (name.empty()) continue;
+
+      geometry_msgs::msg::TransformStamped tf_msg;
+      tf_msg.header.stamp = now;
+      tf_msg.header.frame_id = world_frame_;
+      tf_msg.child_frame_id = name + "/map";
+      tf_msg.transform = subscription.initial_pose;
+      tf_msgs.push_back(tf_msg);
+    }
+  } else {
+    // Estimated poses: convert pixel-space transforms to metric TF.
+    std::vector<geometry_msgs::msg::Transform> transforms;
+    {
+      std::lock_guard<std::mutex> lock(pipeline_mutex_);
+      transforms = pipeline_.getTransforms();
+    }
+
+    // Build parallel vectors of robot names and grid pointers in the same
+    // iteration order as subscriptions_ (which matches pipeline ordering).
+    std::vector<std::string> robot_names;
+    std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> grids;
+    robot_names.reserve(subscriptions_size_);
+    grids.reserve(subscriptions_size_);
+    for (auto& subscription : subscriptions_) {
+      std::string name;
+      for (auto& [rname, ptr] : robots_) {
+        if (ptr == &subscription) {
+          name = rname;
+          break;
+        }
+      }
+      robot_names.push_back(name);
+      grids.push_back(subscription.readonly_map);
+    }
+
+    if (transforms.size() != robot_names.size()) {
+      return;
+    }
+
+    const double res = static_cast<double>(resolution);
+
+    for (size_t i = 0; i < transforms.size(); ++i) {
+      const auto& t = transforms[i];
+      if (robot_names[i].empty() || !grids[i]) {
+        continue;
+      }
+
+      // Skip invalid transforms (zero quaternion = no estimate yet).
+      double qn = t.rotation.x * t.rotation.x + t.rotation.y * t.rotation.y +
+                  t.rotation.z * t.rotation.z + t.rotation.w * t.rotation.w;
+      if (qn < 1e-10) {
+        continue;
+      }
+
+      double robot_origin_x = grids[i]->info.origin.position.x;
+      double robot_origin_y = grids[i]->info.origin.position.y;
+
+      // 2D rotation angle from the quaternion (only z and w are non-zero).
+      double theta = 2.0 * std::atan2(t.rotation.z, t.rotation.w);
+      double cos_t = std::cos(theta);
+      double sin_t = std::sin(theta);
+
+      // Pipeline translations are in pixels; convert to meters.
+      double tx_m = t.translation.x * res;
+      double ty_m = t.translation.y * res;
+
+      // t_world = -R * O_robot + T_pixels*res + O_merged
+      double tf_x = -cos_t * robot_origin_x + sin_t * robot_origin_y
+                     + tx_m + merged_origin_x;
+      double tf_y = -sin_t * robot_origin_x - cos_t * robot_origin_y
+                     + ty_m + merged_origin_y;
+
+      geometry_msgs::msg::TransformStamped tf_msg;
+      tf_msg.header.stamp = now;
+      tf_msg.header.frame_id = world_frame_;
+      tf_msg.child_frame_id = robot_names[i] + "/map";
+      tf_msg.transform.translation.x = tf_x;
+      tf_msg.transform.translation.y = tf_y;
+      tf_msg.transform.translation.z = 0.0;
+      tf_msg.transform.rotation = t.rotation;
+      tf_msgs.push_back(tf_msg);
+
+      RCLCPP_DEBUG(logger_,
+                   "TF %s -> %s/map: (%.3f, %.3f) theta=%.2f° "
+                   "[pixel T=(%.1f,%.1f) grid_origin=(%.2f,%.2f)]",
+                   world_frame_.c_str(), robot_names[i].c_str(),
+                   tf_x, tf_y, theta * 180.0 / M_PI,
+                   t.translation.x, t.translation.y,
+                   robot_origin_x, robot_origin_y);
+    }
+  }
+
+  if (!tf_msgs.empty()) {
+    tf_broadcaster_->sendTransform(tf_msgs);
+    RCLCPP_INFO_ONCE(logger_, "Publishing TF for %zu robot(s): %s -> <robot>/map",
+                     tf_msgs.size(), world_frame_.c_str());
+  }
+}
+
+/*
  * mapMerging()
  */
 void MapMerge::mapMerging()
@@ -287,10 +436,21 @@ void MapMerge::mapMerging()
   merged_map->header.frame_id = world_frame_;
 
   rcpputils::assert_true(merged_map->info.resolution > 0.f);
+
+  // Capture pre-margin origin for TF computation (margin only adds padding,
+  // it doesn't change the physical relationship between frames).
+  double merged_origin_x = merged_map->info.origin.position.x;
+  double merged_origin_y = merged_map->info.origin.position.y;
+  float merged_resolution = merged_map->info.resolution;
+
   if (origin_margin_ > 0.0) {
     applyOriginMargin(merged_map);
   }
   merged_map_publisher_->publish(*merged_map);
+
+  if (publish_tf_ && tf_broadcaster_) {
+    publishTransforms(merged_origin_x, merged_origin_y, merged_resolution);
+  }
 }
 
 void MapMerge::poseEstimation()

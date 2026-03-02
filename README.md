@@ -851,14 +851,24 @@ If you want the robots to start in **unknown** relative positions (no manual ini
    - Estimation works best if robots start **close together** (e.g. &lt; 3 m) so the maps overlap enough for the algorithm to find correspondences.
    - Give each robot time to build a small map before the merge converges (move slightly if needed).
 
-**Current limitation (TF):** With known poses, the launch uses a static TF fallback that publishes `map` → `blinky/odom` and `map` → `pinky/odom` (identity), which is correct because the merge is aligned with those frames. With **unknown** poses, map_merge estimates the relative positions and publishes the merged `/map`, but it does **not** publish TF (e.g. `map` → `blinky/map`, `map` → `pinky/map`). So the current identity fallback is wrong for unknown poses, and Nav2/Explorer would not see the correct robot positions on the merged map until the TF tree is fixed.
+**TF support:** The `map_merge` node now publishes TF transforms (`world_frame` → `<robot>/map`) automatically when `publish_tf: true` (the default in both config files). This completes the TF tree for Nav2 and Explorer:
 
-**To support unknown poses fully** you would need one of:
+```
+map → blinky/map → blinky/odom → blinky/base_footprint
+map → pinky/map → pinky/odom → pinky/base_footprint
+```
 
-- **Option A:** Extend map_merge (or add a small node) to publish the **estimated transforms** as TF: `map` → `blinky/map` and `map` → `pinky/map` (using the pipeline’s estimated transforms). Then the existing `blinky/map` → `blinky/odom` and `pinky/map` → `pinky/odom` from each SLAM would complete the tree.
-- **Option B:** Use a SLAM/map-merge stack that already publishes TF for the merged frame (e.g. some variants or experimental branches that expose the merge result as a transform).
+- **Known poses:** The user-provided `init_pose_x/y/z/yaw` values are published directly as TF.
+- **Unknown poses:** The pixel-space transforms from feature matching are converted to metric TF using grid origins and resolution.
 
-Until then, use **known initial poses** for reliable Nav2 + Explorer on the merged map.
+The legacy `tf_map_odom_fallback.py` (which published identity `map` → `blinky/odom` etc.) is **no longer launched by default**. If you need it as a fallback, add `use_tf_fallback:=true` to the launch command.
+
+**Practical tips** for unknown poses:
+
+- Estimation works best if robots start **close together** (e.g. < 3 m) or explore into each other's territory, so the maps overlap enough for AKAZE feature matching.
+- Until maps overlap, only the first discovered robot gets a valid TF (identity). Other robots' TF will appear once estimation succeeds.
+- The `estimation_confidence` parameter (default 0.6) controls the minimum match quality. Lower = more permissive but noisier.
+- To disable TF publishing (e.g. for debugging), set `publish_tf: false` in the map_merge params.
 
 ### Verification
 
