@@ -707,9 +707,38 @@ In this configuration, you get the same autonomous exploration behavior as the d
 
 ## Multi-Robot SLAM (Blinky + Pinky)
 
-This section describes how to run **multiple robots** (e.g., Blinky and Pinky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot uses a different `ROS_DOMAIN_ID`, so the setup uses **domain bridges** to forward topics into a common aggregation domain (50).
+This section describes how to run **multiple robots** (e.g., Blinky and Pinky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot runs bringup + SLAM + Nav2 on its own ROS domain, and the central PC (domain 50) uses **domain bridges**, **map merge**, and a **multi-robot explorer** to coordinate exploration.
 
 For a “boxes in boxes” system diagram (functions → programs → ROS2 topics/TF/actions), see `docs/architecture.md`.
+
+### Quick start: current multi-robot workflow
+
+- **On each robot (e.g., Blinky, Pinky):**
+
+  ```bash
+  # Terminal 1 on robot: bringup + sensors
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_bringup robot.launch.py
+
+  # Terminal 2 on robot: Navigation2 + SLAM-based navigation
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
+  ```
+
+- **On the central PC (this repo):**
+
+  ```bash
+  cd ~/turtlebot3_ws
+  ./scripts/start_central.sh
+  ```
+
+- **RViz visualization (typically on central PC):**
+
+  ```bash
+  rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
+  ```
 
 ### Overview
 
@@ -745,8 +774,7 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 | `param/humble/mapper_params_pinky.yaml` | SLAM params for Pinky |
 | `param/humble/burger_multirobot_blinky.yaml` | Nav2 costmap params (uses `/blinky/scan_normalized`, sensor_frame `blinky/base_scan`) |
 | `param/humble/burger_multirobot_pinky.yaml` | Nav2 costmap params (uses `/pinky/scan_normalized`, sensor_frame `pinky/base_scan`) |
-| `scripts/start_multirobot_slam.sh` | Start multi-robot SLAM + map merge |
-| `scripts/start_multirobot_nav2_explore.sh` | Start Nav2 + Explore for both robots (includes RViz) |
+| `scripts/start_central.sh` | Start all central multi-robot services (domain bridges, TF relay, map merge, explorer) |
 | `launch/multirobot_slam.launch.py` | Launch file for SLAM, normalizers, TF relay, fallback, map merge |
 
 ### Workflow
