@@ -287,6 +287,7 @@ class MultiRobotExplorer(Node):
         self.robots: Dict[str, RobotState] = {}
         self.latest_map: Optional[OccupancyGrid] = None
         self.exploration_complete = False
+        self.goal_pubs: Dict[str, object] = {}
 
         # -- TF --
         self.tf_buffer = tf2_ros.Buffer()
@@ -309,9 +310,11 @@ class MultiRobotExplorer(Node):
         # -- per-robot setup --
         for name in self.robot_names:
             rs = RobotState(name=name)
-            rs.action_client = ActionClient(
-                self, NavigateToPose, f'/{name}/navigate_to_pose')
             self.robots[name] = rs
+            # Publish PoseStamped goals on /<robot>/goal_pose.
+            # These are bridged to /goal_pose on each robot's domain.
+            self.goal_pubs[name] = self.create_publisher(
+                PoseStamped, f'/{name}/goal_pose', 10)
 
         self._logged_waiting_for_map = False
 
@@ -425,36 +428,26 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
 
     def _send_goal(self, rs: RobotState, frontier: Frontier):
-        if not rs.action_client.server_is_ready():
-            if not getattr(rs, '_logged_no_nav2', False):
-                self.get_logger().info(
-                    f'[{rs.name}] Waiting for Nav2 action server '
-                    f'(/{rs.name}/navigate_to_pose)...')
-                rs._logged_no_nav2 = True
+        goal_pub = self.goal_pubs.get(rs.name)
+        if goal_pub is None:
+            self.get_logger().warn(f'[{rs.name}] No goal publisher available')
             rs.goal_active = False
             return
-        rs._logged_no_nav2 = False
 
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = PoseStamped()
-        goal_msg.pose.header.frame_id = self.world_frame
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = frontier.centroid_world[0]
-        goal_msg.pose.pose.position.y = frontier.centroid_world[1]
-        goal_msg.pose.pose.position.z = 0.0
-        goal_msg.pose.pose.orientation.w = 1.0
+        goal_msg = PoseStamped()
+        goal_msg.header.frame_id = self.world_frame
+        goal_msg.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.position.x = frontier.centroid_world[0]
+        goal_msg.pose.position.y = frontier.centroid_world[1]
+        goal_msg.pose.position.z = 0.0
+        goal_msg.pose.orientation.w = 1.0
 
         self.get_logger().info(
-            f'[{rs.name}] Sending goal ({frontier.centroid_world[0]:.2f}, '
+            f'[{rs.name}] Publishing goal_pose ({frontier.centroid_world[0]:.2f}, '
             f'{frontier.centroid_world[1]:.2f}) — frontier size '
             f'{frontier.size_m:.2f}m ({frontier.size} cells)')
 
-        future = rs.action_client.send_goal_async(
-            goal_msg,
-            feedback_callback=lambda fb, n=rs.name: None,
-        )
-        future.add_done_callback(
-            lambda f, r=rs: self._goal_response_callback(f, r))
+        goal_pub.publish(goal_msg)
 
         rs.goal_position = frontier.centroid_world
         rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
