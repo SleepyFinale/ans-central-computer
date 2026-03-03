@@ -29,6 +29,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from rclpy.duration import Duration
 
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Point
@@ -413,7 +414,7 @@ class MultiRobotExplorer(Node):
             try:
                 t = self.tf_buffer.lookup_transform(
                     self.world_frame, base_frame, rclpy.time.Time(),
-                    timeout=rclpy.duration.Duration(seconds=0.5))
+                    timeout=Duration(seconds=0.5))
                 rs.position = (
                     t.transform.translation.x,
                     t.transform.translation.y,
