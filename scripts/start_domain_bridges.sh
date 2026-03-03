@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_DIR="${WORKSPACE_DIR}/config/domain_bridge"
 
-source /opt/ros/humble/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash 2>/dev/null
+source /opt/ros/humble/setup.bash
 
 echo "=========================================="
 echo "Starting Domain Bridges"

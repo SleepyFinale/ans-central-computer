@@ -23,7 +23,7 @@ WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_DIR="${WORKSPACE_DIR}/config"
 
 cd "$WORKSPACE_DIR"
-source /opt/ros/humble/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash 2>/dev/null
+source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null
 
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}

@@ -13,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$WORKSPACE_DIR"
-source /opt/ros/humble/setup.bash 2>/dev/null || source /opt/ros/jazzy/setup.bash 2>/dev/null
+source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null
 
 CONFIG_FILE="${WORKSPACE_DIR}/config/multi_robot_explorer.yaml"
