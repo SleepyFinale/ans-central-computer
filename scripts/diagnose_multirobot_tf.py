@@ -44,43 +44,72 @@ class TFDiagnostics(Node):
         domain = os.environ.get('ROS_DOMAIN_ID', '?')
         self.log(f'ROS_DOMAIN_ID = {domain}', ok=(domain == '50') if domain != '?' else None)
 
-        # 1. Check topics
+        # 1. Check topics (what should exist given the domain bridges)
         time.sleep(0.5)
         rclpy.spin_once(self, timeout_sec=0.5)
 
-        topic_checks = [
-            '/tf', '/tf_static',
-            '/blinky/tf', '/pinky/tf',
-            '/blinky/scan', '/pinky/scan',
+        critical_topics = [
+            '/tf',
+            '/tf_static',
+            '/blinky/tf',
+            '/pinky/tf',
             '/map',
         ]
-        for topic in topic_checks:
+        # Laser scans stay on the robots; they are optional from the
+        # central PC's point of view (Nav2 + SLAM use them locally).
+        optional_scan_topics = [
+            '/blinky/scan',
+            '/pinky/scan',
+        ]
+
+        for topic in critical_topics:
             try:
                 n = self.count_publishers(topic)
                 self.log(f'Topic {topic}: {n} publisher(s)', ok=(n > 0))
             except Exception as e:
                 self.log(f'Topic {topic}: error - {e}', ok=False)
 
+        for topic in optional_scan_topics:
+            try:
+                n = self.count_publishers(topic)
+                # Report scans as informational only, since in this
+                # architecture they are not bridged to the central PC.
+                self.log(f'Topic {topic}: {n} publisher(s)', ok=None if n == 0 else True)
+            except Exception as e:
+                self.log(f'Topic {topic}: error - {e}', ok=None)
+
         # 2. Let TF buffer fill
         self.log('Waiting 3s for TF buffer...', ok=None)
         for _ in range(30):
             rclpy.spin_once(self, timeout_sec=0.1)
 
-        # 3. Check specific transforms (critical = required for Nav2)
+        # 3. Check specific transforms
+        #
+        # Critical checks are things that must exist for Nav2 and the
+        # central multi_robot_explorer to work:
+        #   - odom -> base_footprint for each robot (via tf_relay)
+        #   - map -> <robot>/map from map_merge
+        #   - full chain map -> <robot>/base_footprint
         now = rclpy.time.Time()
         critical_checks = [
-            ('blinky/odom', 'blinky/base_footprint', 'Robot TF (tf_relay): blinky'),
-            ('pinky/odom', 'pinky/base_footprint', 'Robot TF (tf_relay): pinky'),
-            ('map', 'blinky/odom', 'Fallback/SLAM map->blinky/odom'),
-            ('map', 'pinky/odom', 'Fallback/SLAM map->pinky/odom'),
-            ('map', 'blinky/base_footprint', 'Full chain: map->blinky/base_footprint'),
-            ('map', 'pinky/base_footprint', 'Full chain: map->pinky/base_footprint'),
+            ('blinky/odom', 'blinky/base_footprint',
+             'Robot TF (odom->base_footprint): blinky'),
+            ('pinky/odom', 'pinky/base_footprint',
+             'Robot TF (odom->base_footprint): pinky'),
+            ('map', 'blinky/map',
+             'World TF (map_merge): map->blinky/map'),
+            ('map', 'pinky/map',
+             'World TF (map_merge): map->pinky/map'),
+            ('map', 'blinky/base_footprint',
+             'Explorer chain: map->blinky/base_footprint'),
+            ('map', 'pinky/base_footprint',
+             'Explorer chain: map->pinky/base_footprint'),
         ]
         optional_checks = [
-            ('map', 'blinky/map', 'Optional: map->blinky/map (SLAM local)'),
-            ('map', 'pinky/map', 'Optional: map->pinky/map (SLAM local)'),
-            ('blinky/map', 'blinky/odom', 'Optional: SLAM map->odom blinky'),
-            ('pinky/map', 'pinky/odom', 'Optional: SLAM map->odom pinky'),
+            ('blinky/map', 'blinky/odom',
+             'SLAM TF: blinky/map->blinky/odom'),
+            ('pinky/map', 'pinky/odom',
+             'SLAM TF: pinky/map->pinky/odom'),
         ]
         for parent, child, desc in critical_checks:
             try:
@@ -135,17 +164,21 @@ class TFDiagnostics(Node):
         if miss_count > 0:
             print(f'Issues found ({miss_count} critical). Check [MISSING] items above.')
             print('\nTypical causes:')
-            if not any('blinky/tf' in r and '[OK]' in r for r in self.results):
+            if not any('Topic /blinky/tf:' in r and '[OK]' in r for r in self.results):
                 print('  - /blinky/tf: domain bridges or Blinky robot not running')
-            if not any('pinky/tf' in r and '[OK]' in r for r in self.results):
+            if not any('Topic /pinky/tf:' in r and '[OK]' in r for r in self.results):
                 print('  - /pinky/tf: domain bridges or Pinky robot not running')
-            if any('Fallback/SLAM map->' in r and '[MISSING]' in r for r in self.results):
-                print('  - map->*_/odom: tf_map_odom_fallback not publishing. Restart multirobot_slam.')
-            if any('Full chain' in r and '[MISSING]' in r for r in self.results):
-                print('  - Full chain: ensure tf_relay, tf_map_odom_fallback, and robots are running')
+            if any('Robot TF (odom->base_footprint):' in r and '[MISSING]' in r for r in self.results):
+                print('  - odom->base_footprint: base TF on the robot or tf_relay may not be running.')
+            if any('World TF (map_merge):' in r and '[MISSING]' in r for r in self.results):
+                print('  - map-><robot>/map: map_merge may not be running, or publish_tf may be false.')
+            if any('SLAM TF:' in r and '[MISSING]' in r for r in self.results):
+                print('  - <robot>/map-><robot>/odom: slam_toolbox on that robot may not be publishing yet.')
+            if any('Explorer chain:' in r and '[MISSING]' in r for r in self.results):
+                print('  - Explorer chain: ensure map_merge, slam_toolbox, tf_relay, and both robots are running.')
         else:
-            print('All critical checks passed. Nav2 and explore should work.')
-            print('Optional [INFO] items (blinky/map, pinky/map) appear once slam_toolbox builds maps.')
+            print('All critical checks passed. Multi-robot Nav2 and explorer should work.')
+            print('Optional [INFO] items (SLAM TF) appear once slam_toolbox builds maps.')
         print()
 
 
