@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Set ROS_DOMAIN_ID and ROBOT_SSH for the selected robot.
-# Auto-detects WiFi (Lab/SNS, Azure, or RPi/RaspAP) to pick the correct IP for Blinky/Pinky.
+# Auto-detects WiFi (SNS, RaspAP, or Azure) to pick the correct IP for Blinky/Pinky.
 # Must be sourced so variables apply to the current shell:
 #   source scripts/set_robot_env.sh blinky
 #   source scripts/set_robot_env.sh inky 192.168.0.100
@@ -13,15 +13,15 @@ set_robot_usage() {
   echo ""
   echo "  WiFi auto-detection: Script detects SNS (Lab), Azure, or RaspAP (RPi) and uses the right IP."
   echo ""
-  echo "  Robot   ROS_DOMAIN_ID   Lab (SNS)            Azure                RPi (RaspAP)"
+  echo "  Robot   ROS_DOMAIN_ID   SNS (lab)            RaspAP (rpi)         Azure"
   echo "  ------  --------------  -------------------  -------------------  -------------------"
-  echo "  Blinky  30              blinky@192.168.0.158 blinky@172.20.10.13  blinky@10.3.141.220"
-  echo "  Pinky   31              pinky@192.168.0.194  pinky@172.20.10.14   pinky@10.3.141.194"
+  echo "  Blinky  30              blinky@192.168.0.158 blinky@10.3.141.220  blinky@172.20.10.13"
+  echo "  Pinky   31              pinky@192.168.0.194  pinky@10.3.141.194   pinky@172.20.10.14"
   echo "  Inky    32              inky@<IP>  (pass ip as second argument)"
   echo "  Clyde   33              clyde@<IP> (pass ip as second argument)"
 }
 
-# Detect current WiFi SSID. Returns "SNS", "Azure", "RaspAP", or empty if unknown/not connected.
+# Detect current WiFi SSID. Returns "SNS", "RaspAP", "Azure", or empty if unknown/not connected.
 get_wifi_ssid() {
   local ssid
   if command -v nmcli >/dev/null 2>&1; then
@@ -35,12 +35,12 @@ get_wifi_ssid() {
   echo "${ssid:-}"
 }
 
-# Resolve network name from SSID: SNS -> lab, Azure -> azure, RaspAP -> rpi
+# Resolve network name from SSID: SNS -> lab, RaspAP -> rpi, Azure -> azure
 get_network_from_ssid() {
   case "$1" in
     SNS)    echo "lab" ;;
-    Azure)  echo "azure" ;;
     RaspAP) echo "rpi" ;;
+    Azure)  echo "azure" ;;
     *)      echo "unknown" ;;
   esac
 }
@@ -48,7 +48,7 @@ get_network_from_ssid() {
 robot=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
 ip="${2:-}"
 
-# Robot IPs by network (Lab/SNS vs Azure vs RPi/RaspAP). Inky/Clyde use user-provided IP.
+# Robot IPs by network (SNS vs RaspAP vs Azure). Inky/Clyde use user-provided IP.
 BLINKY_LAB=192.168.0.158
 BLINKY_AZURE=172.20.10.13
 BLINKY_RPI=10.3.141.220
@@ -63,8 +63,8 @@ case "$robot" in
     net=$(get_network_from_ssid "$ssid")
     case "$net" in
       lab)   export ROBOT_SSH="blinky@$BLINKY_LAB" ;;
-      azure) export ROBOT_SSH="blinky@$BLINKY_AZURE" ;;
       rpi)   export ROBOT_SSH="blinky@$BLINKY_RPI" ;;
+      azure) export ROBOT_SSH="blinky@$BLINKY_AZURE" ;;
       *)     export ROBOT_SSH="blinky@$BLINKY_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
@@ -77,8 +77,8 @@ case "$robot" in
     net=$(get_network_from_ssid "$ssid")
     case "$net" in
       lab)   export ROBOT_SSH="pinky@$PINKY_LAB" ;;
-      azure) export ROBOT_SSH="pinky@$PINKY_AZURE" ;;
       rpi)   export ROBOT_SSH="pinky@$PINKY_RPI" ;;
+      azure) export ROBOT_SSH="pinky@$PINKY_AZURE" ;;
       *)     export ROBOT_SSH="pinky@$PINKY_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
