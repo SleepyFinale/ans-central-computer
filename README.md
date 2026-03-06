@@ -17,7 +17,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
    - [Terminal 3: Navigation2](#terminal-3-navigation2)
    - [Terminal 4: Explorer](#terminal-4-explorer)
    - [Nav2 on Robot (Offloaded Navigation)](#nav2-on-robot-offloaded-navigation)
-5. [Multi-Robot SLAM (Blinky + Pinky)](#multi-robot-slam-blinky--pinky)
+5. [Multi-Robot SLAM (Blinky + Pinky + Inky)](#multi-robot-slam-blinky--pinky--inky)
 6. [Troubleshooting](#troubleshooting)
 7. [Diagnostic Commands](#diagnostic-commands)
 8. [Additional Resources](#additional-resources)
@@ -207,7 +207,7 @@ ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and 
 | Blinky | 30            | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
 | Pinky  | 31            | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
 | Inky   | 32            | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
-| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`         |
+| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`        |
 
 ### Recommended: use the setup script
 
