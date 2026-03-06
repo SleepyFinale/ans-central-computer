@@ -1,0 +1,26 @@
+# Domain bridge: Inky (ROS_DOMAIN_ID 32) → Central (domain 50)
+#
+# Bridges robot data TO the central computer:
+#   map, TF, odom (for map_merge, TF relay, explorer)
+#
+# Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
+
+name: inky_bridge
+from_domain: 32
+to_domain: 50
+topics:
+  map:
+    type: nav_msgs/msg/OccupancyGrid
+    remap: inky/map
+  map_metadata:
+    type: nav_msgs/msg/MapMetaData
+    remap: inky/map_metadata
+  map_updates:
+    type: map_msgs/msg/OccupancyGridUpdate
+    remap: inky/map_updates
+  tf:
+    type: tf2_msgs/msg/TFMessage
+    remap: inky/tf
+  tf_static:
+    type: tf2_msgs/msg/TFMessage
+    remap: inky/tf_static

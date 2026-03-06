@@ -202,23 +202,23 @@ ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and 
 
 ### Robot configuration
 
-| Robot  | ROS_DOMAIN_ID | Lab (SSID: SNS)       | Azure (SSID: Azure) |
-| ------ | ------------- | --------------------- | --------------------|
-| Blinky | 30            | blinky@192.168.0.158  | blinky@172.20.10.13 |
-| Pinky  | 31            | pinky@192.168.0.194   | pinky@172.20.10.14  |
-| Inky   | 32            | `inky@<IP>`           | `inky@<IP>`         |
-| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        |
+| Robot  | ROS_DOMAIN_ID | Lab (SSID: SNS)       | RaspAP (rpi)        | Azure (SSID: Azure) |
+| ------ | ------------- | --------------------- | ------------------- | --------------------|
+| Blinky | 30            | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
+| Pinky  | 31            | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
+| Inky   | 32            | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
+| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`         |
 
 ### Recommended: use the setup script
 
-`scripts/set_robot_env.sh` sets `ROS_DOMAIN_ID` and `ROBOT_SSH` for the selected robot. For **Blinky** and **Pinky**, it **auto-detects** which WiFi your PC is on (SNS or Azure) and picks the correct IP.
+`scripts/set_robot_env.sh` sets `ROS_DOMAIN_ID` and `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, and **Inky**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Only **Clyde** requires you to pass the robot's IP (no fixed IPs per network).
 
 **How it works:**
 
 - Detects the current WiFi SSID using `nmcli` or `iwgetid`
-- Maps SSID to network: SNS → Lab, Azure → Azure
-- For Blinky/Pinky: selects the correct SSH target based on robot name + detected network
-- For Inky/Clyde: you must pass the robot's IP (they do not have fixed IPs per network)
+- Maps SSID to network: SNS → Lab, RaspAP → rpi, Azure → Azure
+- For Blinky/Pinky/Inky: selects the correct SSH target based on robot name + detected network
+- For Clyde: you must pass the robot's IP as the second argument
 - If WiFi is unknown or not detected: defaults to Lab (SNS) IP and prints a warning
 
 From the workspace root, **source** the script so variables apply to your current shell:
@@ -226,13 +226,14 @@ From the workspace root, **source** the script so variables apply to your curren
 ```bash
 cd ~/turtlebot3_ws
 
-# Blinky or Pinky (fixed IPs – script auto-detects SNS vs Azure)
+# Blinky, Pinky, or Inky (fixed IPs – script auto-detects SNS vs RaspAP vs Azure)
 source scripts/set_robot_env.sh blinky
 # or
 source scripts/set_robot_env.sh pinky
+# or
+source scripts/set_robot_env.sh inky
 
-# Inky or Clyde (pass the robot's IP address for the network you're on)
-source scripts/set_robot_env.sh inky 192.168.0.xxx
+# Clyde (pass the robot's IP address for the network you're on)
 source scripts/set_robot_env.sh clyde 192.168.0.xxx
 ```
 
@@ -242,7 +243,7 @@ Then connect with:
 ssh $ROBOT_SSH
 ```
 
-**Script output:** The script prints the detected network (`lab` or `azure`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROS_DOMAIN_ID=30  ROBOT_SSH=blinky@192.168.0.158  (network: lab)`.
+**Script output:** The script prints the detected network (`lab`, `rpi`, or `azure`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROS_DOMAIN_ID=30  ROBOT_SSH=blinky@192.168.0.158  (network: lab)`.
 
 **Manual setup (alternative):**
 
@@ -275,7 +276,7 @@ echo $ROBOT_SSH   # if you used the script
 
 - If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0
 - The Remote PC and robot must use the **same** `ROS_DOMAIN_ID` value
-- The Remote PC and robot must be on the **same** WiFi network (both on SNS or both on Azure)
+- The Remote PC and robot must be on the **same** WiFi network (e.g. both on SNS, both on RaspAP, or both on Azure)
 - When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]` again in each terminal (or open new terminals and source once)
 
 ---
@@ -286,7 +287,7 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 
 **Prerequisites:**
 
-- Robot is powered on and connected to the network (SNS or Azure WiFi)
+- Robot is powered on and connected to the network (SNS, RaspAP, or Azure WiFi)
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
@@ -397,7 +398,7 @@ In the **default** configuration, SLAM Toolbox and the laser scan normalizer are
 ```bash
 # Set environment for your robot (if not already set in this terminal)
 cd ~/turtlebot3_ws
-source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
+source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
 
 # Launch SLAM Toolbox with laser scan normalizer (recommended)
 # This automatically handles variable laser scan readings and uses fast map updates
@@ -497,7 +498,7 @@ ros2 topic echo /map --once      # Should show map data (may need to wait a few 
 ```bash
 # Set environment for your robot (if not already set)
 cd ~/turtlebot3_ws
-source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
+source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export TURTLEBOT3_MODEL=burger
@@ -569,7 +570,7 @@ ros2 run tf2_ros tf2_echo odom base_footprint
 ```bash
 # Set environment for your robot (if not already set)
 cd ~/turtlebot3_ws
-source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
+source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
 
 # Start explorer
 ./scripts/start_explorer_simple.sh
@@ -705,9 +706,9 @@ In this configuration, you get the same autonomous exploration behavior as the d
 
 ---
 
-## Multi-Robot SLAM (Blinky + Pinky)
+## Multi-Robot SLAM (Blinky + Pinky + Inky)
 
-This section describes how to run **multiple robots** (e.g., Blinky and Pinky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot runs bringup + SLAM + Nav2 on its own ROS domain, and the central PC (domain 50) uses **domain bridges**, **map merge**, and a **multi-robot explorer** to coordinate exploration.
+This section describes how to run **multiple robots** (e.g., Blinky, Pinky, and Inky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot runs bringup + SLAM + Nav2 on its own ROS domain, and the central PC (domain 50) uses **domain bridges**, **map merge**, and a **multi-robot explorer** to coordinate exploration.
 
 For a “boxes in boxes” system diagram (functions → programs → ROS2 topics/TF/actions), see `docs/architecture.md`.
 
@@ -742,12 +743,12 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 
 ### Overview
 
-- **Blinky** (domain 30) and **Pinky** (domain 31) run robot bringup on their own domains
-- **Domain bridges** subscribe to each robot's topics and republish to domain 50 with namespaced topics (`/blinky/scan`, `/pinky/scan`, etc.)
-- **TF relay** merges `/blinky/tf` and `/pinky/tf` into `/tf` with frame prefixes (`blinky/odom`, `pinky/odom`)
-- **TF map→odom fallback** publishes static identity transforms `map → blinky/odom` and `map → pinky/odom` so the TF tree connects before SLAM converges
-- **Laser scan normalizers** normalize scan readings (for SLAM) and rewrite `frame_id` to `blinky/base_scan` / `pinky/base_scan` (for Nav2 costmaps)
-- **SLAM instances** (one per robot) produce `/blinky/map` and `/pinky/map`
+- **Blinky** (domain 30), **Pinky** (domain 31), and **Inky** (domain 32) run robot bringup on their own domains
+- **Domain bridges** subscribe to each robot's topics and republish to domain 50 with namespaced topics (`/blinky/scan`, `/pinky/scan`, `/inky/scan`, etc.)
+- **TF relay** merges `/blinky/tf`, `/pinky/tf`, and `/inky/tf` into `/tf` with frame prefixes (`blinky/odom`, `pinky/odom`, `inky/odom`)
+- **TF map→odom fallback** publishes static identity transforms `map → blinky/odom`, `map → pinky/odom`, and `map → inky/odom` so the TF tree connects before SLAM converges
+- **Laser scan normalizers** normalize scan readings (for SLAM) and rewrite `frame_id` to `blinky/base_scan`, `pinky/base_scan`, and `inky/base_scan` (for Nav2 costmaps)
+- **SLAM instances** (one per robot) produce `/blinky/map`, `/pinky/map`, and `/inky/map`
 - **Map merge** combines them into a single `/map`
 
 ### Multi-robot prerequisites
@@ -764,8 +765,11 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 | `config/domain_bridge/pinky_bridge.yaml` | Bridge: domain 31 → 50, topics → `/pinky/*` |
 | `config/domain_bridge/inky_bridge.yaml` | Bridge: domain 32 → 50, topics → `/inky/*` |
 | `config/domain_bridge/clyde_bridge.yaml` | Bridge: domain 33 → 50, topics → `/clyde/*` |
-| `scripts/start_domain_bridges.sh` | Start both bridges |
-| `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf → /tf with frame prefixes |
+| `config/domain_bridge/blinky_goals_bridge.yaml` | Bridge: domain 50 → 30, goal_pose → Blinky |
+| `config/domain_bridge/pinky_goals_bridge.yaml` | Bridge: domain 50 → 31, goal_pose → Pinky |
+| `config/domain_bridge/inky_goals_bridge.yaml` | Bridge: domain 50 → 32, goal_pose → Inky |
+| `scripts/start_domain_bridges.sh` | Start bridges (Blinky, Pinky, Inky) |
+| `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf + inky/tf → /tf with frame prefixes |
 | `scripts/tf_map_odom_fallback.py` | Publish map → blinky/odom, map → pinky/odom (identity) for TF tree connectivity |
 | `scripts/wait_for_tf_multirobot.py` | Wait for map → base_footprint before starting Nav2 (60s timeout, 3s warmup) |
 | `scripts/diagnose_multirobot_tf.py` | Diagnose TF tree, topics, and connectivity |
@@ -779,7 +783,7 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 
 ### Workflow
 
-**1. Start robot bringup on each robot (SSH to Blinky and Pinky):**
+**1. Start robot bringup on each robot (SSH to Blinky, Pinky, and/or Inky):**
 
 ```bash
 # On Blinky (ROS_DOMAIN_ID=30)
@@ -797,7 +801,15 @@ export ROS_DOMAIN_ID=31
 ros2 launch turtlebot3_bringup robot.launch.py
 ```
 
-**2. Start domain bridges on central PC:**
+```bash
+# On Inky (ROS_DOMAIN_ID=32)
+source /opt/ros/humble/setup.bash
+export TURTLEBOT3_MODEL=burger
+export ROS_DOMAIN_ID=32
+ros2 launch turtlebot3_bringup robot.launch.py
+```
+
+**2. Start domain bridges on central PC** (Blinky 30→50, Pinky 31→50, Inky 32→50, and goal bridges 50→30/31/32):
 
 ```bash
 cd ~/turtlebot3_ws
@@ -826,9 +838,9 @@ cd ~/turtlebot3_ws
 
 This script:
 
-- Waits for the TF tree (`map → blinky/base_footprint`, `map → pinky/base_footprint`) with a 60-second timeout
-- Launches Nav2 for Blinky and Pinky (each uses the merged `/map`)
-- Launches Explore Lite for both robots
+- Waits for the TF tree (`map → blinky/base_footprint`, `map → pinky/base_footprint`, `map → inky/base_footprint`) with a 60-second timeout
+- Launches Nav2 for Blinky, Pinky, and Inky (each uses the merged `/map`)
+- Launches Explore Lite for all configured robots
 - Launches RViz (disable with `use_rviz:=false` if needed)
 
 **Prerequisites:** Domain bridges and multirobot SLAM must be running first. If the TF wait times out, run diagnostics:
@@ -924,7 +936,7 @@ ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
 - Frontiers are detected in the `map` (world) frame on the merged grid.
 - Goals are sent in the `map` frame. Nav2 uses TF (`map` → `<robot>/map` → `<robot>/odom` → `<robot>/base_footprint`) to transform goals into each robot’s local frame.
 - When maps are independent (no overlap yet), each robot sees frontiers on its own portion of the merged map and explores independently.
-- When overlap is detected and maps merge, the explorer automatically re-detects frontiers on the unified map and coordinates both robots.
+- When overlap is detected and maps merge, the explorer automatically re-detects frontiers on the unified map and coordinates all robots.
 
 **Configuration:** `config/multi_robot_explorer.yaml` (robot names, cost weights, planning frequency, etc.).
 
@@ -942,9 +954,8 @@ ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
 
 ```bash
 # On central PC (ROS_DOMAIN_ID=50)
-ros2 topic list | grep -E "blinky|pinky|map"
-# Should see: /blinky/scan, /pinky/scan, /blinky/scan_normalized, /pinky/scan_normalized,
-#             /blinky/map, /pinky/map, /map
+ros2 topic list | grep -E "blinky|pinky|inky|map"
+# Should see: /blinky/scan, /pinky/scan, /inky/scan (and _normalized), /blinky/map, /pinky/map, /inky/map, /map
 
 ros2 topic echo /map --once   # Merged map
 ```
@@ -958,7 +969,7 @@ cd ~/turtlebot3_ws
 ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 ```
 
-The script reports critical checks (map→base_footprint for both robots) and optional SLAM local frames. If all critical checks pass, Nav2 and Explore should work.
+The script reports critical checks (map→base_footprint for Blinky, Pinky, and Inky) and optional SLAM local frames. If all critical checks pass, Nav2 and Explore should work.
 
 ---
 
@@ -1033,7 +1044,7 @@ You should see `nav2_msgs` in the list. Then try building again:
 
   ```bash
   cd ~/turtlebot3_ws
-  source scripts/set_robot_env.sh blinky   # or pinky, inky <IP>, clyde <IP>
+  source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
   ```
 
   Or set manually: `export ROS_DOMAIN_ID=30` (Blinky), 31 (Pinky), 32 (Inky), 33 (Clyde).
@@ -1058,14 +1069,14 @@ You should see `nav2_msgs` in the list. Then try building again:
 - `ssh $ROBOT_SSH` hangs, times out, or "Connection refused"
 - Robot is powered on but unreachable
 
-**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS) vs Azure—if the robot is on SNS but your PC is on Azure (or vice versa), you will connect to the wrong IP.
+**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS), RaspAP (rpi), and Azure—if the robot is on one network but your PC is on another, you will connect to the wrong IP.
 
 **Fix:**
 
 - **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available).
-- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for Lab, Azure for Azure).
-- **Step 3**: Run `source scripts/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)` or `(network: azure)`.
-- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS or Azure. Connect to the correct network and source the script again.
+- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for Lab, RaspAP for rpi, Azure for Azure).
+- **Step 3**: Run `source scripts/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)`, `(network: rpi)`, or `(network: azure)`.
+- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS, RaspAP, or Azure. Connect to the correct network and source the script again.
 
 ---
 
@@ -1413,7 +1424,7 @@ Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the ro
 cd ~/turtlebot3_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-source scripts/set_robot_env.sh blinky   # or pinky / inky <IP> / clyde <IP>
+source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
 
 python3 scripts/pose_jump_monitor.py
 ```

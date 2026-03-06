@@ -25,7 +25,7 @@ class TFDiagnostics(Node):
         super().__init__('tf_diagnostics')
         self.buffer = Buffer()
         TransformListener(self.buffer, self)
-        self.robots = ['blinky', 'pinky']
+        self.robots = ['blinky', 'pinky', 'inky']
         self.results = []
 
     def log(self, msg: str, ok: bool | None = None):
@@ -53,6 +53,7 @@ class TFDiagnostics(Node):
             '/tf_static',
             '/blinky/tf',
             '/pinky/tf',
+            '/inky/tf',
             '/map',
         ]
         # Laser scans stay on the robots; they are optional from the
@@ -60,6 +61,7 @@ class TFDiagnostics(Node):
         optional_scan_topics = [
             '/blinky/scan',
             '/pinky/scan',
+            '/inky/scan',
         ]
 
         for topic in critical_topics:
@@ -96,20 +98,28 @@ class TFDiagnostics(Node):
              'Robot TF (odom->base_footprint): blinky'),
             ('pinky/odom', 'pinky/base_footprint',
              'Robot TF (odom->base_footprint): pinky'),
+            ('inky/odom', 'inky/base_footprint',
+             'Robot TF (odom->base_footprint): inky'),
             ('map', 'blinky/map',
              'World TF (map_merge): map->blinky/map'),
             ('map', 'pinky/map',
              'World TF (map_merge): map->pinky/map'),
+            ('map', 'inky/map',
+             'World TF (map_merge): map->inky/map'),
             ('map', 'blinky/base_footprint',
              'Explorer chain: map->blinky/base_footprint'),
             ('map', 'pinky/base_footprint',
              'Explorer chain: map->pinky/base_footprint'),
+            ('map', 'inky/base_footprint',
+             'Explorer chain: map->inky/base_footprint'),
         ]
         optional_checks = [
             ('blinky/map', 'blinky/odom',
              'SLAM TF: blinky/map->blinky/odom'),
             ('pinky/map', 'pinky/odom',
              'SLAM TF: pinky/map->pinky/odom'),
+            ('inky/map', 'inky/odom',
+             'SLAM TF: inky/map->inky/odom'),
         ]
         for parent, child, desc in critical_checks:
             try:
@@ -168,6 +178,8 @@ class TFDiagnostics(Node):
                 print('  - /blinky/tf: domain bridges or Blinky robot not running')
             if not any('Topic /pinky/tf:' in r and '[OK]' in r for r in self.results):
                 print('  - /pinky/tf: domain bridges or Pinky robot not running')
+            if not any('Topic /inky/tf:' in r and '[OK]' in r for r in self.results):
+                print('  - /inky/tf: domain bridges or Inky robot not running')
             if any('Robot TF (odom->base_footprint):' in r and '[MISSING]' in r for r in self.results):
                 print('  - odom->base_footprint: base TF on the robot or tf_relay may not be running.')
             if any('World TF (map_merge):' in r and '[MISSING]' in r for r in self.results):
@@ -175,7 +187,7 @@ class TFDiagnostics(Node):
             if any('SLAM TF:' in r and '[MISSING]' in r for r in self.results):
                 print('  - <robot>/map-><robot>/odom: slam_toolbox on that robot may not be publishing yet.')
             if any('Explorer chain:' in r and '[MISSING]' in r for r in self.results):
-                print('  - Explorer chain: ensure map_merge, slam_toolbox, tf_relay, and both robots are running.')
+                print('  - Explorer chain: ensure map_merge, slam_toolbox, tf_relay, and all robots are running.')
         else:
             print('All critical checks passed. Multi-robot Nav2 and explorer should work.')
             print('Optional [INFO] items (SLAM TF) appear once slam_toolbox builds maps.')

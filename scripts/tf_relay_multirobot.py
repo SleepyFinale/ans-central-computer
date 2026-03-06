@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TF relay for multi-robot: subscribes to blinky/tf, pinky/tf (and _static)
-and republishes to /tf with frame ID prefixes so SLAM can see both robots.
+TF relay for multi-robot: subscribes to blinky/tf, pinky/tf, inky/tf (and _static)
+and republishes to /tf with frame ID prefixes so SLAM can see all robots.
 """
 
 import rclpy
@@ -27,7 +27,7 @@ class TFRelayNode(Node):
     def __init__(self):
         super().__init__('tf_relay_multirobot')
 
-        self.declare_parameter('robot_prefixes', ['blinky', 'pinky'])
+        self.declare_parameter('robot_prefixes', ['blinky', 'pinky', 'inky'])
         self.robot_prefixes = self.get_parameter('robot_prefixes').value
 
         self.tf_pub = self.create_publisher(TFMessage, '/tf', 100)

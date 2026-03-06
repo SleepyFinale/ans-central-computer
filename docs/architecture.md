@@ -80,7 +80,7 @@ flowchart TB
 
 ## Function: GlobalMapping (multi-robot SLAM + map merge) — matches current workspace
 
-This function already exists in your central workspace:
+This function already exists in your central workspace. **Inky** (domain 32) is now configured with fixed IPs per network and domain bridges like Blinky and Pinky (`inky_bridge.yaml`, `inky_goals_bridge.yaml`).
 
 - **Domain bridging**: `config/domain_bridge/*_bridge.yaml` + `scripts/start_domain_bridges.sh`
 - **TF stitching**: `scripts/tf_relay_multirobot.py` (plus optional fallback `scripts/tf_map_odom_fallback.py`)
