@@ -756,6 +756,9 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 - `ros-humble-domain-bridge` installed: `sudo apt install ros-humble-domain-bridge`
 - Workspace built
 - Central PC uses `ROS_DOMAIN_ID=50` (default in `~/.bashrc`)
+- `multi_robot_explorer` now targets Nav2 `NavigateToPose` actions first; if
+  action bridging is unavailable, it can fall back to publishing `goal_pose`
+  (`use_pose_goal_fallback: true` in `config/multi_robot_explorer.yaml`).
 
 ### Files added for multi-robot
 
@@ -765,9 +768,9 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
 | `config/domain_bridge/pinky_bridge.yaml` | Bridge: domain 31 → 50, topics → `/pinky/*` |
 | `config/domain_bridge/inky_bridge.yaml` | Bridge: domain 32 → 50, topics → `/inky/*` |
 | `config/domain_bridge/clyde_bridge.yaml` | Bridge: domain 33 → 50, topics → `/clyde/*` |
-| `config/domain_bridge/blinky_goals_bridge.yaml` | Bridge: domain 50 → 30, goal_pose → Blinky |
-| `config/domain_bridge/pinky_goals_bridge.yaml` | Bridge: domain 50 → 31, goal_pose → Pinky |
-| `config/domain_bridge/inky_goals_bridge.yaml` | Bridge: domain 50 → 32, goal_pose → Inky |
+| `config/domain_bridge/blinky_goals_bridge.yaml` | Bridge: domain 50 → 30, `/blinky/navigate_to_pose` action → Blinky |
+| `config/domain_bridge/pinky_goals_bridge.yaml` | Bridge: domain 50 → 31, `/pinky/navigate_to_pose` action → Pinky |
+| `config/domain_bridge/inky_goals_bridge.yaml` | Bridge: domain 50 → 32, `/inky/navigate_to_pose` action → Inky |
 | `scripts/start_domain_bridges.sh` | Start bridges (Blinky, Pinky, Inky) |
 | `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf + inky/tf → /tf with frame prefixes |
 | `scripts/tf_map_odom_fallback.py` | Publish map → blinky/odom, map → pinky/odom (identity) for TF tree connectivity |
@@ -1280,7 +1283,7 @@ Adjust x, y, z, w values to match robot's actual position.
 - Check explorer status:
   - Look for `[INFO] [explore_node]: Exploration started`
 - Check goals:
-  - `ros2 topic echo /goal_pose`
+  - `ros2 action list | grep navigate_to_pose`
 - Check Nav2 is up:
   - `ros2 node list | grep nav2`
 - Check TF is valid:
@@ -1522,7 +1525,7 @@ ros2 node list | grep nav2
 ros2 node list | grep explore
 
 # Check goals being sent
-ros2 topic echo /goal_pose
+ros2 action list | grep navigate_to_pose
 
 # Check explorer topics
 ros2 topic list | grep explore

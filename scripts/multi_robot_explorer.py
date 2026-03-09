@@ -32,7 +32,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.duration import Duration
 
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseStamped, Point
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.action import NavigateToPose
 from visualization_msgs.msg import Marker, MarkerArray
@@ -60,10 +60,13 @@ class RobotState:
     goal_position: Optional[Tuple[float, float]] = None
     last_goal_time: float = 0.0
     goal_active: bool = False
+    goal_pending: bool = False
     position: Optional[Tuple[float, float]] = None  # current (x,y) in world
     goals_reached: int = 0
     goals_failed: int = 0
     blacklist: list = field(default_factory=list)
+    server_unavailable_logged: bool = False
+    last_distance_remaining: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +273,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('progress_timeout', 30.0)
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('visualize', True)
+        self.declare_parameter('use_pose_goal_fallback', True)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -283,6 +287,8 @@ class MultiRobotExplorer(Node):
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
         self.visualize = self.get_parameter('visualize').value
+        self.use_pose_goal_fallback = (
+            self.get_parameter('use_pose_goal_fallback').value)
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -311,11 +317,12 @@ class MultiRobotExplorer(Node):
         # -- per-robot setup --
         for name in self.robot_names:
             rs = RobotState(name=name)
+            rs.action_client = ActionClient(
+                self, NavigateToPose, f'/{name}/navigate_to_pose')
             self.robots[name] = rs
-            # Publish PoseStamped goals on /<robot>/goal_pose.
-            # These are bridged to /goal_pose on each robot's domain.
-            self.goal_pubs[name] = self.create_publisher(
-                PoseStamped, f'/{name}/goal_pose', 10)
+            if self.use_pose_goal_fallback:
+                self.goal_pubs[name] = self.create_publisher(
+                    PoseStamped, f'/{name}/goal_pose', 10)
 
         self._logged_waiting_for_map = False
 
@@ -326,7 +333,8 @@ class MultiRobotExplorer(Node):
         self.get_logger().info(
             f'Multi-robot explorer started: robots={self.robot_names}, '
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
-            f'freq={freq:.2f} Hz')
+            f'freq={freq:.2f} Hz, '
+            f'use_pose_goal_fallback={self.use_pose_goal_fallback}')
 
     # -----------------------------------------------------------------------
     # Callbacks
@@ -429,10 +437,59 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
 
     def _send_goal(self, rs: RobotState, frontier: Frontier):
+        if rs.action_client is None:
+            self.get_logger().warn(f'[{rs.name}] No action client available')
+            rs.goal_active = False
+            return
+
+        if not rs.action_client.wait_for_server(timeout_sec=0.2):
+            if not rs.server_unavailable_logged:
+                self.get_logger().warn(
+                    f'[{rs.name}] NavigateToPose action server not available '
+                    f'on /{rs.name}/navigate_to_pose')
+                rs.server_unavailable_logged = True
+            if self.use_pose_goal_fallback:
+                self._publish_pose_fallback_goal(rs, frontier)
+                return
+            rs.goal_active = False
+            rs.goal_pending = False
+            return
+        if rs.server_unavailable_logged:
+            self.get_logger().info(
+                f'[{rs.name}] NavigateToPose action server is now available')
+            rs.server_unavailable_logged = False
+
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = PoseStamped()
+        goal_msg.pose.header.frame_id = self.world_frame
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.pose.position.x = frontier.centroid_world[0]
+        goal_msg.pose.pose.position.y = frontier.centroid_world[1]
+        goal_msg.pose.pose.position.z = 0.0
+        goal_msg.pose.pose.orientation.w = 1.0
+
+        rs.goal_active = True
+        rs.goal_pending = True
+        rs.goal_position = frontier.centroid_world
+        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        rs.last_distance_remaining = None
+
+        send_future = rs.action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=lambda f, r=rs: self._goal_feedback_callback(f, r),
+        )
+        send_future.add_done_callback(
+            lambda f, r=rs: self._goal_response_callback(f, r))
+        self.get_logger().info(
+            f'[{rs.name}] Sending NavigateToPose ({frontier.centroid_world[0]:.2f}, '
+            f'{frontier.centroid_world[1]:.2f}) — frontier size '
+            f'{frontier.size_m:.2f}m ({frontier.size} cells)')
+
+    def _publish_pose_fallback_goal(self, rs: RobotState, frontier: Frontier):
         goal_pub = self.goal_pubs.get(rs.name)
         if goal_pub is None:
-            self.get_logger().warn(f'[{rs.name}] No goal publisher available')
             rs.goal_active = False
+            rs.goal_pending = False
             return
 
         goal_msg = PoseStamped()
@@ -443,33 +500,69 @@ class MultiRobotExplorer(Node):
         goal_msg.pose.position.z = 0.0
         goal_msg.pose.orientation.w = 1.0
 
-        self.get_logger().info(
-            f'[{rs.name}] Publishing goal_pose ({frontier.centroid_world[0]:.2f}, '
-            f'{frontier.centroid_world[1]:.2f}) — frontier size '
-            f'{frontier.size_m:.2f}m ({frontier.size} cells)')
-
         goal_pub.publish(goal_msg)
-
         rs.goal_position = frontier.centroid_world
         rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
         rs.goal_active = True
+        rs.goal_pending = False
+        rs.goal_handle = None
+        self.get_logger().warn(
+            f'[{rs.name}] Falling back to PoseStamped goal_pose '
+            f'({frontier.centroid_world[0]:.2f}, {frontier.centroid_world[1]:.2f})')
 
     def _goal_response_callback(self, future, rs: RobotState):
-        goal_handle = future.result()
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Failed to send NavigateToPose goal: {exc}')
+            rs.goal_active = False
+            rs.goal_pending = False
+            rs.goal_handle = None
+            if rs.goal_position is not None:
+                rs.blacklist.append(rs.goal_position)
+            return
+
+        rs.goal_pending = False
         if not goal_handle.accepted:
             self.get_logger().warn(f'[{rs.name}] Goal rejected by Nav2')
             rs.goal_active = False
+            if rs.goal_position is not None:
+                rs.blacklist.append(rs.goal_position)
             return
 
         rs.goal_handle = goal_handle
+        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
         self.get_logger().debug(f'[{rs.name}] Goal accepted')
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
             lambda f, r=rs: self._goal_result_callback(f, r))
 
+    def _goal_feedback_callback(self, feedback_msg, rs: RobotState):
+        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        feedback = feedback_msg.feedback
+        if hasattr(feedback, 'distance_remaining'):
+            rs.last_distance_remaining = feedback.distance_remaining
+
     def _goal_result_callback(self, future, rs: RobotState):
-        result = future.result()
+        try:
+            result = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Failed while waiting for NavigateToPose result: {exc}')
+            result = None
+
+        if result is None:
+            rs.goals_failed += 1
+            if rs.goal_position:
+                rs.blacklist.append(rs.goal_position)
+            rs.goal_active = False
+            rs.goal_pending = False
+            rs.goal_handle = None
+            rs.last_distance_remaining = None
+            return
+
         status = result.status
 
         if status == GoalStatus.STATUS_SUCCEEDED:
@@ -490,7 +583,9 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] Goal finished with status {status}')
 
         rs.goal_active = False
+        rs.goal_pending = False
         rs.goal_handle = None
+        rs.last_distance_remaining = None
 
     def _cancel_goal(self, rs: RobotState):
         if rs.goal_handle is not None:
@@ -499,7 +594,9 @@ class MultiRobotExplorer(Node):
             except Exception:
                 pass
         rs.goal_active = False
+        rs.goal_pending = False
         rs.goal_handle = None
+        rs.last_distance_remaining = None
 
     # -----------------------------------------------------------------------
     # Visualisation
