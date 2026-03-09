@@ -5,7 +5,7 @@
 #   1. Domain bridges  (robot ↔ central topic forwarding)
 #   2. TF relay        (prefix robot TF frames: odom → blinky/odom, etc.)
 #   3. Map merge       (merge individual maps into a global map)
-#   4. Explorer        (detect frontiers, send waypoints to robots)
+#   4. Explorer        (detect frontiers, send Nav2 action goals)
 #
 # Prerequisites:
 #   - Robots are powered on, running bringup + SLAM + Nav2

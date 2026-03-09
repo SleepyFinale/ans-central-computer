@@ -28,8 +28,9 @@ multi_robot_explorer:
     potential_scale: 3.0
     gain_scale: 1.0
 
-    # Seconds before a goal is considered stale and cancelled.
-    progress_timeout: 10.0
+    # Seconds without action feedback before a goal is considered stale.
+    # Keep this comfortably above planner/controller recovery durations.
+    progress_timeout: 45.0
 
     # Distance (m) at which a frontier near another robot's active goal
     # gets a penalty (discourages sending robots to the same area).
@@ -37,3 +38,7 @@ multi_robot_explorer:
 
     # Publish frontier markers on /explore/frontiers for RViz
     visualize: true
+
+    # If NavigateToPose action bridge is unavailable, publish /<robot>/goal_pose
+    # as a compatibility fallback.
+    use_pose_goal_fallback: true
