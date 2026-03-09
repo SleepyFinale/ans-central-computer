@@ -24,3 +24,10 @@ topics:
   tf_static:
     type: tf2_msgs/msg/TFMessage
     remap: pinky/tf_static
+  # Nav2 NavigateToPose action feedback/status (robot -> central)
+  /navigate_to_pose/_action/status:
+    type: action_msgs/msg/GoalStatusArray
+    remap: /pinky/navigate_to_pose/_action/status
+  /navigate_to_pose/_action/feedback:
+    type: nav2_msgs/action/NavigateToPose_FeedbackMessage
+    remap: /pinky/navigate_to_pose/_action/feedback

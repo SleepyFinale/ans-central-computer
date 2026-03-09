@@ -9,7 +9,19 @@
 name: pinky_goals_bridge
 from_domain: 50
 to_domain: 31
-actions:
-  pinky/navigate_to_pose:
-    type: nav2_msgs/action/NavigateToPose
-    remap: navigate_to_pose
+topics:
+  # Fallback PoseStamped goal (central -> robot)
+  /pinky/goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+    remap: /goal_pose
+services:
+  # Action service endpoints (central -> robot)
+  /pinky/navigate_to_pose/_action/send_goal:
+    type: nav2_msgs/action/NavigateToPose_SendGoal
+    remap: /navigate_to_pose/_action/send_goal
+  /pinky/navigate_to_pose/_action/get_result:
+    type: nav2_msgs/action/NavigateToPose_GetResult
+    remap: /navigate_to_pose/_action/get_result
+  /pinky/navigate_to_pose/_action/cancel_goal:
+    type: action_msgs/srv/CancelGoal
+    remap: /navigate_to_pose/_action/cancel_goal
