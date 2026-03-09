@@ -2,7 +2,7 @@
 # Start domain bridges for multi-robot operation.
 #
 # Bridges robot data TO the central computer (maps, TF)
-# and NavigateToPose actions FROM the central computer TO robots.
+# and exploration waypoints FROM the central computer TO robots (goal_pose).
 #
 # Robot domains:  Blinky=30  Pinky=31  Inky=32
 # Central domain: 50
@@ -23,9 +23,9 @@ echo "    Pinky  (domain 31 → 50): map, TF"
 echo "    Inky   (domain 32 → 50): map, TF"
 echo ""
 echo "  Central → Robot (waypoints):"
-echo "    Blinky (domain 50 → 30): navigate_to_pose action"
-echo "    Pinky  (domain 50 → 31): navigate_to_pose action"
-echo "    Inky   (domain 50 → 32): navigate_to_pose action"
+echo "    Blinky (domain 50 → 30): goal_pose"
+echo "    Pinky  (domain 50 → 31): goal_pose"
+echo "    Inky   (domain 50 → 32): goal_pose"
 echo ""
 echo "Press Ctrl+C to stop all bridges."
 echo ""

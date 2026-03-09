@@ -273,6 +273,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('progress_timeout', 30.0)
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('visualize', True)
+        self.declare_parameter('prefer_action_goals', False)
         self.declare_parameter('use_pose_goal_fallback', True)
 
         self.robot_names: List[str] = (
@@ -287,6 +288,8 @@ class MultiRobotExplorer(Node):
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
         self.visualize = self.get_parameter('visualize').value
+        self.prefer_action_goals = (
+            self.get_parameter('prefer_action_goals').value)
         self.use_pose_goal_fallback = (
             self.get_parameter('use_pose_goal_fallback').value)
 
@@ -334,6 +337,7 @@ class MultiRobotExplorer(Node):
             f'Multi-robot explorer started: robots={self.robot_names}, '
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
             f'freq={freq:.2f} Hz, '
+            f'prefer_action_goals={self.prefer_action_goals}, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}')
 
     # -----------------------------------------------------------------------
@@ -437,6 +441,10 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
 
     def _send_goal(self, rs: RobotState, frontier: Frontier):
+        if not self.prefer_action_goals:
+            self._publish_pose_goal(rs, frontier, fallback=False)
+            return
+
         if rs.action_client is None:
             self.get_logger().warn(f'[{rs.name}] No action client available')
             rs.goal_active = False
@@ -449,7 +457,7 @@ class MultiRobotExplorer(Node):
                     f'on /{rs.name}/navigate_to_pose')
                 rs.server_unavailable_logged = True
             if self.use_pose_goal_fallback:
-                self._publish_pose_fallback_goal(rs, frontier)
+                self._publish_pose_goal(rs, frontier, fallback=True)
                 return
             rs.goal_active = False
             rs.goal_pending = False
@@ -485,7 +493,7 @@ class MultiRobotExplorer(Node):
             f'{frontier.centroid_world[1]:.2f}) — frontier size '
             f'{frontier.size_m:.2f}m ({frontier.size} cells)')
 
-    def _publish_pose_fallback_goal(self, rs: RobotState, frontier: Frontier):
+    def _publish_pose_goal(self, rs: RobotState, frontier: Frontier, fallback: bool):
         goal_pub = self.goal_pubs.get(rs.name)
         if goal_pub is None:
             rs.goal_active = False
@@ -506,9 +514,15 @@ class MultiRobotExplorer(Node):
         rs.goal_active = True
         rs.goal_pending = False
         rs.goal_handle = None
-        self.get_logger().warn(
-            f'[{rs.name}] Falling back to PoseStamped goal_pose '
-            f'({frontier.centroid_world[0]:.2f}, {frontier.centroid_world[1]:.2f})')
+        if fallback:
+            self.get_logger().warn(
+                f'[{rs.name}] Falling back to PoseStamped goal_pose '
+                f'({frontier.centroid_world[0]:.2f}, {frontier.centroid_world[1]:.2f})')
+        else:
+            self.get_logger().info(
+                f'[{rs.name}] Publishing goal_pose ({frontier.centroid_world[0]:.2f}, '
+                f'{frontier.centroid_world[1]:.2f}) — frontier size '
+                f'{frontier.size_m:.2f}m ({frontier.size} cells)')
 
     def _goal_response_callback(self, future, rs: RobotState):
         try:

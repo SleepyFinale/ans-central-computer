@@ -1,15 +1,15 @@
 # Domain bridge: Central (domain 50) → Inky (ROS_DOMAIN_ID 32)
 #
-# Bridges Nav2 action goals FROM the central computer TO the robot.
-# The multi_robot_explorer sends goals to /inky/navigate_to_pose (domain 50).
-# This bridge remaps them to /navigate_to_pose on the robot's domain.
+# Bridges exploration waypoints FROM the central computer TO the robot.
+# The multi_robot_explorer publishes goals on /inky/goal_pose (domain 50).
+# This bridge remaps them to /goal_pose on the robot's domain.
 #
 # Run with: ros2 run domain_bridge domain_bridge <path-to-this-file>
 
 name: inky_goals_bridge
 from_domain: 50
 to_domain: 32
-actions:
-  inky/navigate_to_pose:
-    type: nav2_msgs/action/NavigateToPose
-    remap: navigate_to_pose
+topics:
+  inky/goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+    remap: goal_pose
