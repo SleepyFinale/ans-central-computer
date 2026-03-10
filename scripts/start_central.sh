@@ -57,7 +57,13 @@ echo ""
 # surfaced clearly. Override by setting EXPLORER_USE_GOAL_POSE_FALLBACK=true
 # before running this script if you need the legacy behaviour.
 EXPLORER_USE_GOAL_POSE_FALLBACK="${EXPLORER_USE_GOAL_POSE_FALLBACK:-false}"
+EXPLORER_FREQUENCY_HZ="${EXPLORER_FREQUENCY_HZ:-}"
 echo "  Explorer fallback = use_pose_goal_fallback=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
+if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
+    echo "  Explorer frequency override = ${EXPLORER_FREQUENCY_HZ} Hz"
+else
+    echo "  Explorer frequency override = (using YAML default)"
+fi
 echo ""
 
 # Detect robot names from available topics (e.g., /blinky/tf, /pinky/tf).
@@ -196,13 +202,20 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
     SINGLE_ROBOT="${SELECTED_ROBOTS[0]}"
     echo "[2/3] Single-robot setup detected (${SINGLE_ROBOT}) — skipping map merge."
     echo "[3/3] Starting single-robot explorer (Nav2 offloaded to robot)..."
-    python3 "${SCRIPT_DIR}/multi_robot_explorer.py" --ros-args \
-        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml" \
-        -p "robot_names:=[${SINGLE_ROBOT}]" \
-        -p "map_topic:=/map" \
-        -p "world_frame:=map" \
-        -p "single_robot_offloaded_nav2:=true" \
-        -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}" &
+    EXPLORER_ARGS=(
+        "${SCRIPT_DIR}/multi_robot_explorer.py"
+        --ros-args
+        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml"
+        -p "robot_names:=[${SINGLE_ROBOT}]"
+        -p "map_topic:=/map"
+        -p "world_frame:=map"
+        -p "single_robot_offloaded_nav2:=true"
+        -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
+    )
+    if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
+        EXPLORER_ARGS+=(-p "explore_frequency:=${EXPLORER_FREQUENCY_HZ}")
+    fi
+    python3 "${EXPLORER_ARGS[@]}" &
     PIDS+=($!)
 else
     # ---- 2. Map merge ----
@@ -214,10 +227,17 @@ else
 
     # ---- 3. Explorer ----
     echo "[3/3] Starting multi-robot explorer..."
-    python3 "${SCRIPT_DIR}/multi_robot_explorer.py" --ros-args \
-        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml" \
-        -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
-        -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}" &
+    EXPLORER_ARGS=(
+        "${SCRIPT_DIR}/multi_robot_explorer.py"
+        --ros-args
+        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml"
+        -p "robot_names:=[${ROBOT_LIST_PARAM}]"
+        -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
+    )
+    if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
+        EXPLORER_ARGS+=(-p "explore_frequency:=${EXPLORER_FREQUENCY_HZ}")
+    fi
+    python3 "${EXPLORER_ARGS[@]}" &
     PIDS+=($!)
 fi
 
