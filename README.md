@@ -689,6 +689,62 @@ This mode is useful when the central PC is managing multiple robots or when you 
 
 In this configuration, you get the same autonomous exploration behavior as the default setup, but with Nav2's CPU load moved off the central PC and onto the robot.
 
+#### Using `start_central.sh` + `multi_robot_explorer.py` with a single robot (Nav2 on robot)
+
+For a **single robot** where Nav2 + SLAM run on the **robot SBC** and you want to use the central computer only for coordination (frontier selection) while still leveraging the `start_central.sh` workflow, the script now automatically enters a single-robot offloaded-Nav2 mode when it detects exactly one robot namespace (after any `-bpi` filters).
+
+- **On the robot (e.g., Pinky SBC):**
+
+  ```bash
+  # Terminal 1 – bringup + SLAM + normalizer
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+
+  ros2 launch turtlebot3_bringup robot.launch.py
+
+  # Terminal 2 – Nav2 (SLAM-based navigation, no RViz)
+  source /opt/ros/humble/setup.bash
+  export TURTLEBOT3_MODEL=burger
+
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+    use_sim_time:=False \
+    use_rviz:=False
+  ```
+
+  In this configuration, the robot publishes `/map` (live SLAM map) and a TF tree containing `map -> <robot>/odom -> <robot>/base_footprint` on its own SBC.
+
+- **On the central PC:**
+
+  ```bash
+  cd ~/turtlebot3_ws
+  # Match the robot's ROS_DOMAIN_ID (e.g. 50 for the single-domain setup).
+  export ROS_DOMAIN_ID=<robot_domain_id>
+
+  # Optional: use set_robot_env.sh if you are on the same domain
+  # source scripts/set_robot_env.sh pinky
+
+  # Start central explorer stack (mode is auto-detected)
+  ./scripts/start_central.sh -p
+  ```
+
+  Behavior in this mode:
+
+  - `start_central.sh` detects that there is exactly one robot namespace after filtering and automatically enters **single-robot offloaded-Nav2 mode**.
+  - `tf_relay_multirobot.py` is started with frame prefixing disabled, so TF frames such as `map`, `pinky/odom`, `pinky/base_footprint` are relayed from `/pinky/tf` to `/tf` unchanged.
+  - `map_merge` is **skipped** (the robot's own `/map` is treated as the world map).
+  - `multi_robot_explorer.py` is launched with:
+    - `robot_names:=[pinky]` (or the detected robot name).
+    - `map_topic:=/map` and `world_frame:=map`.
+    - `single_robot_offloaded_nav2:=true`, so goals are sent in the `map` frame and TF lookups use `<robot>/base_footprint`.
+
+  This lets the central explorer treat the robot's live `/map` as the world map while still sending `NavigateToPose` goals to `/<robot>/navigate_to_pose` in the `map` frame.
+
+**Summary of supported combinations (automatic mode selection):**
+
+- **Single robot, Nav2 on central PC:** use `navigation2_slam.launch.py` on the central PC + `./scripts/start_explorer_simple.sh` (no `start_central.sh` needed).
+- **Single robot, Nav2 on robot SBC (default when one robot is detected):** use `navigation2_slam.launch.py` on the robot + `./scripts/start_central.sh -<robot_letter>` on the central PC; `start_central.sh` automatically runs in single-robot offloaded-Nav2 mode (no map_merge).
+- **Multi-robot, Nav2 on each robot:** use the namespaced SLAM + Nav2 launches per robot and run `./scripts/start_central.sh` (no extra mode flags needed) on the central PC; when it sees multiple robot namespaces, it automatically starts TF relay with frame prefixing, `multirobot_map_merge`, and the multi-robot explorer.
+
 ---
 
 ## Multi-Robot SLAM (Blinky + Pinky + Inky)

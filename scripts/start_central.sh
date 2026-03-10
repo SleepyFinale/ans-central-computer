@@ -132,6 +132,14 @@ echo "Detected robots: ${DETECTED_ROBOTS[*]}"
 echo "Using robots   : ${SELECTED_ROBOTS[*]}"
 echo ""
 
+if ((${#SELECTED_ROBOTS[@]} == 1)); then
+    MODE_DESC="single-robot (Nav2 on robot, no map_merge)"
+else
+    MODE_DESC="multi-robot (Nav2 on robots, map_merge enabled)"
+fi
+echo "  Mode          = ${MODE_DESC}"
+echo ""
+
 # Build a ROS 2 list parameter value like "[blinky,pinky]".
 ROBOT_LIST_PARAM=""
 for r in "${SELECTED_ROBOTS[@]}"; do
@@ -153,28 +161,47 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# ---- 1. TF relay ----
-echo "[1/3] Starting TF relay (prefix robot frames)..."
-python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
-    -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" &
-PIDS+=($!)
-sleep 1
+# ---- 1. TF relay / world frame setup ----
+if ((${#SELECTED_ROBOTS[@]} == 1)); then
+    # Single-robot offloaded Nav2 mode (default for one robot):
+    # - Nav2 + SLAM run on the robot.
+    # - The robot publishes TF on /<robot>/tf with frames like 'map',
+    #   '<robot>/odom', '<robot>/base_footprint'. We relay those to /tf
+    #   without changing frame IDs.
+    echo "[1/3] Single-robot mode detected — starting TF relay without frame prefixing..."
+    python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
+        -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" \
+        -p "prefix_frames:=false" &
+    PIDS+=($!)
+    sleep 1
+else
+    # Multi-robot mode:
+    # - Nav2 + SLAM run on each robot in its own namespace.
+    # - We prefix TF frames with the robot name so map_merge and the
+    #   explorer can distinguish them.
+    echo "[1/3] Multi-robot mode detected — starting TF relay with frame prefixing..."
+    python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
+        -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" &
+    PIDS+=($!)
+    sleep 1
+fi
 
 if ((${#SELECTED_ROBOTS[@]} == 1)); then
     # ------------------------------------------------------------------
-    # Single-robot mode: use the robot's own map frame as world frame
-    # and skip map_merge entirely.
+    # Single-robot setup:
+    #   - Skip map_merge.
+    #   - Treat the robot's /map in frame 'map' as the world map
+    #     (world_frame='map').
     # ------------------------------------------------------------------
     SINGLE_ROBOT="${SELECTED_ROBOTS[0]}"
     echo "[2/3] Single-robot setup detected (${SINGLE_ROBOT}) — skipping map merge."
-    echo "[3/3] Starting multi-robot explorer in single-robot mode..."
-    # NOTE: For rclpy nodes, parameters passed via CLI should be the raw parameter
-    # names (robot_names, map_topic, world_frame, ...) — not prefixed by node name.
+    echo "[3/3] Starting single-robot explorer (Nav2 offloaded to robot)..."
     python3 "${SCRIPT_DIR}/multi_robot_explorer.py" --ros-args \
         --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml" \
-        -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
+        -p "robot_names:=[${SINGLE_ROBOT}]" \
         -p "map_topic:=/map" \
-        -p "world_frame:=${SINGLE_ROBOT}/map" \
+        -p "world_frame:=map" \
+        -p "single_robot_offloaded_nav2:=true" \
         -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}" &
     PIDS+=($!)
 else

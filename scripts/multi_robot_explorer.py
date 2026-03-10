@@ -274,6 +274,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
+        self.declare_parameter('single_robot_offloaded_nav2', False)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -289,6 +290,8 @@ class MultiRobotExplorer(Node):
         self.visualize = self.get_parameter('visualize').value
         self.use_pose_goal_fallback = (
             self.get_parameter('use_pose_goal_fallback').value)
+        self.single_robot_offloaded_nav2 = (
+            self.get_parameter('single_robot_offloaded_nav2').value)
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -330,11 +333,13 @@ class MultiRobotExplorer(Node):
         period = 1.0 / freq if freq > 0 else 3.0
         self.plan_timer = self.create_timer(period, self._plan_tick)
 
+        mode = 'single_robot_offloaded_nav2' if self.single_robot_offloaded_nav2 else 'multi_robot'
         self.get_logger().info(
             f'Multi-robot explorer started: robots={self.robot_names}, '
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
             f'freq={freq:.2f} Hz, '
-            f'use_pose_goal_fallback={self.use_pose_goal_fallback}')
+            f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
+            f'mode={mode}')
 
     # -----------------------------------------------------------------------
     # Callbacks
@@ -418,6 +423,11 @@ class MultiRobotExplorer(Node):
 
     def _update_robot_positions(self):
         for rs in self.robots.values():
+            # In all modes, treat the robot base frame as "<robot>/base_footprint".
+            # For multi-robot + map_merge, TF provides:
+            #   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
+            # For offloaded single-robot mode, the robot publishes:
+            #   map -> <robot>/odom -> <robot>/base_footprint
             base_frame = f'{rs.name}/base_footprint'
             try:
                 t = self.tf_buffer.lookup_transform(

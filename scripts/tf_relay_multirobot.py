@@ -28,7 +28,9 @@ class TFRelayNode(Node):
         super().__init__('tf_relay_multirobot')
 
         self.declare_parameter('robot_prefixes', ['blinky', 'pinky', 'inky'])
+        self.declare_parameter('prefix_frames', True)
         self.robot_prefixes = self.get_parameter('robot_prefixes').value
+        self.prefix_frames = self.get_parameter('prefix_frames').value
 
         self.tf_pub = self.create_publisher(TFMessage, '/tf', 100)
         self.tf_static_pub = self.create_publisher(TFMessage, '/tf_static', TF_STATIC_QOS)
@@ -50,7 +52,8 @@ class TFRelayNode(Node):
             )
 
         self.get_logger().info(
-            f'TF relay started: merging {self.robot_prefixes} -> /tf'
+            f'TF relay started: merging {self.robot_prefixes} -> /tf '
+            f'(prefix_frames={self.prefix_frames})'
         )
 
     def tf_callback(self, msg: TFMessage, prefix: str, is_static: bool):
@@ -61,8 +64,15 @@ class TFRelayNode(Node):
             for t in msg.transforms:
                 from copy import deepcopy
                 t_out = deepcopy(t)
-                t_out.header.frame_id = prefix_frame(t.header.frame_id, prefix)
-                t_out.child_frame_id = prefix_frame(t.child_frame_id, prefix)
+                if self.prefix_frames:
+                    t_out.header.frame_id = prefix_frame(t.header.frame_id, prefix)
+                    t_out.child_frame_id = prefix_frame(t.child_frame_id, prefix)
+                else:
+                    # Pass frames through unchanged; still relay from
+                    # <robot>/tf to /tf so consumers that listen only on /tf
+                    # can see them.
+                    t_out.header.frame_id = t.header.frame_id
+                    t_out.child_frame_id = t.child_frame_id
                 out.transforms.append(t_out)
             if is_static:
                 self.tf_static_pub.publish(out)
