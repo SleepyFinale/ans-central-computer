@@ -185,6 +185,7 @@ def assign_frontiers(
     potential_scale: float,
     gain_scale: float,
     nearby_penalty_dist: float = 2.0,
+    min_goal_separation: float = 0.25,
 ) -> Dict[str, int]:
     """Assign one frontier to each idle robot.
 
@@ -222,6 +223,11 @@ def assign_frontiers(
                 continue
 
             dist = _dist(rpos, fr.centroid_world)
+            # avoid goals that are effectively already within Nav2's goal
+            # tolerance around the robot; these lead to immediate "success"
+            # with no real motion
+            if dist < min_goal_separation:
+                continue
             gain = gain_scale * fr.size_m
             cost = potential_scale * dist
             penalty = 0.0
@@ -275,6 +281,8 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
         self.declare_parameter('single_robot_offloaded_nav2', False)
+        self.declare_parameter('min_goal_separation', 0.25)
+        self.declare_parameter('suspicious_success_distance', 0.15)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -292,6 +300,10 @@ class MultiRobotExplorer(Node):
             self.get_parameter('use_pose_goal_fallback').value)
         self.single_robot_offloaded_nav2 = (
             self.get_parameter('single_robot_offloaded_nav2').value)
+        self.min_goal_separation = (
+            self.get_parameter('min_goal_separation').value)
+        self.suspicious_success_distance = (
+            self.get_parameter('suspicious_success_distance').value)
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -411,6 +423,7 @@ class MultiRobotExplorer(Node):
             self.robots, frontiers,
             self.potential_scale, self.gain_scale,
             self.nearby_penalty_dist,
+            self.min_goal_separation,
         )
 
         for rname, fi in assignments.items():
@@ -577,10 +590,24 @@ class MultiRobotExplorer(Node):
         status = result.status
 
         if status == GoalStatus.STATUS_SUCCEEDED:
-            rs.goals_reached += 1
-            self.get_logger().info(
-                f'[{rs.name}] Goal reached '
-                f'(total: {rs.goals_reached})')
+            suspicious = (
+                rs.last_distance_remaining is not None
+                and rs.last_distance_remaining > self.suspicious_success_distance
+            )
+            if suspicious:
+                rs.goals_failed += 1
+                self.get_logger().warn(
+                    f'[{rs.name}] Goal reported success but distance_remaining='
+                    f'{rs.last_distance_remaining:.2f}m > '
+                    f'{self.suspicious_success_distance:.2f}m — treating as '
+                    f'failure and blacklisting')
+                if rs.goal_position:
+                    rs.blacklist.append(rs.goal_position)
+            else:
+                rs.goals_reached += 1
+                self.get_logger().info(
+                    f'[{rs.name}] Goal reached '
+                    f'(total: {rs.goals_reached})')
         elif status == GoalStatus.STATUS_ABORTED:
             rs.goals_failed += 1
             self.get_logger().warn(

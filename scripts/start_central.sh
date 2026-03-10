@@ -10,8 +10,8 @@
 # Prerequisites:
 #   - All robots and the central PC use the same ROS_DOMAIN_ID (typically 50)
 #   - Each robot is powered on and running:
-#       * namespaced bringup       (robot_namespaced.launch.py)
-#       * namespaced SLAM + Nav2   (navigation2_slam_namespaced.launch.py)
+#       * bringup       (robot.launch.py)
+#       * SLAM + Nav2   (navigation2_slam.launch.py)
 #   - Central PC and robots are on the same WiFi network
 #
 # Usage:
