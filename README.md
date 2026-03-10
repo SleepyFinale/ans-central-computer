@@ -202,16 +202,18 @@ ROS 2 uses `ROS_DOMAIN_ID` to separate different robot networks. Each robot and 
 
 ### Robot configuration
 
-| Robot  | ROS_DOMAIN_ID | Lab (SSID: SNS)       | RaspAP (rpi)        | Azure (SSID: Azure) |
-| ------ | ------------- | --------------------- | ------------------- | --------------------|
-| Blinky | 30            | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
-| Pinky  | 31            | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
-| Inky   | 32            | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
-| Clyde  | 33            | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`        |
+All robots and the Remote PC share a **single ROS 2 domain**, `ROS_DOMAIN_ID=50`. The table below lists the SSH targets per network; the domain ID is the same for every robot.
+
+| Robot  | Lab (SSID: SNS)       | RaspAP (rpi)        | Azure (SSID: Azure) |
+| ------ | --------------------- | ------------------- | --------------------|
+| Blinky | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
+| Pinky  | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
+| Inky   | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
+| Clyde  | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`        |
 
 ### Recommended: use the setup script
 
-`scripts/set_robot_env.sh` sets `ROS_DOMAIN_ID` and `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, and **Inky**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Only **Clyde** requires you to pass the robot's IP (no fixed IPs per network).
+`scripts/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, and **Inky**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Only **Clyde** requires you to pass the robot's IP (no fixed IPs per network).
 
 **How it works:**
 
@@ -243,25 +245,11 @@ Then connect with:
 ssh $ROBOT_SSH
 ```
 
-**Script output:** The script prints the detected network (`lab`, `rpi`, or `azure`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROS_DOMAIN_ID=30  ROBOT_SSH=blinky@192.168.0.158  (network: lab)`.
+**Script output:** The script prints the detected network (`lab`, `rpi`, or `azure`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@192.168.0.158  (network: lab)`.
 
 **Manual setup (alternative):**
 
 ```bash
-# Set ROS_DOMAIN_ID for the robot you're using (see table above)
-export ROS_DOMAIN_ID=30   # Blinky
-# export ROS_DOMAIN_ID=31   # Pinky
-# export ROS_DOMAIN_ID=32   # Inky
-# export ROS_DOMAIN_ID=33   # Clyde
-```
-
-**To make it permanent (add to `~/.bashrc`):**
-
-```bash
-# Example: always use Blinky
-echo "source ~/turtlebot3_ws/scripts/set_robot_env.sh blinky" >> ~/.bashrc
-source ~/.bashrc
-```
 
 **Verify it's set:**
 
@@ -270,11 +258,8 @@ echo $ROS_DOMAIN_ID
 echo $ROBOT_SSH   # if you used the script
 ```
 
-**Default domain for central PC:** The workspace configures `ROS_DOMAIN_ID=50` by default (in `~/.bashrc`) for multi-robot aggregation. For **single-robot** sessions, run `source scripts/set_robot_env.sh <robot>` to switch to that robot's domain (e.g., 30 for Blinky).
-
 **Important:**
 
-- If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0
 - The Remote PC and robot must use the **same** `ROS_DOMAIN_ID` value
 - The Remote PC and robot must be on the **same** WiFi network (e.g. both on SNS, both on RaspAP, or both on Azure)
 - When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]` again in each terminal (or open new terminals and source once)
@@ -283,7 +268,7 @@ echo $ROBOT_SSH   # if you used the script
 
 ## Connecting to a Robot
 
-This section describes the steps to connect to a TurtleBot3 robot and start autonomous exploration. You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robot table](#ros-domain-configuration) and `scripts/set_robot_env.sh` so `ROS_DOMAIN_ID` and `ROBOT_SSH` match the robot you want.
+This section describes the steps to connect to a TurtleBot3 robot and start autonomous exploration. You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robot table](#ros-domain-configuration) and `scripts/set_robot_env.sh` so `ROBOT_SSH` matches the robot you want.
 
 **Prerequisites:**
 
@@ -291,7 +276,7 @@ This section describes the steps to connect to a TurtleBot3 robot and start auto
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
-- Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]` — this overrides the default `ROS_DOMAIN_ID=50` with the robot's domain (30 for Blinky, etc.)
+- Robot environment is set (see [ROS Domain Configuration](#ros-domain-configuration)): `source scripts/set_robot_env.sh <robot> [ip]` — this sets `ROBOT_SSH` appropriately.
 
 **Startup order is critical:** Start terminals in sequence and wait between steps for proper initialization.
 
@@ -969,18 +954,7 @@ You should see `nav2_msgs` in the list. Then try building again:
   source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
   ```
 
-  Or set manually: `export ROS_DOMAIN_ID=30` (Blinky), 31 (Pinky), 32 (Inky), 33 (Clyde).
-
-- **Step 4 (optional)**: Make it persistent.
-
-  ```bash
-  echo "source ~/turtlebot3_ws/scripts/set_robot_env.sh blinky" >> ~/.bashrc
-  source ~/.bashrc
-  ```
-
-- **Step 5**: Restart terminals (or `source ~/.bashrc`) so every process uses the same domain.
-
-**Note:** If `ROS_DOMAIN_ID` is not set, ROS 2 defaults to 0. Make sure both robot and Remote PC explicitly set the same value!
+- **Step 4**: Restart terminals (or `source ~/.bashrc`) so every process uses the same domain.
 
 ---
 
@@ -1458,8 +1432,6 @@ echo $ROS_DOMAIN_ID
 
 # On Robot (via SSH)
 echo $ROS_DOMAIN_ID
-
-# Both should show the same value (30, 31, 32, or 33)
 ```
 
 ### Run multi-robot TF diagnostics

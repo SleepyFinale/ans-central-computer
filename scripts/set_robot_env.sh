@@ -1,24 +1,23 @@
 #!/usr/bin/env bash
-# Set ROS_DOMAIN_ID and ROBOT_SSH for the selected robot.
+# Set ROBOT_SSH for the selected robot.
 # Auto-detects WiFi (SNS, RaspAP, or Azure) to pick the correct IP for Blinky/Pinky/Inky.
 # Must be sourced so variables apply to the current shell:
 #   source scripts/set_robot_env.sh blinky
-#   source scripts/set_robot_env.sh inky
 
 set_robot_usage() {
   echo "Usage: source scripts/set_robot_env.sh <robot> [ip]"
   echo ""
   echo "  robot   One of: blinky, pinky, inky, clyde"
-  echo "  ip      Optional. Required for clyde if not using hostname. Override for inky optional."
+  echo "  ip      Optional. Required for clyde if not using hostname."
   echo ""
-  echo "  WiFi auto-detection: Script detects SNS (Lab), Azure, or RaspAP (RPi) and uses the right IP."
+  echo "  WiFi auto-detection: Script detects SNS (Lab), RaspAP (RPi), or Azure and uses the right IP."
   echo ""
-  echo "  Robot   ROS_DOMAIN_ID   SNS (lab)            RaspAP (rpi)         Azure"
-  echo "  ------  --------------  -------------------  -------------------  -------------------"
-  echo "  Blinky  30              blinky@192.168.0.158 blinky@10.3.141.220  blinky@172.20.10.13"
-  echo "  Pinky   31              pinky@192.168.0.194  pinky@10.3.141.194   pinky@172.20.10.14"
-  echo "  Inky    32              inky@192.168.0.139   inky@10.3.141.139    inky@172.20.10.15"
-  echo "  Clyde   33              clyde@<IP> (pass ip as second argument)"
+  echo "  Robot   SNS (lab)            RaspAP (rpi)         Azure"
+  echo "  ------  -------------------  -------------------  -------------------"
+  echo "  Blinky  blinky@192.168.0.158 blinky@10.3.141.220  blinky@172.20.10.13"
+  echo "  Pinky   pinky@192.168.0.194  pinky@10.3.141.194   pinky@172.20.10.14"
+  echo "  Inky    inky@192.168.0.139   inky@10.3.141.139    inky@172.20.10.15"
+  echo "  Clyde   clyde@<IP>           clyde@<IP>           clyde@<IP>"
 }
 
 # Detect current WiFi SSID. Returns "SNS", "RaspAP", "Azure", or empty if unknown/not connected.
@@ -61,7 +60,6 @@ INKY_AZURE=172.20.10.15
 
 case "$robot" in
   blinky)
-    export ROS_DOMAIN_ID=30
     ssid=$(get_wifi_ssid)
     net=$(get_network_from_ssid "$ssid")
     case "$net" in
@@ -72,10 +70,9 @@ case "$robot" in
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
     esac
-    echo "Robot: Blinky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
+    echo "Robot: Blinky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     ;;
   pinky)
-    export ROS_DOMAIN_ID=31
     ssid=$(get_wifi_ssid)
     net=$(get_network_from_ssid "$ssid")
     case "$net" in
@@ -86,35 +83,28 @@ case "$robot" in
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
     esac
-    echo "Robot: Pinky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
+    echo "Robot: Pinky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     ;;
   inky)
-    export ROS_DOMAIN_ID=32
-    if [ -n "$ip" ]; then
-      export ROBOT_SSH="inky@$ip"
-      echo "Robot: Inky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH"
-    else
-      ssid=$(get_wifi_ssid)
-      net=$(get_network_from_ssid "$ssid")
-      case "$net" in
-        lab)   export ROBOT_SSH="inky@$INKY_LAB" ;;
-        rpi)   export ROBOT_SSH="inky@$INKY_RPI" ;;
-        azure) export ROBOT_SSH="inky@$INKY_AZURE" ;;
-        *)     export ROBOT_SSH="inky@$INKY_LAB"
-               echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-               ;;
-      esac
-      echo "Robot: Inky  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
-    fi
+    ssid=$(get_wifi_ssid)
+    net=$(get_network_from_ssid "$ssid")
+    case "$net" in
+      lab)   export ROBOT_SSH="inky@$INKY_LAB" ;;
+      rpi)   export ROBOT_SSH="inky@$INKY_RPI" ;;
+      azure) export ROBOT_SSH="inky@$INKY_AZURE" ;;
+      *)     export ROBOT_SSH="inky@$INKY_LAB"
+             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
+             ;;
+    esac
+    echo "Robot: Inky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     ;;
   clyde)
-    export ROS_DOMAIN_ID=33
     if [ -n "$ip" ]; then
       export ROBOT_SSH="clyde@$ip"
-      echo "Robot: Clyde  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH=$ROBOT_SSH"
+      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH"
     else
       unset ROBOT_SSH 2>/dev/null || true
-      echo "Robot: Clyde  ROS_DOMAIN_ID=$ROS_DOMAIN_ID  ROBOT_SSH not set (pass IP: source scripts/set_robot_env.sh clyde <IP>)"
+      echo "Robot: Clyde  ROBOT_SSH not set (pass IP: source scripts/set_robot_env.sh clyde <IP>)"
     fi
     ;;
   "")
