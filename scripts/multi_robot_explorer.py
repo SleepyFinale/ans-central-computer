@@ -430,7 +430,8 @@ class MultiRobotExplorer(Node):
             except (tf2_ros.LookupException,
                     tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException):
-                pass  # keep last known position
+                # keep last known position
+                pass
 
     # -----------------------------------------------------------------------
     # Nav2 goal management

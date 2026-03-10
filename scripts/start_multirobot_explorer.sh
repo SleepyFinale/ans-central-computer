@@ -1,10 +1,12 @@
 #!/bin/bash
 # Start the multi-robot frontier explorer on the central PC.
 #
-# Prerequisites:
-#   - Domain bridges running (start_domain_bridges.sh)
-#   - Multi-robot SLAM running (start_multirobot_slam.sh)
-#   - Multi-robot Nav2 running for each robot
+# Prerequisites (single-domain, namespaced setup):
+#   - All robots and the central PC use the same ROS_DOMAIN_ID (typically 50)
+#   - Each robot is running Nav2 + SLAM in its own namespace
+#     (e.g. navigation2_slam_namespaced.launch.py robot_name:=blinky ...)
+#   - TF relay and map_merge are running on the central PC
+#     (for example via ./scripts/start_central.sh)
 #
 # Usage:
 #   ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh

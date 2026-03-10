@@ -39,6 +39,14 @@ multi_robot_explorer:
     # Publish frontier markers on /explore/frontiers for RViz
     visualize: true
 
-    # If NavigateToPose action bridge is unavailable, publish /<robot>/goal_pose
+    # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
+    # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose
     # as a compatibility fallback.
-    use_pose_goal_fallback: true
+    #
+    # In the standard single-domain, namespaced multi-robot workflow started via
+    # scripts/start_central.sh, this flag is overridden to "false" so the
+    # explorer *only* drives robots through Nav2's NavigateToPose action
+    # servers. To temporarily re-enable the topic-based fallback in that
+    # workflow, set EXPLORER_USE_GOAL_POSE_FALLBACK=true before running
+    # start_central.sh.
+    use_pose_goal_fallback: false

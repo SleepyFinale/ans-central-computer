@@ -50,12 +50,12 @@ flowchart TB
 flowchart TB
   subgraph Robots["Individual Robots (SBCs)"]
     direction TB
-    r1["Robot: Blinky (ROS_DOMAIN_ID=30)"]
-    r2["Robot: Pinky (ROS_DOMAIN_ID=31)"]
-    rN["Robot: Inky/Clyde/... (ROS_DOMAIN_ID=32/33/...)"]
+    r1["Robot: Blinky (ns=/blinky, ROS_DOMAIN_ID=50)"]
+    r2["Robot: Pinky (ns=/pinky, ROS_DOMAIN_ID=50)"]
+    rN["Robot: Inky/Clyde/... (ns=/inky,/clyde, ROS_DOMAIN_ID=50)"]
   end
 
-  subgraph Central["Central Computer (Aggregation Domain: ROS_DOMAIN_ID=50)"]
+  subgraph Central["Central Computer (Shared Domain: ROS_DOMAIN_ID=50)"]
     direction TB
     centralMapping["Function: GlobalMapping"]
     centralTasking["Function: Frontier+TaskAllocation"]
@@ -70,7 +70,7 @@ flowchart TB
     guiStatus["Robot status panel"]
   end
 
-  Robots -->|"sensor+pose+maps (bridged into domain 50)"| Central
+  Robots -->|"sensor+pose+maps (namespaced topics, shared domain)"| Central
   Central -->|"waypoints / safety commands (capstone contract)"| Robots
   Central -->|"map+poses+events"| GUI
   Robots -->|"video + object detections"| GUI
@@ -80,13 +80,11 @@ flowchart TB
 
 ## Function: GlobalMapping (multi-robot SLAM + map merge) — matches current workspace
 
-This function already exists in your central workspace. **Inky** (domain 32) is now configured with fixed IPs per network and domain bridges like Blinky and Pinky (`inky_bridge.yaml`, `inky_goals_bridge.yaml`).
+This function already exists in your central workspace. Robots (Blinky, Pinky, Inky, etc.) now run **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
 
-- **Domain bridging**: `config/domain_bridge/*_bridge.yaml` + `scripts/start_domain_bridges.sh`
-- **TF stitching**: `scripts/tf_relay_multirobot.py` (plus optional fallback `scripts/tf_map_odom_fallback.py`)
-- **Per-robot SLAM**: `slam_toolbox` instances using `param/humble/mapper_params_*.yaml`
-- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params.yaml`
-- **Launch**: `src/turtlebot3/turtlebot3_navigation2/launch/multirobot_slam.launch.py` (started by `scripts/start_multirobot_slam.sh`)
+- **TF stitching**: `scripts/tf_relay_multirobot.py` (merges `/blinky/tf`, `/pinky/tf`, `/inky/tf` into `/tf` with prefixes)
+- **Per-robot SLAM**: `slam_toolbox` instances on each robot, publishing `/blinky/map`, `/pinky/map`, etc.
+- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (or `multirobot_params.yaml` for known init poses)
 
 ```mermaid
 flowchart TB
@@ -95,19 +93,14 @@ flowchart TB
 
     subgraph Programs_GlobalMapping["Programs"]
       direction TB
-      domainBridge["domain_bridge (30/31/... -> 50)\nconfig/domain_bridge/*_bridge.yaml\nscripts/start_domain_bridges.sh"]
       tfRelay["script: scripts/tf_relay_multirobot.py"]
-      slamB["node: slam_toolbox (Blinky)\nasync_slam_toolbox_node\nparam: mapper_params_blinky.yaml"]
-      slamP["node: slam_toolbox (Pinky)\nasync_slam_toolbox_node\nparam: mapper_params_pinky.yaml"]
-      mapMerge["node: multirobot_map_merge/map_merge\nconfig/map_merge/multirobot_params.yaml"]
-      launchSlam["launch: multirobot_slam.launch.py\nscripts/start_multirobot_slam.sh"]
+      slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\nparam: mapper_params_blinky.yaml"]
+      slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\nparam: mapper_params_pinky.yaml"]
+      mapMerge["node: multirobot_map_merge/map_merge\nconfig/map_merge/multirobot_params_unknown_poses.yaml"]
     end
 
     subgraph Data_GlobalMapping["Data (topics + TF)"]
       direction TB
-      bScanN["topic:/blinky/scan_normalized (sensor_msgs/LaserScan)"]
-      pScanN["topic:/pinky/scan_normalized (sensor_msgs/LaserScan)"]
-
       bMap["topic:/blinky/map (nav_msgs/OccupancyGrid)"]
       pMap["topic:/pinky/map (nav_msgs/OccupancyGrid)"]
       gMap["topic:/map (nav_msgs/OccupancyGrid)"]
@@ -119,24 +112,10 @@ flowchart TB
       tfChain["TF chains (intended):\nmap -> blinky/map -> blinky/odom -> blinky/base_footprint\nmap -> pinky/map -> pinky/odom -> pinky/base_footprint"]
     end
 
-    launchSlam --> domainBridge
-    launchSlam --> tfRelay
-    launchSlam --> slamB
-    launchSlam --> slamP
-    launchSlam --> mapMerge
-
-    domainBridge -->|"topic:/blinky/scan_normalized"| bScanN
-    domainBridge -->|"topic:/pinky/scan_normalized"| pScanN
-
-    domainBridge -->|"topic:/blinky/tf(+_static)"| bTF
-    domainBridge -->|"topic:/pinky/tf(+_static)"| pTF
-
     bTF -->|"script: prefix+merge"| tfRelay
     pTF -->|"script: prefix+merge"| tfRelay
     tfRelay -->|"topic:/tf + /tf_static"| gTF
 
-    bScanN -->|"scan_topic"| slamB
-    pScanN -->|"scan_topic"| slamP
     slamB -->|"topic:/blinky/map"| bMap
     slamP -->|"topic:/pinky/map"| pMap
 

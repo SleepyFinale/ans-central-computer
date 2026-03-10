@@ -708,32 +708,45 @@ In this configuration, you get the same autonomous exploration behavior as the d
 
 ## Multi-Robot SLAM (Blinky + Pinky + Inky)
 
-This section describes how to run **multiple robots** (e.g., Blinky, Pinky, and Inky) together, with the central PC aggregating their data into a single merged SLAM map. Each robot runs bringup + SLAM + Nav2 on its own ROS domain, and the central PC (domain 50) uses **domain bridges**, **map merge**, and a **multi-robot explorer** to coordinate exploration.
+This section describes how to run **multiple robots** (e.g., Blinky, Pinky, and Inky) together in a **single ROS 2 domain** with per-robot namespaces. Each robot runs bringup + SLAM + Nav2 in its own namespace (e.g. `/blinky`, `/pinky`, `/inky`), and the central PC (also on that domain, typically `ROS_DOMAIN_ID=50`) uses **TF relay**, **map merge**, and a **multi-robot explorer** to coordinate exploration.
 
 For a “boxes in boxes” system diagram (functions → programs → ROS2 topics/TF/actions), see `docs/architecture.md`.
 
-### Quick start: current multi-robot workflow
+### Quick start: single-domain, namespaced workflow
 
 - **On each robot (e.g., Blinky, Pinky):**
 
   ```bash
-  # Terminal 1 on robot: bringup + sensors
   source /opt/ros/humble/setup.bash
-  export TURTLEBOT3_MODEL=burger
-  ros2 launch turtlebot3_bringup robot.launch.py
+  source ~/turtlebot3_ws/install/setup.bash
 
-  # Terminal 2 on robot: Navigation2 + SLAM-based navigation
-  source /opt/ros/humble/setup.bash
   export TURTLEBOT3_MODEL=burger
-  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
+  export ROS_DOMAIN_ID=50      # shared domain for all robots + central
+
+  # Terminal 1 on robot: namespaced bringup + sensors
+  ros2 launch turtlebot3_bringup robot_namespaced.launch.py \
+    robot_name:=blinky         # or pinky / inky / clyde
+
+  # Terminal 2 on robot: namespaced Nav2 + SLAM-based navigation
+  ros2 launch turtlebot3_navigation2 navigation2_slam_namespaced.launch.py \
+    robot_name:=blinky \
+    use_sim_time:=false \
+    use_rviz:=false
   ```
 
 - **On the central PC (this repo):**
 
   ```bash
   cd ~/turtlebot3_ws
+  export ROS_DOMAIN_ID=50
   ./scripts/start_central.sh
   ```
+
+  This starts:
+
+  - `tf_relay_multirobot.py` (merges `/blinky/tf`, `/pinky/tf`, `/inky/tf` into `/tf` with frame prefixes)
+  - `multirobot_map_merge` (merges `/blinky/map`, `/pinky/map`, `/inky/map` into `/map`)
+  - `multi_robot_explorer.py` (detects frontiers on `/map` and sends `NavigateToPose` goals to each robot)
 
 - **RViz visualization (typically on central PC):**
 
@@ -741,122 +754,19 @@ For a “boxes in boxes” system diagram (functions → programs → ROS2 topic
   rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
   ```
 
+  Set the fixed frame to `map` and add the `/map` display plus TF, costmaps, and robot paths.
+
 ### Overview
 
-- **Blinky** (domain 30), **Pinky** (domain 31), and **Inky** (domain 32) run robot bringup on their own domains
-- **Domain bridges** subscribe to each robot's topics and republish to domain 50 with namespaced topics (`/blinky/scan`, `/pinky/scan`, `/inky/scan`, etc.)
-- **TF relay** merges `/blinky/tf`, `/pinky/tf`, and `/inky/tf` into `/tf` with frame prefixes (`blinky/odom`, `pinky/odom`, `inky/odom`)
-- **TF map→odom fallback** publishes static identity transforms `map → blinky/odom`, `map → pinky/odom`, and `map → inky/odom` so the TF tree connects before SLAM converges
-- **Laser scan normalizers** normalize scan readings (for SLAM) and rewrite `frame_id` to `blinky/base_scan`, `pinky/base_scan`, and `inky/base_scan` (for Nav2 costmaps)
-- **SLAM instances** (one per robot) produce `/blinky/map`, `/pinky/map`, and `/inky/map`
-- **Map merge** combines them into a single `/map`
+- All robots and the central PC share the **same** `ROS_DOMAIN_ID` (typically 50).
+- Each robot uses a unique **namespace** (e.g. `blinky`, `pinky`, `inky`, `clyde`), so topics and TF frames are automatically namespaced:
+  - `/blinky/scan`, `/blinky/scan_normalized`, `/blinky/map`, `/blinky/tf`, `/blinky/cmd_vel`, `/blinky/navigate_to_pose`
+  - `/pinky/...`, `/inky/...`, etc.
+- **TF relay** subscribes to `/blinky/tf`, `/pinky/tf`, `/inky/tf` (and `_static`) and republishes them on `/tf` and `/tf_static` with prefixed frame IDs (e.g. `blinky/base_footprint`, `pinky/base_footprint`).
+- **Map merge** (`multirobot_map_merge/map_merge`) consumes `/blinky/map`, `/pinky/map`, `/inky/map` and produces a merged `/map` in the `map` frame, publishing TF from `map` to each `<robot>/map`.
+- **Multi-robot explorer** (`multi_robot_explorer.py`) detects frontiers on `/map`, tracks each robot’s pose via TF (`map -> <robot>/base_footprint`), and sends `NavigateToPose` goals to `/<robot>/navigate_to_pose`.
 
-### Multi-robot prerequisites
-
-- `ros-humble-domain-bridge` installed: `sudo apt install ros-humble-domain-bridge`
-- Workspace built
-- Central PC uses `ROS_DOMAIN_ID=50` (default in `~/.bashrc`)
-- `multi_robot_explorer` now targets Nav2 `NavigateToPose` actions first; if
-  action bridging is unavailable, it can fall back to publishing `goal_pose`
-  (`use_pose_goal_fallback: true` in `config/multi_robot_explorer.yaml`).
-
-### Files added for multi-robot
-
-| File | Purpose |
-| ---- | ------- |
-| `config/domain_bridge/blinky_bridge.yaml` | Bridge: domain 30 → 50, topics → `/blinky/*` |
-| `config/domain_bridge/pinky_bridge.yaml` | Bridge: domain 31 → 50, topics → `/pinky/*` |
-| `config/domain_bridge/inky_bridge.yaml` | Bridge: domain 32 → 50, topics → `/inky/*` |
-| `config/domain_bridge/clyde_bridge.yaml` | Bridge: domain 33 → 50, topics → `/clyde/*` |
-| `config/domain_bridge/blinky_goals_bridge.yaml` | Bridge: domain 50 → 30, `/blinky/navigate_to_pose` action → Blinky |
-| `config/domain_bridge/pinky_goals_bridge.yaml` | Bridge: domain 50 → 31, `/pinky/navigate_to_pose` action → Pinky |
-| `config/domain_bridge/inky_goals_bridge.yaml` | Bridge: domain 50 → 32, `/inky/navigate_to_pose` action → Inky |
-| `scripts/start_domain_bridges.sh` | Start bridges (Blinky, Pinky, Inky) |
-| `scripts/tf_relay_multirobot.py` | Merge blinky/tf + pinky/tf + inky/tf → /tf with frame prefixes |
-| `scripts/tf_map_odom_fallback.py` | Publish map → blinky/odom, map → pinky/odom (identity) for TF tree connectivity |
-| `scripts/wait_for_tf_multirobot.py` | Wait for map → base_footprint before starting Nav2 (60s timeout, 3s warmup) |
-| `scripts/diagnose_multirobot_tf.py` | Diagnose TF tree, topics, and connectivity |
-| `config/map_merge/multirobot_params.yaml` | Map merge init poses for Blinky and Pinky |
-| `param/humble/mapper_params_blinky.yaml` | SLAM params for Blinky |
-| `param/humble/mapper_params_pinky.yaml` | SLAM params for Pinky |
-| `param/humble/burger_multirobot_blinky.yaml` | Nav2 costmap params (uses `/blinky/scan_normalized`, sensor_frame `blinky/base_scan`) |
-| `param/humble/burger_multirobot_pinky.yaml` | Nav2 costmap params (uses `/pinky/scan_normalized`, sensor_frame `pinky/base_scan`) |
-| `scripts/start_central.sh` | Start all central multi-robot services (domain bridges, TF relay, map merge, explorer) |
-| `launch/multirobot_slam.launch.py` | Launch file for SLAM, normalizers, TF relay, fallback, map merge |
-
-### Workflow
-
-**1. Start robot bringup on each robot (SSH to Blinky, Pinky, and/or Inky):**
-
-```bash
-# On Blinky (ROS_DOMAIN_ID=30)
-source /opt/ros/humble/setup.bash
-export TURTLEBOT3_MODEL=burger
-export ROS_DOMAIN_ID=30
-ros2 launch turtlebot3_bringup robot.launch.py
-```
-
-```bash
-# On Pinky (ROS_DOMAIN_ID=31)
-source /opt/ros/humble/setup.bash
-export TURTLEBOT3_MODEL=burger
-export ROS_DOMAIN_ID=31
-ros2 launch turtlebot3_bringup robot.launch.py
-```
-
-```bash
-# On Inky (ROS_DOMAIN_ID=32)
-source /opt/ros/humble/setup.bash
-export TURTLEBOT3_MODEL=burger
-export ROS_DOMAIN_ID=32
-ros2 launch turtlebot3_bringup robot.launch.py
-```
-
-**2. Start domain bridges on central PC** (Blinky 30→50, Pinky 31→50, Inky 32→50, and goal bridges 50→30/31/32):
-
-```bash
-cd ~/turtlebot3_ws
-./scripts/start_domain_bridges.sh
-```
-
-**3. Start multi-robot SLAM on central PC:**
-
-```bash
-cd ~/turtlebot3_ws
-./scripts/start_multirobot_slam.sh
-```
-
-Or directly:
-
-```bash
-ROS_DOMAIN_ID=50 ros2 launch turtlebot3_navigation2 multirobot_slam.launch.py use_sim_time:=false
-```
-
-**4. Start Nav2 and Explorer** for autonomous exploration on the merged map:
-
-```bash
-cd ~/turtlebot3_ws
-./scripts/start_multirobot_nav2_explore.sh
-```
-
-This script:
-
-- Waits for the TF tree (`map → blinky/base_footprint`, `map → pinky/base_footprint`, `map → inky/base_footprint`) with a 60-second timeout
-- Launches Nav2 for Blinky, Pinky, and Inky (each uses the merged `/map`)
-- Launches Explore Lite for all configured robots
-- Launches RViz (disable with `use_rviz:=false` if needed)
-
-**Prerequisites:** Domain bridges and multirobot SLAM must be running first. If the TF wait times out, run diagnostics:
-
-```bash
-ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
-```
-
-**Single-robot testing:** To run Nav2 + Explore with only one robot (e.g. Blinky):
-
-```bash
-TF_WAIT_BASE_FRAMES=blinky/base_footprint ./scripts/start_multirobot_nav2_explore.sh
-```
+> **Legacy note:** The older multi-domain workflow (robots on domains 30/31/32/33 with `domain_bridge` processes and `scripts/start_domain_bridges.sh`) has been retired in this repo in favour of the simpler single-domain, namespaced configuration described above.
 
 ### Map merge init poses
 
@@ -933,6 +843,15 @@ ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
    - **Overlap penalty:** frontiers near another robot’s active goal are penalised (less redundant coverage).
 4. Sends `NavigateToPose` goals to each robot’s Nav2 instance via `/<robot>/navigate_to_pose`.
 5. Re-plans when a goal is reached, fails, or times out.
+
+In the single-domain, namespaced workflow started via `scripts/start_central.sh`,
+the explorer is configured to drive robots **exclusively** through these Nav2
+`NavigateToPose` action servers (one per namespace, e.g. `/blinky/navigate_to_pose`,
+`/pinky/navigate_to_pose`). The older topic-based `/goal_pose` compatibility
+fallback is disabled by default so that missing or misconfigured Nav2 action
+servers surface as clear errors rather than silently falling back. You can
+temporarily re-enable that fallback by setting
+`EXPLORER_USE_GOAL_POSE_FALLBACK=true` before running `scripts/start_central.sh`.
 
 **Coordinate frame handling:**
 
