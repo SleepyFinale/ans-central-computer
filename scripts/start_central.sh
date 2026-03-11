@@ -207,7 +207,7 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
         --ros-args
         --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml"
         -p "robot_names:=[${SINGLE_ROBOT}]"
-        -p "map_topic:=/map"
+        -p "map_topic:=/${SINGLE_ROBOT}/map"
         -p "world_frame:=map"
         -p "single_robot_offloaded_nav2:=true"
         -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
