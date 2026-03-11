@@ -666,23 +666,7 @@ Invalid frame ID "base_footprint" ... frame does not exist
 
 ---
 
-#### 5. AMCL warning: “Please set the initial pose…” (wrong launch file)
-
-**When this happens:** You launched the non-SLAM Nav2 bringup (AMCL/static-map workflow) while expecting SLAM-based exploration.
-
-**Fix (SLAM/exploration):**
-
-```bash
-ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=False
-```
-
-**Fix (static map + AMCL):**
-
-- Use the non-SLAM bringup (e.g. `navigation2.launch.py`) and then set the initial pose in RViz.
-
----
-
-#### 6. RViz errors about Nav2 panels / GLSL
+#### 5. RViz errors about Nav2 panels / GLSL
 
 **Symptoms:**
 
@@ -702,7 +686,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ---
 
-#### 6b. RViz exit code -11 (SIGSEGV) or nav2_container slow to terminate on Ctrl+C
+#### 6. RViz exit code -11 (SIGSEGV) or nav2_container slow to terminate on Ctrl+C
 
 **Symptoms:**
 
@@ -718,18 +702,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ---
 
-#### 7. (Optional) Manually set initial pose (static map + AMCL only)
-
-```bash
-ros2 topic pub --once /initialpose geometry_msgs/msg/PoseWithCovarianceStamped \
-  '{header: {frame_id: "map"}, pose: {pose: {position: {x: 0.0, y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}'
-```
-
-Adjust x, y, z, w values to match robot's actual position.
-
----
-
-#### 8. Costmap warning: “Sensor origin is out of map bounds”
+#### 7. Costmap warning: “Sensor origin is out of map bounds”
 
 **Cause:** The global costmap's static layer uses the merged map; if the map bounds start at (0, 0), the lidar (sensor) at about (-0.03, 0) in the robot frame can fall outside the map when the robot is near the origin, so Nav2 warns that it cannot raytrace for it.
 
@@ -755,7 +728,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 9. No map appearing in SLAM (`/map` topic missing or not publishing)
+#### 8. No map appearing in SLAM (`/map` topic missing or not publishing)
 
 **Cause:** SLAM Toolbox not receiving scan data, not initialized yet, or needs more time.
 
@@ -796,7 +769,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 10. Explorer waiting for costmap
+#### 9. Explorer waiting for costmap
 
 **Cause:** Nav2 costmap hasn't initialized yet (normal - takes 20-40 seconds).
 
@@ -816,7 +789,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 11. Robot not moving / explorer not finding frontiers
+#### 10. Robot not moving / explorer not finding frontiers
 
 **Cause:** System still initializing, or map too small.
 
@@ -836,7 +809,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 12. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
+#### 11. "Starting point in lethal space" / "Collision Ahead - Exiting Spin" (robot stuck near walls/corners)
 
 **Cause:** The planner thinks the robot is inside an obstacle (often due to costmap inflation when the robot is close to a wall or corner). During SLAM the map and costmap update continuously, so this can happen even in open space briefly. Recovery (spin/backup) may also see inflated obstacles and abort.
 
@@ -854,7 +827,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 12a. Nav2: "No goal checker was specified in parameter 'current_goal_checker'"
+#### 12. Nav2: "No goal checker was specified in parameter 'current_goal_checker'"
 
 **Cause:** The default Nav2 behavior tree does not set `goal_checker_id` on the FollowPath node, so the controller server reports that it’s using the only loaded goal checker (e.g. `general_goal_checker`).
 
@@ -862,7 +835,7 @@ Adjust x, y, z, w values to match robot's actual position.
 
 ---
 
-#### 13. Odom TF jumping away from map TF / map at a weird angle / straight walls look curved
+#### 13. Odom TF jumping away from map TF / map at a weird angle / straight walls look curved (odometry drift)
 
 **Cause:** The `map`→`odom` transform is published by SLAM Toolbox. When it corrects for odometry drift, that correction can appear as a “jump” if updates are infrequent or large. Curved walls usually mean rotational odometry drift during mapping (robot thinks it’s going straight but odom says it’s turning).
 
