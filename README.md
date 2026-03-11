@@ -1,6 +1,6 @@
 # Autonomous Navigation Systems: Central Computer - Autonomous Exploration Setup
 
-This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configured for autonomous exploration and mapping with Nav2, SLAM Toolbox, and Explore Lite.
+This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configured for autonomous exploration and mapping with Nav2, SLAM Toolbox, and a central multi-robot explorer.
 
 ## Table of Contents
 
@@ -99,7 +99,7 @@ source /opt/ros/humble/setup.bash
 
 - TurtleBot3 core packages
 - Navigation2 configuration and launch files
-- Explore Lite for autonomous exploration
+- Central multi-robot exploration components
 - Custom launch files and scripts
 
 The Navigation2 source code is included in the repository for reference, but the build scripts use the system-installed packages instead.
@@ -122,7 +122,7 @@ This repository contains all the necessary packages for TurtleBot3 autonomous ex
 
 - TurtleBot3 core packages (DynamixelSDK, turtlebot3_msgs, turtlebot3)
 - Navigation2 configuration
-- Explore Lite for autonomous exploration
+- Central multi-robot exploration components
 - Custom launch files and scripts
 
 You can now branch, push, and pull changes as needed for your development workflow.
@@ -158,13 +158,12 @@ cd ~/turtlebot3_ws
 
 #### `scripts/minimal_rebuild.sh`
 
-Performs a minimal rebuild of only essential packages:
+Performs a minimal rebuild of only the central-PC essentials:
 
 - Removes build artifacts
-- Builds only packages needed for:
-  - `turtlebot3_bringup robot.launch.py`
-  - `turtlebot3_navigation2 navigation2.launch.py`
-  - `explore_lite` (for the explorer)
+- Builds only packages needed to run:
+  - `./scripts/start_central.sh`
+  - `./scripts/start_rviz_central.sh`
 
 **Usage:**
 
@@ -175,16 +174,14 @@ cd ~/turtlebot3_ws
 
 **When to use:**
 
-- After making small changes to specific packages
-- Faster rebuild times during development
-- When you only need to update navigation or exploration components
+- After making small changes that only affect the central PC
+- Faster rebuild times during development when you just need the central explorer / map merge / RViz pieces
 
 **Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/set_robot_env.sh <robot> [ip]`. If you need to manually source the workspace:
 
 ```bash
 cd ~/turtlebot3_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+source scripts/ros_robot_env.bash
 ```
 
 ---
@@ -279,8 +276,7 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 **Commands (on the robot SBC):**
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ~/turtlebot3_ws/install/setup.bash
+source scripts/ros_robot_env.bash
 export TURTLEBOT3_MODEL=burger
 
 ros2 launch turtlebot3_bringup robot.launch.py
@@ -365,8 +361,7 @@ ros2 topic echo /<robot>/scan --once  # Should show laser scan data
 **Commands (on the robot SBC):**
 
 ```bash
-source /opt/ros/humble/setup.bash
-source ~/turtlebot3_ws/install/setup.bash
+source scripts/ros_robot_env.bash
 export TURTLEBOT3_MODEL=burger
 
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
@@ -433,7 +428,6 @@ You will also see the individual Nav2 lifecycle nodes configuring and activating
 
 ```bash
 cd ~/turtlebot3_ws
-source scripts/set_robot_env.sh <robot>
 ros2 topic list | grep "/<robot>/"
 ros2 topic echo /<robot>/map --once           # Should show map data after SLAM initializes
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
