@@ -15,6 +15,7 @@ multi_robot_explorer:
     world_frame: map
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
+    # Matches m-explore-ros2's planner_frequency semantics.
     explore_frequency: 1.0
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
@@ -28,13 +29,23 @@ multi_robot_explorer:
     potential_scale: 3.0
     gain_scale: 1.0
 
-    # Seconds without action feedback before a goal is considered stale.
-    # Keep this comfortably above planner/controller recovery durations.
+    # Progress watchdog: if distance_remaining does not decrease by at least
+    # progress_min_delta within this many seconds, the goal is considered
+    # stalled and will be cancelled and blacklisted.
     progress_timeout: 45.0
+    progress_min_delta: 0.05
 
     # Distance (m) at which a frontier near another robot's active goal
     # gets a penalty (discourages sending robots to the same area).
     nearby_penalty_dist: 2.0
+
+    # Blacklist radius (m): goals whose centroids fall within this distance
+    # of a blacklisted point will be skipped for that robot.
+    blacklist_radius: 0.5
+
+    # When a robot successfully reaches a goal, blacklist entries within
+    # this radius are cleared so that region can be reconsidered later.
+    blacklist_clear_radius: 0.5
 
     # Publish frontier markers on /explore/frontiers for RViz
     visualize: true
@@ -50,3 +61,14 @@ multi_robot_explorer:
     # workflow, set EXPLORER_USE_GOAL_POSE_FALLBACK=true before running
     # start_central.sh.
     use_pose_goal_fallback: false
+
+    # Optional: after exploration completes (no frontiers), send each robot
+    # back toward its initial pose (first valid map -> <robot>/base_footprint
+    # transform seen by the central explorer).
+    return_to_init: false
+    robot_base_frame: base_footprint
+
+    # Multi-robot status publishing and pause/resume control, analogous to
+    # explore/status and explore/resume in m-explore-ros2.
+    status_topic: explore_multi/status
+    control_topic: explore_multi/resume

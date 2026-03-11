@@ -32,6 +32,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.duration import Duration
 
 from action_msgs.msg import GoalStatus
+from std_msgs.msg import Bool, String
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.action import NavigateToPose
@@ -67,6 +68,11 @@ class RobotState:
     blacklist: list = field(default_factory=list)
     server_unavailable_logged: bool = False
     last_distance_remaining: Optional[float] = None
+    last_progress_distance: Optional[float] = None
+    last_progress_time: float = 0.0
+    initial_position: Optional[Tuple[float, float]] = None
+    initial_orientation_w: float = 1.0
+    returning_home: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +156,10 @@ def detect_frontiers(
     # cluster with 8-connectivity (pure NumPy implementation)
     labelled, n_labels = _label_frontiers_8c(frontier_mask)
 
-    min_cells = max(1, int(min_size_m / resolution))
+    # Interpret min_size_m as a characteristic linear size and require at
+    # least the corresponding area in cells. This better matches the
+    # cluster-size semantics used in costmap-based frontier search.
+    min_cells = max(1, int((min_size_m / resolution) ** 2))
     frontiers: List[Frontier] = []
     for label_id in range(1, n_labels + 1):
         ys, xs = np.where(labelled == label_id)
@@ -186,6 +195,7 @@ def assign_frontiers(
     gain_scale: float,
     nearby_penalty_dist: float = 2.0,
     min_goal_separation: float = 0.25,
+    blacklist_radius: float = 0.5,
 ) -> Dict[str, int]:
     """Assign one frontier to each idle robot.
 
@@ -219,7 +229,7 @@ def assign_frontiers(
         blacklist = idle_robots[rname].blacklist
         for fi, fr in enumerate(frontiers):
             # skip blacklisted centroids
-            if any(_dist(fr.centroid_world, bl) < 0.5 for bl in blacklist):
+            if any(_dist(fr.centroid_world, bl) < blacklist_radius for bl in blacklist):
                 continue
 
             dist = _dist(rpos, fr.centroid_world)
@@ -272,17 +282,29 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('robot_names', ['blinky', 'pinky'])
         self.declare_parameter('map_topic', 'map')
         self.declare_parameter('world_frame', 'map')
-        self.declare_parameter('explore_frequency', 0.33)
+        # Match m-explore-ros2 planner_frequency semantics; default tuned in YAML.
+        self.declare_parameter('explore_frequency', 1.0)
         self.declare_parameter('min_frontier_size', 0.15)
         self.declare_parameter('potential_scale', 3.0)
         self.declare_parameter('gain_scale', 1.0)
-        self.declare_parameter('progress_timeout', 30.0)
+        # Progress timeout is interpreted as "no meaningful distance progress"
+        # for this many seconds before a goal is considered stalled.
+        self.declare_parameter('progress_timeout', 45.0)
+        self.declare_parameter('progress_min_delta', 0.05)
         self.declare_parameter('nearby_penalty_dist', 2.0)
+        self.declare_parameter('blacklist_radius', 0.5)
+        self.declare_parameter('blacklist_clear_radius', 0.5)
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
         self.declare_parameter('single_robot_offloaded_nav2', False)
         self.declare_parameter('min_goal_separation', 0.25)
         self.declare_parameter('suspicious_success_distance', 0.15)
+        # Optional return-to-origin behaviour per robot, similar to explore_node.
+        self.declare_parameter('return_to_init', False)
+        self.declare_parameter('robot_base_frame', 'base_footprint')
+        # Status + control topics (multi-robot aware counterpart of explore/status, explore/resume).
+        self.declare_parameter('status_topic', 'explore_multi/status')
+        self.declare_parameter('control_topic', 'explore_multi/resume')
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -293,8 +315,13 @@ class MultiRobotExplorer(Node):
         self.potential_scale = self.get_parameter('potential_scale').value
         self.gain_scale = self.get_parameter('gain_scale').value
         self.progress_timeout = self.get_parameter('progress_timeout').value
+        self.progress_min_delta = (
+            self.get_parameter('progress_min_delta').value)
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
+        self.blacklist_radius = self.get_parameter('blacklist_radius').value
+        self.blacklist_clear_radius = (
+            self.get_parameter('blacklist_clear_radius').value)
         self.visualize = self.get_parameter('visualize').value
         self.use_pose_goal_fallback = (
             self.get_parameter('use_pose_goal_fallback').value)
@@ -304,12 +331,26 @@ class MultiRobotExplorer(Node):
             self.get_parameter('min_goal_separation').value)
         self.suspicious_success_distance = (
             self.get_parameter('suspicious_success_distance').value)
+        self.return_to_init = self.get_parameter('return_to_init').value
+        self.robot_base_frame = self.get_parameter('robot_base_frame').value
+        self.status_topic = self.get_parameter('status_topic').value
+        self.control_topic = self.get_parameter('control_topic').value
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
         self.latest_map: Optional[OccupancyGrid] = None
         self.exploration_complete = False
         self.goal_pubs: Dict[str, object] = {}
+        self.paused: bool = False
+
+        # -- status publishing & control --
+        self.status_pub = self.create_publisher(String, self.status_topic, 10)
+        self.resume_sub = self.create_subscription(
+            Bool,
+            self.control_topic,
+            self._resume_callback,
+            10,
+        )
 
         # -- TF --
         self.tf_buffer = tf2_ros.Buffer()
@@ -352,6 +393,7 @@ class MultiRobotExplorer(Node):
             f'freq={freq:.2f} Hz, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
             f'mode={mode}')
+        self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
     # Callbacks
@@ -359,6 +401,31 @@ class MultiRobotExplorer(Node):
 
     def _map_callback(self, msg: OccupancyGrid):
         self.latest_map = msg
+
+    def _publish_status(self, state: str):
+        msg = String()
+        # Simple text state with per-robot summary; consumer tools can parse if desired.
+        per_robot = ', '.join(
+            f'{rs.name}:reached={rs.goals_reached},failed={rs.goals_failed}'
+            for rs in self.robots.values()
+        )
+        msg.data = f'state={state}; robots=[{per_robot}]'
+        self.status_pub.publish(msg)
+
+    def _resume_callback(self, msg: Bool):
+        if msg.data:
+            if self.paused:
+                self.get_logger().info('Resume requested on control topic')
+            self.paused = False
+            self._publish_status('IN_PROGRESS')
+        else:
+            if not self.paused:
+                self.get_logger().info('Pause requested on control topic — cancelling active goals')
+                for rs in self.robots.values():
+                    if rs.goal_active:
+                        self._cancel_goal(rs)
+            self.paused = True
+            self._publish_status('PAUSED')
 
     # -----------------------------------------------------------------------
     # Main planning loop
@@ -370,19 +437,31 @@ class MultiRobotExplorer(Node):
                 self.get_logger().info(
                     'Waiting for merged map on configured topic...')
                 self._logged_waiting_for_map = True
+                self._publish_status('WAITING_FOR_MAP')
+            return
+
+        if self.paused:
+            # Still keep TF and map up to date, but do not assign new goals.
+            self._update_robot_positions()
             return
 
         # update robot positions from TF
         self._update_robot_positions()
 
-        # check for stale goals (progress timeout)
+        # check for stale goals (progress timeout / lack of distance progress)
         now = self.get_clock().now().nanoseconds / 1e9
         for rs in self.robots.values():
-            if (rs.goal_active and rs.last_goal_time > 0
-                    and (now - rs.last_goal_time) > self.progress_timeout):
+            if not rs.goal_active or rs.last_goal_time <= 0:
+                continue
+
+            # Prefer a notion of "time since last meaningful distance progress"
+            # over pure wall-clock since goal send, mirroring explore_node.
+            last_prog_time = rs.last_progress_time or rs.last_goal_time
+            if (now - last_prog_time) > self.progress_timeout:
                 self.get_logger().warn(
-                    f'[{rs.name}] Goal timed out after '
-                    f'{self.progress_timeout:.0f}s, cancelling')
+                    f'[{rs.name}] Goal appears stalled for '
+                    f'{self.progress_timeout:.0f}s without distance progress; '
+                    f'cancelling and blacklisting')
                 self._cancel_goal(rs)
                 if rs.goal_position:
                     rs.blacklist.append(rs.goal_position)
@@ -402,6 +481,16 @@ class MultiRobotExplorer(Node):
                 self.get_logger().info(
                     'No frontiers remaining — exploration complete!')
                 self.exploration_complete = True
+                if self.return_to_init:
+                    # Optionally send each robot back toward its initial pose.
+                    for rs in self.robots.values():
+                        if rs.initial_position and not rs.returning_home:
+                            self._send_return_to_init(rs)
+                    self._publish_status('RETURNING_TO_ORIGIN'
+                                         if any(r.returning_home for r in self.robots.values())
+                                         else 'COMPLETE')
+                else:
+                    self._publish_status('COMPLETE')
             return
 
         if self.exploration_complete:
@@ -413,6 +502,8 @@ class MultiRobotExplorer(Node):
             if not rs.goal_active and rs.position is not None)
         self.get_logger().debug(
             f'{len(frontiers)} frontiers, {n_idle} idle robot(s)')
+        if n_idle > 0:
+            self._publish_status('IN_PROGRESS')
 
         # publish visualisation
         if self.visualize:
@@ -424,6 +515,7 @@ class MultiRobotExplorer(Node):
             self.potential_scale, self.gain_scale,
             self.nearby_penalty_dist,
             self.min_goal_separation,
+            self.blacklist_radius,
         )
 
         for rname, fi in assignments.items():
@@ -441,7 +533,7 @@ class MultiRobotExplorer(Node):
             #   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
             # For offloaded single-robot mode, the robot publishes:
             #   map -> <robot>/odom -> <robot>/base_footprint
-            base_frame = f'{rs.name}/base_footprint'
+            base_frame = f'{rs.name}/{self.robot_base_frame}'
             try:
                 t = self.tf_buffer.lookup_transform(
                     self.world_frame, base_frame, rclpy.time.Time(),
@@ -450,6 +542,12 @@ class MultiRobotExplorer(Node):
                     t.transform.translation.x,
                     t.transform.translation.y,
                 )
+                # Capture an approximate "home" pose per robot the first
+                # time we see a valid transform. This is used by the optional
+                # return_to_init behaviour.
+                if rs.initial_position is None:
+                    rs.initial_position = rs.position
+                    rs.initial_orientation_w = t.transform.rotation.w or 1.0
             except (tf2_ros.LookupException,
                     tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException):
@@ -495,8 +593,12 @@ class MultiRobotExplorer(Node):
         rs.goal_active = True
         rs.goal_pending = True
         rs.goal_position = frontier.centroid_world
-        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_goal_time = now
         rs.last_distance_remaining = None
+        rs.last_progress_distance = None
+        rs.last_progress_time = now
+        rs.returning_home = False
 
         send_future = rs.action_client.send_goal_async(
             goal_msg,
@@ -526,7 +628,10 @@ class MultiRobotExplorer(Node):
 
         goal_pub.publish(goal_msg)
         rs.goal_position = frontier.centroid_world
-        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_goal_time = now
+        rs.last_progress_time = now
+        rs.last_progress_distance = None
         rs.goal_active = True
         rs.goal_pending = False
         rs.goal_handle = None
@@ -556,7 +661,9 @@ class MultiRobotExplorer(Node):
             return
 
         rs.goal_handle = goal_handle
-        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_goal_time = now
+        rs.last_progress_time = now
         self.get_logger().debug(f'[{rs.name}] Goal accepted')
 
         result_future = goal_handle.get_result_async()
@@ -564,10 +671,21 @@ class MultiRobotExplorer(Node):
             lambda f, r=rs: self._goal_result_callback(f, r))
 
     def _goal_feedback_callback(self, feedback_msg, rs: RobotState):
-        rs.last_goal_time = self.get_clock().now().nanoseconds / 1e9
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_goal_time = now
         feedback = feedback_msg.feedback
         if hasattr(feedback, 'distance_remaining'):
-            rs.last_distance_remaining = feedback.distance_remaining
+            dist = feedback.distance_remaining
+            rs.last_distance_remaining = dist
+            # Track last time we saw a meaningful decrease in remaining
+            # distance, in metres. This lets the watchdog in _plan_tick
+            # reason about "no progress" rather than just elapsed time.
+            if rs.last_progress_distance is None:
+                rs.last_progress_distance = float(dist)
+                rs.last_progress_time = now
+            elif (rs.last_progress_distance - dist) > self.progress_min_delta:
+                rs.last_progress_distance = float(dist)
+                rs.last_progress_time = now
 
     def _goal_result_callback(self, future, rs: RobotState):
         try:
@@ -585,6 +703,8 @@ class MultiRobotExplorer(Node):
             rs.goal_pending = False
             rs.goal_handle = None
             rs.last_distance_remaining = None
+            rs.last_progress_distance = None
+            rs.last_progress_time = 0.0
             return
 
         status = result.status
@@ -608,6 +728,15 @@ class MultiRobotExplorer(Node):
                 self.get_logger().info(
                     f'[{rs.name}] Goal reached '
                     f'(total: {rs.goals_reached})')
+                # On a genuine success, allow future exploration of the
+                # surrounding region by clearing any nearby blacklist
+                # entries. This mirrors the idea that previously-bad
+                # frontiers can become good again as the map evolves.
+                if rs.goal_position and rs.blacklist:
+                    rs.blacklist = [
+                        bl for bl in rs.blacklist
+                        if _dist(bl, rs.goal_position) >= self.blacklist_clear_radius
+                    ]
         elif status == GoalStatus.STATUS_ABORTED:
             rs.goals_failed += 1
             self.get_logger().warn(
@@ -624,6 +753,13 @@ class MultiRobotExplorer(Node):
         rs.goal_pending = False
         rs.goal_handle = None
         rs.last_distance_remaining = None
+        rs.last_progress_distance = None
+        rs.last_progress_time = 0.0
+        if rs.returning_home and self.exploration_complete:
+            rs.returning_home = False
+            # When all robots have finished returning, mark complete.
+            if not any(r.returning_home for r in self.robots.values()):
+                self._publish_status('COMPLETE')
 
     def _cancel_goal(self, rs: RobotState):
         if rs.goal_handle is not None:
@@ -635,6 +771,50 @@ class MultiRobotExplorer(Node):
         rs.goal_pending = False
         rs.goal_handle = None
         rs.last_distance_remaining = None
+        rs.last_progress_distance = None
+        rs.last_progress_time = 0.0
+
+    def _send_return_to_init(self, rs: RobotState):
+        if rs.initial_position is None:
+            return
+        if rs.action_client is None:
+            self.get_logger().warn(
+                f'[{rs.name}] Cannot send return_to_init goal (no action client)')
+            return
+        if not rs.action_client.wait_for_server(timeout_sec=0.2):
+            self.get_logger().warn(
+                f'[{rs.name}] NavigateToPose server unavailable for '
+                f'return_to_init on /{rs.name}/navigate_to_pose')
+            return
+
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = PoseStamped()
+        goal_msg.pose.header.frame_id = self.world_frame
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.pose.position.x = rs.initial_position[0]
+        goal_msg.pose.pose.position.y = rs.initial_position[1]
+        goal_msg.pose.pose.position.z = 0.0
+        goal_msg.pose.pose.orientation.w = rs.initial_orientation_w or 1.0
+
+        rs.goal_active = True
+        rs.goal_pending = True
+        rs.goal_position = rs.initial_position
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_goal_time = now
+        rs.last_progress_time = now
+        rs.last_progress_distance = None
+        rs.last_distance_remaining = None
+        rs.returning_home = True
+
+        send_future = rs.action_client.send_goal_async(
+            goal_msg,
+            feedback_callback=lambda f, r=rs: self._goal_feedback_callback(f, r),
+        )
+        send_future.add_done_callback(
+            lambda f, r=rs: self._goal_response_callback(f, r))
+        self.get_logger().info(
+            f'[{rs.name}] Sending return_to_init NavigateToPose '
+            f'({rs.initial_position[0]:.2f}, {rs.initial_position[1]:.2f})')
 
     # -----------------------------------------------------------------------
     # Visualisation

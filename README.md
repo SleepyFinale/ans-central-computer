@@ -867,7 +867,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 When running only the central stack (`./scripts/start_central.sh`) and RViz helper (`./scripts/start_rviz_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
 
-- `config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, etc.).
+- `config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, progress watchdogs, optional return-to-origin, and status/control topics).
 - `config/map_merge/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
 
 All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `ans-turtlebot3` workspace; this central repository keeps only the configuration needed for coordination and visualization.
