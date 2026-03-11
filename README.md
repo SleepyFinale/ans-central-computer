@@ -516,17 +516,26 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
   - `/tf`, `/tf_static` (from TF relay)
   - `/explore/frontiers` (from `multi_robot_explorer`)
 
-- **Central Terminal 2 – RViz visualization**
+-- **Central Terminal 2 – RViz visualization**
 
   ```bash
   cd ~/turtlebot3_ws
   source /opt/ros/humble/setup.bash
   source install/setup.bash
 
-  rviz2 -d $(ros2 pkg prefix turtlebot3_navigation2)/share/turtlebot3_navigation2/rviz/tb3_navigation2.rviz
+  # Global merged map (default):
+  ./scripts/start_rviz_central.sh
+
+  # Or explicitly:
+  ./scripts/start_rviz_central.sh --global
+
+  # Per-robot local map view (namespaced topics):
+  ./scripts/start_rviz_central.sh --local <robot>
+  # or shorthand:
+  ./scripts/start_rviz_central.sh -r <robot>
   ```
 
-  Set the fixed frame to `map`. You should see the live map, robot poses, paths, and frontier goals as the explorer runs.
+  In **global mode**, RViz loads the workspace config `config/rviz/central_global_map.rviz` with the fixed frame set to `map` and the global `/map` topic (from map merge in multi-robot mode, or the single robot's `/map` in single-robot mode). In **local mode**, it uses a per-robot template so you see that robot's namespaced map and navigation topics (for example `/<robot>/map`, `/<robot>/scan_normalized`, `/<robot>/plan`) while still using `map` as the fixed frame.
 
 ---
 
