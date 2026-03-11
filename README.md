@@ -718,7 +718,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 **Fix (multi-robot / map_merge):**
 
-- The workspace configures **map_merge** with `origin_margin: 0.05` (in `config/map_merge/multirobot_params.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
+- The workspace configures **map_merge** with `origin_margin: 0.05` (in `config/map_merge/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
   - `./scripts/minimal_rebuild.sh` (or `clean_rebuild.sh`), then
   - `./scripts/start_multirobot_slam.sh`, then
   - `./scripts/start_multirobot_nav2_explore.sh`
@@ -848,7 +848,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 - Jumps happen more often the farther the robot is from the start.
 - Map looks rotated or straight corridors/walls appear curved.
 
-**What we’ve done:** SLAM params in `mapper_params_online_async_fast.yaml` are tuned for smoother behavior:
+**What we’ve done:** SLAM params in the robot-side SLAM config (see the `ans-turtlebot3` workspace) are tuned for smoother behavior:
 
 - `map_update_interval: 0.35` — balance between update frequency and stability.
 - `minimum_travel_distance` / `minimum_travel_heading: 0.18` — match often enough so pose updates are smaller.
@@ -857,9 +857,20 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 **If it still happens:**
 
 - Ensure only **one** node publishes `map`→`odom` (SLAM Toolbox when using SLAM; do not run AMCL at the same time). The Nav2 panel showing “Localization: inactive” is normal when using SLAM.
-- Check odometry: wheel slip, uneven floors, or miscalibrated wheel radius/separation (TurtleBot3: `turtlebot3_node/param/burger.yaml` — `wheels.separation`, `wheels.radius`) can cause drift and curved maps.
+- Check odometry: wheel slip, uneven floors, or miscalibrated wheel radius/separation on the TurtleBot3 (see the robot-side workspace) can cause drift and curved maps.
 - If the robot has an IMU, ensure `use_imu: true` in the diff_drive/odometry config so orientation drift is reduced.
-- **Periodic revisit:** In long or similar-looking corridors, enabling the explorer's periodic revisit can create loop-closure opportunities and reduce drift. In `src/m-explore-ros2/explore/config/params.yaml` set `revisit_enabled: true` and adjust `revisit_after_n_goals` (e.g. 3–5). The robot will return toward the start every N reached goals, then resume exploration.
+- **Periodic revisit:** In long or similar-looking corridors, enabling the explorer's periodic revisit can create loop-closure opportunities and reduce drift. Configure this in the robot-side exploration params (in the `ans-turtlebot3` workspace) so the robot will return toward the start every N reached goals, then resume exploration.
+
+---
+
+### Central parameter files
+
+When running only the central stack (`./scripts/start_central.sh`) and RViz helper (`./scripts/start_rviz_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
+
+- `config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, etc.).
+- `config/map_merge/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
+
+All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `ans-turtlebot3` workspace; this central repository keeps only the configuration needed for coordination and visualization.
 
 ---
 

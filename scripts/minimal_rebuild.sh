@@ -34,9 +34,9 @@ if [ -n "$CMAKE_PREFIX_PATH" ]; then
     export CMAKE_PREFIX_PATH=$(echo "$CMAKE_PREFIX_PATH" | tr ':' '\n' | grep -v "^${WORKSPACE_ROOT}/install" | tr '\n' ':' | sed 's/:$//')
 fi
 
-# Source ROS + workspace environment
-echo "Step 1: Sourcing ROS and workspace environment..."
-WS_DIR="$WS_DIR" source "${SCRIPT_DIR}/ros_robot_env.bash"
+# Source base ROS environment (overlay is sourced after a successful build)
+echo "Step 1: Sourcing base ROS Humble environment..."
+source /opt/ros/humble/setup.bash
 
 # Clean build artifacts
 echo ""
@@ -91,7 +91,8 @@ fi
 # Ensure Navigation2 system packages are installed (needed for nav2_msgs / multi_robot_explorer.py)
 echo ""
 echo "Step 4: Verifying Navigation2 system packages..."
-if ! ros2 pkg list 2>/dev/null | grep -q "^nav2_msgs$"; then
+PKG_LIST_NAV2=$(ros2 pkg list 2>/dev/null || echo "")
+if ! echo "$PKG_LIST_NAV2" | grep -q "^nav2_msgs$"; then
     echo "  ✗ Navigation2 packages not found!"
     echo ""
     echo "  This workspace uses system Navigation2 packages (installed via apt)"
@@ -166,7 +167,8 @@ if [ $? -eq 0 ]; then
     echo "  ✓ Workspace sourced via ros_robot_env.bash"
     echo ""
     echo "Verifying key packages are available..."
-    if ros2 pkg list | grep -q "multirobot_map_merge"; then
+    PKG_LIST=$(ros2 pkg list 2>/dev/null || echo "")
+    if echo "$PKG_LIST" | grep -q "^multirobot_map_merge$"; then
         echo "  ✓ multirobot_map_merge is available"
     else
         echo "  ✗ multirobot_map_merge not found"

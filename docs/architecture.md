@@ -84,7 +84,7 @@ This function already exists in your central workspace. Robots (Blinky, Pinky, I
 
 - **TF stitching**: `scripts/tf_relay_multirobot.py` (merges `/blinky/tf`, `/pinky/tf`, `/inky/tf` into `/tf` with prefixes)
 - **Per-robot SLAM**: `slam_toolbox` instances on each robot, publishing `/blinky/map`, `/pinky/map`, etc.
-- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (or `multirobot_params.yaml` for known init poses)
+- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (for unknown initial poses on the central computer)
 
 ```mermaid
 flowchart TB
@@ -94,8 +94,8 @@ flowchart TB
     subgraph Programs_GlobalMapping["Programs"]
       direction TB
       tfRelay["script: scripts/tf_relay_multirobot.py"]
-      slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\nparam: mapper_params_blinky.yaml"]
-      slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\nparam: mapper_params_pinky.yaml"]
+      slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
+      slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       mapMerge["node: multirobot_map_merge/map_merge\nconfig/map_merge/multirobot_params_unknown_poses.yaml"]
     end
 
