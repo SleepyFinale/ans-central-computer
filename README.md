@@ -928,7 +928,68 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 
 ---
 
-#### 17. Measuring pose jumps with `pose_jump_monitor.py`
+#### 17. Central single-robot: explorer stuck on "Waiting for map on /robot_name/map"
+
+**Symptoms:**
+
+- You are running only **one** robot (e.g. Pinky) with:
+
+  ```bash
+  # On the robot
+  ros2 launch turtlebot3_bringup robot.launch.py
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=false use_rviz:=false
+  ```
+
+- On the central PC you start:
+
+  ```bash
+  cd ~/turtlebot3_ws
+  ./scripts/start_central.sh
+  ```
+
+- The log shows something like:
+
+  ```text
+  [INFO] [multi_robot_explorer]: Multi-robot explorer started: robots=['pinky'], map_topic=/pinky/map, world_frame=map, ...
+  [INFO] [multi_robot_explorer]: Waiting for map on /pinky/map (mode=single_robot_offloaded_nav2)...
+  ```
+
+- `ros2 topic list` on the central PC shows a namespaced map topic such as `/pinky/map`, and `ros2 topic echo /pinky/map --once` returns a valid `nav_msgs/OccupancyGrid`, but the explorer appears to do nothing.
+
+**Cause:** Earlier versions of the central explorer subscribed to the map using only a **single QoS profile** (`TRANSIENT_LOCAL` + `RELIABLE`). In some runs, the QoS offered by the robot-side `/pinky/map` publisher did not match that profile closely enough, so the topic existed but the central subscriber never actually received any data and remained in `WAITING_FOR_MAP`.
+
+**What this repo does now:**
+
+- `scripts/multi_robot_explorer.py` subscribes to the configured `map_topic` using **two QoS profiles in parallel**:
+  - `TRANSIENT_LOCAL + RELIABLE` — ideal when the publisher supports transient-local maps (map servers / SLAM map latching).
+  - `VOLATILE + BEST_EFFORT` — compatibility fallback for publishers that do not match the transient-local/reliable profile.
+- Both subscriptions share the same callback; whichever QoS matches the publisher first will deliver the map and unblock the explorer.
+- The log message has been clarified to:
+
+  ```text
+  [INFO] [...]: Waiting for map on /pinky/map (mode=single_robot_offloaded_nav2)...
+  ```
+
+**Expected behavior now:**
+
+- With a robot running `navigation2_slam.launch.py` and publishing its namespaced map topic (for example `/pinky/map`), the central explorer should leave `WAITING_FOR_MAP` **within a few seconds** after the first map message arrives and start assigning exploration goals.
+- You should see goals being sent on `/<robot_name>/navigate_to_pose` (for example `/pinky/navigate_to_pose`) and frontier markers on `/explore/frontiers` once the map contains some free and unknown space.
+
+**If it still seems stuck:**
+
+- On the central PC, verify that the map is really publishing:
+
+  ```bash
+  ros2 topic echo /pinky/map --once
+  ```
+
+  If this hangs, the robot-side SLAM node is not publishing a map yet; troubleshoot on the robot first.
+- Ensure **ROS_DOMAIN_ID=50** on both the robot and the central PC.
+- Make sure you are not also running multi-robot `map_merge` manually in single-robot mode; `./scripts/start_central.sh` will skip `map_merge` automatically when only one robot is detected.
+
+---
+
+#### 18. Measuring pose jumps with `pose_jump_monitor.py`
 
 Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the robot’s reported pose in the map frame is "jumping" during SLAM. This is useful when the robot appears to teleport in RViz or when the explorer seems confused by localization corrections.
 

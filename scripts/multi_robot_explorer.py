@@ -309,6 +309,7 @@ class MultiRobotExplorer(Node):
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
         map_topic = self.get_parameter('map_topic').value
+        self.map_topic = map_topic
         self.world_frame = self.get_parameter('world_frame').value
         freq = self.get_parameter('explore_frequency').value
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
@@ -357,13 +358,21 @@ class MultiRobotExplorer(Node):
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         # -- map subscription --
-        map_qos = QoSProfile(
+        map_qos_transient = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self.map_sub = self.create_subscription(
-            OccupancyGrid, map_topic, self._map_callback, map_qos)
+        self.map_sub_transient = self.create_subscription(
+            OccupancyGrid, map_topic, self._map_callback, map_qos_transient)
+
+        map_qos_compatible = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.VOLATILE,
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+        )
+        self.map_sub_compatible = self.create_subscription(
+            OccupancyGrid, map_topic, self._map_callback, map_qos_compatible)
 
         # -- visualisation --
         if self.visualize:
@@ -434,8 +443,13 @@ class MultiRobotExplorer(Node):
     def _plan_tick(self):
         if self.latest_map is None:
             if not self._logged_waiting_for_map:
+                mode = (
+                    'single_robot_offloaded_nav2'
+                    if self.single_robot_offloaded_nav2
+                    else 'multi_robot'
+                )
                 self.get_logger().info(
-                    'Waiting for merged map on configured topic...')
+                    f'Waiting for map on {self.map_topic} (mode={mode})...')
                 self._logged_waiting_for_map = True
                 self._publish_status('WAITING_FOR_MAP')
             return
