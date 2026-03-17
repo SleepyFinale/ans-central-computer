@@ -66,6 +66,38 @@ else
 fi
 echo ""
 
+# Prevent multiple central stacks from running at once. If you start this
+# script multiple times (e.g., in different terminals), you'll end up with
+# duplicate nodes with the same name publishing conflicting status and
+# sending duplicate Nav2 goals.
+#
+# We validate this using OS processes (authoritative) rather than only the
+# ROS graph, because the ROS graph can temporarily retain nodes after
+# crashes/network hiccups.
+existing_central="$(ps aux | grep -E 'python3 .*scripts/(multi_robot_explorer|tf_relay_multirobot)\.py' | grep -v grep || true)"
+if [[ -n "$existing_central" ]]; then
+    echo "ERROR: A central stack appears to already be running (found existing processes):"
+    echo "$existing_central"
+    echo ""
+    echo "Stop the existing instance(s) (Ctrl+C in the other terminal),"
+    echo "or kill the existing processes, then re-run this script."
+    exit 1
+fi
+
+# If the graph still shows these nodes, warn but continue.
+NODES_RAW="$(ros2 node list 2>/dev/null || true)"
+if [[ -n "$NODES_RAW" ]]; then
+    explorer_count="$(echo "$NODES_RAW" | grep -c '^/multi_robot_explorer$' || true)"
+    tf_relay_count="$(echo "$NODES_RAW" | grep -c '^/tf_relay_multirobot$' || true)"
+    if (( explorer_count > 0 || tf_relay_count > 0 )); then
+        echo "WARNING: ROS graph currently includes central node names already:"
+        echo "  /multi_robot_explorer count = ${explorer_count}"
+        echo "  /tf_relay_multirobot count  = ${tf_relay_count}"
+        echo "Continuing because no matching OS processes were found."
+        echo ""
+    fi
+fi
+
 # Detect robot names from available topics (e.g., /blinky/tf, /pinky/tf).
 echo "Detecting robots from ROS topics..."
 TOPICS_RAW="$(ros2 topic list 2>/dev/null || true)"
@@ -156,7 +188,12 @@ for r in "${SELECTED_ROBOTS[@]}"; do
 done
 
 PIDS=()
+CLEANUP_DONE=false
 cleanup() {
+    if [[ "$CLEANUP_DONE" == "true" ]]; then
+        return
+    fi
+    CLEANUP_DONE=true
     echo ""
     echo "Shutting down..."
     for pid in "${PIDS[@]}"; do
@@ -165,7 +202,7 @@ cleanup() {
     wait 2>/dev/null
     echo "Done."
 }
-trap cleanup SIGINT SIGTERM EXIT
+trap cleanup SIGHUP SIGINT SIGTERM EXIT
 
 # ---- 1. TF relay / world frame setup ----
 if ((${#SELECTED_ROBOTS[@]} == 1)); then

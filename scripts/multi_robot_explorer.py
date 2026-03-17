@@ -30,6 +30,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException
 
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
@@ -299,6 +300,13 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('single_robot_offloaded_nav2', False)
         self.declare_parameter('min_goal_separation', 0.25)
         self.declare_parameter('suspicious_success_distance', 0.15)
+        # For very small initial maps, Nav2 can legitimately report success
+        # with a relatively large distance_remaining because the frontier
+        # centroid may still be outside the tiny explored region. To avoid
+        # blacklisting useful early frontiers, the "suspicious success"
+        # heuristic is only applied once the map has grown beyond a
+        # configurable size.
+        self.declare_parameter('strict_success_min_map_size', 3.0)
         # Optional return-to-origin behaviour per robot, similar to explore_node.
         self.declare_parameter('return_to_init', False)
         self.declare_parameter('robot_base_frame', 'base_footprint')
@@ -332,6 +340,8 @@ class MultiRobotExplorer(Node):
             self.get_parameter('min_goal_separation').value)
         self.suspicious_success_distance = (
             self.get_parameter('suspicious_success_distance').value)
+        self.strict_success_min_map_size = (
+            self.get_parameter('strict_success_min_map_size').value)
         self.return_to_init = self.get_parameter('return_to_init').value
         self.robot_base_frame = self.get_parameter('robot_base_frame').value
         self.status_topic = self.get_parameter('status_topic').value
@@ -340,6 +350,8 @@ class MultiRobotExplorer(Node):
         # -- state --
         self.robots: Dict[str, RobotState] = {}
         self.latest_map: Optional[OccupancyGrid] = None
+        self._map_size_x: float = 0.0
+        self._map_size_y: float = 0.0
         self.exploration_complete = False
         self.goal_pubs: Dict[str, object] = {}
         self.paused: bool = False
@@ -410,6 +422,11 @@ class MultiRobotExplorer(Node):
 
     def _map_callback(self, msg: OccupancyGrid):
         self.latest_map = msg
+        # Track current map physical size in metres for heuristics that behave
+        # differently on tiny initial maps vs. larger, more mature maps.
+        res = msg.info.resolution
+        self._map_size_x = msg.info.width * res
+        self._map_size_y = msg.info.height * res
 
     def _publish_status(self, state: str):
         msg = String()
@@ -724,11 +741,21 @@ class MultiRobotExplorer(Node):
         status = result.status
 
         if status == GoalStatus.STATUS_SUCCEEDED:
+            # Only apply the "suspicious success" heuristic once the map has
+            # grown beyond a minimum physical size. On tiny initial maps,
+            # SLAM + Nav2 can legitimately succeed while still reporting a
+            # non-trivial distance_remaining because the frontier centroid
+            # lies just outside the currently known free space.
+            small_map = (
+                self._map_size_x < self.strict_success_min_map_size
+                and self._map_size_y < self.strict_success_min_map_size
+            )
             suspicious = (
                 rs.last_distance_remaining is not None
                 and rs.last_distance_remaining > self.suspicious_success_distance
             )
-            if suspicious:
+
+            if suspicious and not small_map:
                 rs.goals_failed += 1
                 self.get_logger().warn(
                     f'[{rs.name}] Goal reported success but distance_remaining='
@@ -739,13 +766,20 @@ class MultiRobotExplorer(Node):
                     rs.blacklist.append(rs.goal_position)
             else:
                 rs.goals_reached += 1
-                self.get_logger().info(
-                    f'[{rs.name}] Goal reached '
-                    f'(total: {rs.goals_reached})')
-                # On a genuine success, allow future exploration of the
-                # surrounding region by clearing any nearby blacklist
-                # entries. This mirrors the idea that previously-bad
-                # frontiers can become good again as the map evolves.
+                if suspicious and small_map:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal reported success with '
+                        f'distance_remaining={rs.last_distance_remaining:.2f}m '
+                        f'on a small map (~{self._map_size_x:.1f}x'
+                        f'{self._map_size_y:.1f}m); accepting as success to '
+                        f'grow the initial map')
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal reached '
+                        f'(total: {rs.goals_reached})')
+                # On a genuine success (including relaxed small-map cases),
+                # allow future exploration of the surrounding region by
+                # clearing any nearby blacklist entries.
                 if rs.goal_position and rs.blacklist:
                     rs.blacklist = [
                         bl for bl in rs.blacklist
@@ -908,7 +942,7 @@ def main(args=None):
     node = MultiRobotExplorer()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         # cancel all active goals

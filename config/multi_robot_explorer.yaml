@@ -22,6 +22,20 @@ multi_robot_explorer:
     # that aren't worth navigating to.
     min_frontier_size: 0.15
 
+    # When Nav2 reports success but the last feedback still shows a non-trivial
+    # distance_remaining, the explorer can optionally treat this as a
+    # suspicious success (likely abort / early convergence) and blacklist the
+    # goal. This threshold controls how large that remaining distance must be
+    # to be considered suspicious once the map has grown beyond the initial
+    # tiny phase.
+    suspicious_success_distance: 0.30
+
+    # For very small maps (both width and height below this size in metres),
+    # the suspicious-success heuristic is disabled and such goals are accepted
+    # as successes to allow the map to grow without prematurely blacklisting
+    # useful nearby frontiers.
+    strict_success_min_map_size: 3.0
+
     # Cost function weights (same semantics as explore_lite):
     #   cost = potential_scale * distance - gain_scale * frontier_size
     # Higher potential_scale  = prefer closer frontiers

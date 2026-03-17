@@ -7,6 +7,7 @@ and republishes to /tf with frame ID prefixes so SLAM can see all robots.
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
+from rclpy.executors import ExternalShutdownException
 from tf2_msgs.msg import TFMessage
 
 TF_STATIC_QOS = QoSProfile(
@@ -87,7 +88,7 @@ def main(args=None):
     node = TFRelayNode()
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, RuntimeError):
+    except (KeyboardInterrupt, ExternalShutdownException, RuntimeError):
         pass
     finally:
         try:
