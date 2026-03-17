@@ -43,6 +43,7 @@
 #include <map_merge/ros1_names.hpp>
 #include <rcpputils/asserts.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <opencv2/core.hpp>
 
 
 namespace map_merge
@@ -455,6 +456,10 @@ void MapMerge::mapMerging()
 
 void MapMerge::poseEstimation()
 {
+  if (pose_estimation_disabled_) {
+    return;
+  }
+
   RCLCPP_DEBUG(logger_, "Grid pose estimation started.");
   RCLCPP_INFO_ONCE(logger_, "Grid pose estimation started.");
   std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> grids;
@@ -469,40 +474,69 @@ void MapMerge::poseEstimation()
     }
   }
 
+  size_t non_null_grids = 0;
+  for (const auto & g : grids) {
+    if (g) {
+      ++non_null_grids;
+    }
+  }
+
+  if (non_null_grids < 2) {
+    // Not enough maps yet to run multi-robot pose estimation safely.
+    return;
+  }
+
   // Print grids size
   // RCLCPP_INFO(logger_, "Grids size: %d", grids.size());
 
-  std::lock_guard<std::mutex> lock(pipeline_mutex_);
-  pipeline_.feed(grids.begin(), grids.end());
-  // TODO allow user to change feature type
-  bool success = pipeline_.estimateTransforms(logger_,combine_grids::FeatureType::AKAZE,
-                               confidence_threshold_);
-  // bool success = pipeline_.estimateTransforms(logger_, combine_grids::FeatureType::SURF,
-  //                              confidence_threshold_);
-  // bool success = pipeline_.estimateTransforms(logger_, combine_grids::FeatureType::ORB,
-  //                              confidence_threshold_);
-  if (!success) {
-    RCLCPP_INFO(logger_, "No grid poses estimated");
-  } else {
-    // log merge-state transitions
-    size_t matched = pipeline_.matchedCount();
-    size_t total = grids.size();
-    if (matched != last_matched_count_ || total != last_total_grids_) {
-      if (matched == total && total > 1) {
-        RCLCPP_INFO(logger_,
-                    "All %zu robot maps merged via feature matching", total);
-      } else if (matched > 1) {
-        RCLCPP_INFO(logger_,
-                    "%zu of %zu robot maps merged; %zu placed independently",
-                    matched, total, total - matched);
-      } else if (total > 1) {
-        RCLCPP_INFO(logger_,
-                    "%zu robot maps placed independently (no overlap detected yet)",
-                    total);
+  try {
+    std::lock_guard<std::mutex> lock(pipeline_mutex_);
+    pipeline_.feed(grids.begin(), grids.end());
+
+    // TODO allow user to change feature type
+    bool success = pipeline_.estimateTransforms(
+      logger_, combine_grids::FeatureType::AKAZE, confidence_threshold_);
+
+    if (!success) {
+      RCLCPP_INFO(logger_, "No grid poses estimated");
+    } else {
+      // log merge-state transitions
+      size_t matched = pipeline_.matchedCount();
+      size_t total = grids.size();
+      if (matched != last_matched_count_ || total != last_total_grids_) {
+        if (matched == total && total > 1) {
+          RCLCPP_INFO(
+            logger_,
+            "All %zu robot maps merged via feature matching", total);
+        } else if (matched > 1) {
+          RCLCPP_INFO(
+            logger_,
+            "%zu of %zu robot maps merged; %zu placed independently",
+            matched, total, total - matched);
+        } else if (total > 1) {
+          RCLCPP_INFO(
+            logger_,
+            "%zu robot maps placed independently (no overlap detected yet)",
+            total);
+        }
+        last_matched_count_ = matched;
+        last_total_grids_ = total;
       }
-      last_matched_count_ = matched;
-      last_total_grids_ = total;
     }
+  } catch (const cv::Exception & e) {
+    // After a fatal OpenCV/FLANN error, disable further pose estimation and
+    // reset the pipeline so subsequent map merging can continue safely.
+    {
+      std::lock_guard<std::mutex> lock(pipeline_mutex_);
+      pipeline_ = combine_grids::MergingPipeline();
+    }
+    pose_estimation_disabled_ = true;
+  } catch (const std::exception & e) {
+    {
+      std::lock_guard<std::mutex> lock(pipeline_mutex_);
+      pipeline_ = combine_grids::MergingPipeline();
+    }
+    pose_estimation_disabled_ = true;
   }
 }
 

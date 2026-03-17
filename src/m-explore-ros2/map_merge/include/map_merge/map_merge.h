@@ -101,6 +101,10 @@ private:
 
   rclcpp::Logger logger_;
 
+  // Disable pose estimation after a fatal pipeline/OpenCV failure so we don't
+  // keep invoking a broken feature-matching pipeline.
+  bool pose_estimation_disabled_ = false;
+
   // merge-state tracking (for logging transitions)
   size_t last_matched_count_ = 0;
   size_t last_total_grids_ = 0;
