@@ -40,7 +40,7 @@ multi_robot_explorer:
     #   cost = potential_scale * distance - gain_scale * frontier_size
     # Higher potential_scale  = prefer closer frontiers
     # Higher gain_scale       = prefer larger frontiers
-    potential_scale: 3.0
+    potential_scale: 2.0
     gain_scale: 1.0
 
     # Progress watchdog: if distance_remaining does not decrease by at least
@@ -63,6 +63,24 @@ multi_robot_explorer:
 
     # Publish frontier markers on /explore/frontiers for RViz
     visualize: true
+
+    # Goal selection strategy within each frontier region:
+    #   - centroid: use the geometric centroid of the frontier region
+    #   - farthest_cell: choose the frontier cell farthest from the robot
+    # The default is farthest_cell so that initial goals are not almost
+    # inside Nav2's goal tolerance.
+    goal_point_strategy: farthest_cell
+
+    # Minimum desired distance from robot to goal (metres). When using the
+    # farthest_cell strategy, the explorer prefers frontier cells at or
+    # beyond this distance, but will fall back to the farthest available
+    # cell if the region is smaller than this.
+    min_goal_distance: 0.6
+
+    # Minimum separation between the robot and a candidate goal (metres).
+    # This is a safety net to avoid effectively-zero motion goals; with the
+    # farthest_cell strategy we can keep this relatively small.
+    min_goal_separation: 0.05
 
     # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
     # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose

@@ -52,6 +52,7 @@ class Frontier:
     size: int                            # number of frontier cells
     size_m: float                        # size * resolution (metres)
     cells: int = 0                       # alias for size
+    indices: Optional[np.ndarray] = None  # (N, 2) array of (y, x) cell indices
 
 
 @dataclass
@@ -171,11 +172,13 @@ def detect_frontiers(
         cx = float(np.mean(xs))
         wx = origin_x + (cx + 0.5) * resolution
         wy = origin_y + (cy + 0.5) * resolution
+        indices = np.stack((ys, xs), axis=1)
         frontiers.append(Frontier(
             centroid_world=(wx, wy),
             size=n,
             size_m=n * resolution,
             cells=n,
+            indices=indices,
         ))
 
     return frontiers
@@ -313,6 +316,15 @@ class MultiRobotExplorer(Node):
         # Status + control topics (multi-robot aware counterpart of explore/status, explore/resume).
         self.declare_parameter('status_topic', 'explore_multi/status')
         self.declare_parameter('control_topic', 'explore_multi/resume')
+        # Goal selection strategy within each frontier region.
+        # - 'centroid': use the geometric centroid of the frontier region
+        # - 'farthest_cell': choose the frontier cell farthest from the robot
+        #   (in world distance), falling back to centroid when needed.
+        self.declare_parameter('goal_point_strategy', 'farthest_cell')
+        # Minimum desired distance from robot to goal (metres). This is used
+        # when selecting a representative cell inside a frontier region so
+        # that the initial goals are not almost inside Nav2's goal tolerance.
+        self.declare_parameter('min_goal_distance', 0.6)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -346,6 +358,12 @@ class MultiRobotExplorer(Node):
         self.robot_base_frame = self.get_parameter('robot_base_frame').value
         self.status_topic = self.get_parameter('status_topic').value
         self.control_topic = self.get_parameter('control_topic').value
+        self.goal_point_strategy = (
+            self.get_parameter('goal_point_strategy').value or 'farthest_cell'
+        )
+        self.min_goal_distance = (
+            float(self.get_parameter('min_goal_distance').value)
+        )
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -589,6 +607,45 @@ class MultiRobotExplorer(Node):
     # Nav2 goal management
     # -----------------------------------------------------------------------
 
+    def _select_goal_point(self, rs: RobotState, frontier: Frontier) -> Tuple[float, float]:
+        """Choose a goal point within a frontier region according to the
+        configured strategy. Falls back to the centroid when needed.
+        """
+        # Default to centroid.
+        gx, gy = frontier.centroid_world
+
+        if self.goal_point_strategy == 'farthest_cell' and frontier.indices is not None and rs.position is not None:
+            rx, ry = rs.position
+            # frontier.indices is (N, 2) with (y, x) in cell coordinates.
+            ys = frontier.indices[:, 0].astype(np.float32)
+            xs = frontier.indices[:, 1].astype(np.float32)
+
+            # Convert all frontier cells to world coordinates.
+            m = self.latest_map
+            res = m.info.resolution
+            ox = m.info.origin.position.x
+            oy = m.info.origin.position.y
+            wx = ox + (xs + 0.5) * res
+            wy = oy + (ys + 0.5) * res
+
+            # Distances from robot to each candidate cell.
+            dx = wx - rx
+            dy = wy - ry
+            dists = np.hypot(dx, dy)
+
+            # Prefer cells at or beyond the configured minimum goal distance,
+            # but allow closer ones if nothing meets that threshold.
+            mask_far_enough = dists >= max(0.0, self.min_goal_distance)
+            if np.any(mask_far_enough):
+                idx = int(np.argmax(dists * mask_far_enough))
+            else:
+                idx = int(np.argmax(dists))
+
+            gx = float(wx[idx])
+            gy = float(wy[idx])
+
+        return gx, gy
+
     def _send_goal(self, rs: RobotState, frontier: Frontier):
         if rs.action_client is None:
             self.get_logger().warn(f'[{rs.name}] No action client available')
@@ -612,18 +669,20 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] NavigateToPose action server is now available')
             rs.server_unavailable_logged = False
 
+        goal_x, goal_y = self._select_goal_point(rs, frontier)
+
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = PoseStamped()
         goal_msg.pose.header.frame_id = self.world_frame
         goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = frontier.centroid_world[0]
-        goal_msg.pose.pose.position.y = frontier.centroid_world[1]
+        goal_msg.pose.pose.position.x = goal_x
+        goal_msg.pose.pose.position.y = goal_y
         goal_msg.pose.pose.position.z = 0.0
         goal_msg.pose.pose.orientation.w = 1.0
 
         rs.goal_active = True
         rs.goal_pending = True
-        rs.goal_position = frontier.centroid_world
+        rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
         rs.last_distance_remaining = None
@@ -638,9 +697,8 @@ class MultiRobotExplorer(Node):
         send_future.add_done_callback(
             lambda f, r=rs: self._goal_response_callback(f, r))
         self.get_logger().info(
-            f'[{rs.name}] Sending NavigateToPose ({frontier.centroid_world[0]:.2f}, '
-            f'{frontier.centroid_world[1]:.2f}) — frontier size '
-            f'{frontier.size_m:.2f}m ({frontier.size} cells)')
+            f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
+            f'— frontier size {frontier.size_m:.2f}m ({frontier.size} cells)')
 
     def _publish_pose_fallback_goal(self, rs: RobotState, frontier: Frontier):
         goal_pub = self.goal_pubs.get(rs.name)
@@ -649,16 +707,18 @@ class MultiRobotExplorer(Node):
             rs.goal_pending = False
             return
 
+        goal_x, goal_y = self._select_goal_point(rs, frontier)
+
         goal_msg = PoseStamped()
         goal_msg.header.frame_id = self.world_frame
         goal_msg.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.position.x = frontier.centroid_world[0]
-        goal_msg.pose.position.y = frontier.centroid_world[1]
+        goal_msg.pose.position.x = goal_x
+        goal_msg.pose.position.y = goal_y
         goal_msg.pose.position.z = 0.0
         goal_msg.pose.orientation.w = 1.0
 
         goal_pub.publish(goal_msg)
-        rs.goal_position = frontier.centroid_world
+        rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
         rs.last_progress_time = now
@@ -668,7 +728,7 @@ class MultiRobotExplorer(Node):
         rs.goal_handle = None
         self.get_logger().warn(
             f'[{rs.name}] Falling back to PoseStamped goal_pose '
-            f'({frontier.centroid_world[0]:.2f}, {frontier.centroid_world[1]:.2f})')
+            f'({goal_x:.2f}, {goal_y:.2f})')
 
     def _goal_response_callback(self, future, rs: RobotState):
         try:
