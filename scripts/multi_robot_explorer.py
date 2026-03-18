@@ -36,6 +36,7 @@ from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
+from std_msgs.msg import String as StringMsg
 from nav2_msgs.action import NavigateToPose
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -75,6 +76,13 @@ class RobotState:
     initial_position: Optional[Tuple[float, float]] = None
     initial_orientation_w: float = 1.0
     returning_home: bool = False
+    # Track behaviour around repeated / stagnant goals. last_goal_world stores
+    # the most recent goal position in world coordinates (x, y).
+    last_goal_world: Optional[Tuple[float, float]] = None
+    repeat_goal_count: int = 0
+    # Short history of recent goals and associated frontier sizes for
+    # stagnation detection. Each entry is (x, y, frontier_size_m).
+    recent_goals: deque = field(default_factory=lambda: deque(maxlen=10))
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +294,16 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('robot_names', ['blinky', 'pinky'])
         self.declare_parameter('map_topic', 'map')
         self.declare_parameter('world_frame', 'map')
+        # New parameters to control local-vs-global behaviour.
+        # mode:
+        #   - 'auto'        : start in local-per-robot mode and switch to global
+        #                     once the merge_state reports MERGED.
+        #   - 'local_only'  : always use per-robot local maps.
+        #   - 'global_only' : always use the merged global map (back-compat).
+        self.declare_parameter('mode', 'auto')
+        # Topic where a helper node (or map_merge) can publish a simple
+        # merge state string: NO_OVERLAP, PARTIAL, MERGED.
+        self.declare_parameter('merge_state_topic', 'map_merge/merge_state')
         # Match m-explore-ros2 planner_frequency semantics; default tuned in YAML.
         self.declare_parameter('explore_frequency', 1.0)
         self.declare_parameter('min_frontier_size', 0.15)
@@ -301,7 +319,9 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
         self.declare_parameter('single_robot_offloaded_nav2', False)
-        self.declare_parameter('min_goal_separation', 0.25)
+        # Minimum separation between robot and candidate goal used as a final
+        # safety net; most shaping is done via min_goal_distance.
+        self.declare_parameter('min_goal_separation', 0.5)
         self.declare_parameter('suspicious_success_distance', 0.15)
         # For very small initial maps, Nav2 can legitimately report success
         # with a relatively large distance_remaining because the frontier
@@ -325,12 +345,21 @@ class MultiRobotExplorer(Node):
         # when selecting a representative cell inside a frontier region so
         # that the initial goals are not almost inside Nav2's goal tolerance.
         self.declare_parameter('min_goal_distance', 0.6)
+        # Per-robot local map topic pattern. By default we assume the standard
+        # namespaced SLAM layout '/<robot>/map'.
+        self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
         map_topic = self.get_parameter('map_topic').value
         self.map_topic = map_topic
         self.world_frame = self.get_parameter('world_frame').value
+        self.mode: str = (
+            self.get_parameter('mode').value or 'auto'
+        ).lower()
+        self.merge_state_topic: str = (
+            self.get_parameter('merge_state_topic').value
+        )
         freq = self.get_parameter('explore_frequency').value
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.potential_scale = self.get_parameter('potential_scale').value
@@ -361,18 +390,33 @@ class MultiRobotExplorer(Node):
         self.goal_point_strategy = (
             self.get_parameter('goal_point_strategy').value or 'farthest_cell'
         )
-        self.min_goal_distance = (
-            float(self.get_parameter('min_goal_distance').value)
+        self.min_goal_distance = float(
+            self.get_parameter('min_goal_distance').value
+        )
+        self.local_map_topic_pattern: str = (
+            self.get_parameter('local_map_topic_pattern').value
         )
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
-        self.latest_map: Optional[OccupancyGrid] = None
+        # Global merged map (from map_merge in multi-robot mode, or a single
+        # robot's map in single-robot mode).
+        self.latest_global_map: Optional[OccupancyGrid] = None
+        # Per-robot local maps. In many setups these are the same as the maps
+        # consumed by map_merge (/<robot>/map).
+        self.latest_local_maps: Dict[str, OccupancyGrid] = {}
+        # Map message currently associated with goal selection; set by the
+        # frontier-step helpers before assigning goals so _select_goal_point
+        # can convert frontier cells into world coordinates without assuming
+        # a single global map source.
+        self._current_goal_map: Optional[OccupancyGrid] = None
         self._map_size_x: float = 0.0
         self._map_size_y: float = 0.0
         self.exploration_complete = False
         self.goal_pubs: Dict[str, object] = {}
         self.paused: bool = False
+        self.in_global_phase: bool = False
+        self._merge_state_last: str = 'NO_OVERLAP'
 
         # -- status publishing & control --
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
@@ -387,14 +431,18 @@ class MultiRobotExplorer(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        # -- map subscription --
+        # -- global map subscription --
         map_qos_transient = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
         self.map_sub_transient = self.create_subscription(
-            OccupancyGrid, map_topic, self._map_callback, map_qos_transient)
+            OccupancyGrid,
+            map_topic,
+            self._global_map_callback,
+            map_qos_transient,
+        )
 
         map_qos_compatible = QoSProfile(
             depth=1,
@@ -402,7 +450,38 @@ class MultiRobotExplorer(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
         )
         self.map_sub_compatible = self.create_subscription(
-            OccupancyGrid, map_topic, self._map_callback, map_qos_compatible)
+            OccupancyGrid,
+            map_topic,
+            self._global_map_callback,
+            map_qos_compatible,
+        )
+
+        # -- per-robot local map subscriptions --
+        self._local_map_subs = []
+        for name in self.robot_names:
+            topic = self.local_map_topic_pattern.format(robot=name)
+            sub_t = self.create_subscription(
+                OccupancyGrid,
+                topic,
+                lambda msg, r=name: self._local_map_callback(msg, r),
+                map_qos_transient,
+            )
+            sub_c = self.create_subscription(
+                OccupancyGrid,
+                topic,
+                lambda msg, r=name: self._local_map_callback(msg, r),
+                map_qos_compatible,
+            )
+            self._local_map_subs.append(sub_t)
+            self._local_map_subs.append(sub_c)
+
+        # -- merge state subscription (optional) --
+        self.merge_state_sub = self.create_subscription(
+            StringMsg,
+            self.merge_state_topic,
+            self._merge_state_callback,
+            10,
+        )
 
         # -- visualisation --
         if self.visualize:
@@ -438,13 +517,18 @@ class MultiRobotExplorer(Node):
     # Callbacks
     # -----------------------------------------------------------------------
 
-    def _map_callback(self, msg: OccupancyGrid):
-        self.latest_map = msg
+    def _global_map_callback(self, msg: OccupancyGrid):
+        self.latest_global_map = msg
         # Track current map physical size in metres for heuristics that behave
         # differently on tiny initial maps vs. larger, more mature maps.
         res = msg.info.resolution
         self._map_size_x = msg.info.width * res
         self._map_size_y = msg.info.height * res
+
+    def _local_map_callback(self, msg: OccupancyGrid, robot: str):
+        # Store the most recent local map per robot. These are only used in
+        # local-per-robot mode.
+        self.latest_local_maps[robot] = msg
 
     def _publish_status(self, state: str):
         msg = String()
@@ -476,7 +560,17 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
 
     def _plan_tick(self):
-        if self.latest_map is None:
+        # Decide whether we should operate in global or local mode on this tick.
+        use_global = False
+        if self.mode == 'global_only':
+            use_global = True
+        elif self.mode == 'local_only':
+            use_global = False
+        else:
+            # auto mode: follow merge_state flag
+            use_global = self.in_global_phase
+
+        if use_global and self.latest_global_map is None:
             if not self._logged_waiting_for_map:
                 mode = (
                     'single_robot_offloaded_nav2'
@@ -485,6 +579,13 @@ class MultiRobotExplorer(Node):
                 )
                 self.get_logger().info(
                     f'Waiting for map on {self.map_topic} (mode={mode})...')
+                self._logged_waiting_for_map = True
+                self._publish_status('WAITING_FOR_MAP')
+            return
+        if not use_global and not self.latest_local_maps:
+            if not self._logged_waiting_for_map:
+                self.get_logger().info(
+                    'Waiting for per-robot local maps in local exploration mode...')
                 self._logged_waiting_for_map = True
                 self._publish_status('WAITING_FOR_MAP')
             return
@@ -515,10 +616,19 @@ class MultiRobotExplorer(Node):
                 if rs.goal_position:
                     rs.blacklist.append(rs.goal_position)
 
-        # detect frontiers
-        m = self.latest_map
+        if use_global:
+            self._global_frontier_step()
+        else:
+            self._local_frontier_step()
+
+    def _global_frontier_step(self):
+        m = self.latest_global_map
+        # Use the current global map for all goal selection in this tick.
+        self._current_goal_map = m
         frontiers = detect_frontiers(
-            m.data, m.info.width, m.info.height,
+            m.data,
+            m.info.width,
+            m.info.height,
             m.info.resolution,
             m.info.origin.position.x,
             m.info.origin.position.y,
@@ -531,13 +641,16 @@ class MultiRobotExplorer(Node):
                     'No frontiers remaining — exploration complete!')
                 self.exploration_complete = True
                 if self.return_to_init:
-                    # Optionally send each robot back toward its initial pose.
                     for rs in self.robots.values():
                         if rs.initial_position and not rs.returning_home:
                             self._send_return_to_init(rs)
-                    self._publish_status('RETURNING_TO_ORIGIN'
-                                         if any(r.returning_home for r in self.robots.values())
-                                         else 'COMPLETE')
+                    self._publish_status(
+                        'RETURNING_TO_ORIGIN'
+                        if any(
+                            r.returning_home for r in self.robots.values()
+                        )
+                        else 'COMPLETE'
+                    )
                 else:
                     self._publish_status('COMPLETE')
             return
@@ -560,8 +673,10 @@ class MultiRobotExplorer(Node):
 
         # assign frontiers to idle robots
         assignments = assign_frontiers(
-            self.robots, frontiers,
-            self.potential_scale, self.gain_scale,
+            self.robots,
+            frontiers,
+            self.potential_scale,
+            self.gain_scale,
             self.nearby_penalty_dist,
             self.min_goal_separation,
             self.blacklist_radius,
@@ -570,6 +685,84 @@ class MultiRobotExplorer(Node):
         for rname, fi in assignments.items():
             fr = frontiers[fi]
             self._send_goal(self.robots[rname], fr)
+
+    def _local_frontier_step(self):
+        # Per-robot frontier detection: each robot plans only on its own local
+        # map. This keeps exploration local while maps have not yet been
+        # confidently merged.
+        any_frontiers = False
+        any_idle = False
+
+        for name, rs in self.robots.items():
+            if rs.position is None or rs.goal_active:
+                continue
+            any_idle = True
+            lm = self.latest_local_maps.get(name)
+            if lm is None:
+                continue
+            # Use this robot's local map for goal selection while we process
+            # its frontiers in this tick.
+            self._current_goal_map = lm
+            self._map_size_x = lm.info.width * lm.info.resolution
+            self._map_size_y = lm.info.height * lm.info.resolution
+            frontiers = detect_frontiers(
+                lm.data,
+                lm.info.width,
+                lm.info.height,
+                lm.info.resolution,
+                lm.info.origin.position.x,
+                lm.info.origin.position.y,
+                self.min_frontier_size,
+            )
+            if not frontiers:
+                continue
+            any_frontiers = True
+
+            if self.visualize:
+                self._publish_frontier_markers(frontiers)
+
+            # Assign a frontier for this single robot using the same utility
+            # function but restricted to this robot and these frontiers.
+            sub_assignments = assign_frontiers(
+                {name: rs},
+                frontiers,
+                self.potential_scale,
+                self.gain_scale,
+                self.nearby_penalty_dist,
+                self.min_goal_separation,
+                self.blacklist_radius,
+            )
+            if name in sub_assignments:
+                fr = frontiers[sub_assignments[name]]
+                self._send_goal(rs, fr)
+
+        if not any_frontiers:
+            if not self.exploration_complete and any_idle:
+                self.get_logger().info(
+                    'No frontiers remaining on any local map — exploration complete!')
+                self.exploration_complete = True
+                if self.return_to_init:
+                    for rs in self.robots.values():
+                        if rs.initial_position and not rs.returning_home:
+                            self._send_return_to_init(rs)
+                    self._publish_status(
+                        'RETURNING_TO_ORIGIN'
+                        if any(
+                            r.returning_home for r in self.robots.values()
+                        )
+                        else 'COMPLETE'
+                    )
+                else:
+                    self._publish_status('COMPLETE')
+
+    def _merge_state_callback(self, msg: StringMsg):
+        state = (msg.data or '').strip().upper()
+        self._merge_state_last = state or 'NO_OVERLAP'
+        if state == 'MERGED':
+            if not self.in_global_phase:
+                self.get_logger().info(
+                    'Merge state reported MERGED — switching to global exploration on merged map')
+            self.in_global_phase = True
 
     # -----------------------------------------------------------------------
     # TF helpers
@@ -620,8 +813,13 @@ class MultiRobotExplorer(Node):
             ys = frontier.indices[:, 0].astype(np.float32)
             xs = frontier.indices[:, 1].astype(np.float32)
 
-            # Convert all frontier cells to world coordinates.
-            m = self.latest_map
+            # Convert all frontier cells to world coordinates using the map
+            # that was active when the frontier set was computed.
+            m = self._current_goal_map
+            if m is None:
+                # Fallback to centroid if, for some reason, we don't have a
+                # map associated with this frontier batch.
+                return gx, gy
             res = m.info.resolution
             ox = m.info.origin.position.x
             oy = m.info.origin.position.y
@@ -689,6 +887,35 @@ class MultiRobotExplorer(Node):
         rs.last_progress_distance = None
         rs.last_progress_time = now
         rs.returning_home = False
+
+        # Update repeat-goal tracking. If we keep selecting essentially the
+        # same goal for this robot, treat the region as exhausted after a few
+        # repeats and blacklist it so other frontiers can be considered.
+        REPEAT_DIST_THRESH = 0.3  # metres
+        REPEAT_LIMIT = 5
+        frontier_size_m = float(frontier.size_m)
+
+        if rs.last_goal_world is not None:
+            lx, ly = rs.last_goal_world
+            dx = goal_x - lx
+            dy = goal_y - ly
+            if math.hypot(dx, dy) < REPEAT_DIST_THRESH:
+                rs.repeat_goal_count += 1
+            else:
+                rs.repeat_goal_count = 0
+        else:
+            rs.repeat_goal_count = 0
+
+        rs.last_goal_world = (goal_x, goal_y)
+        rs.recent_goals.append((goal_x, goal_y, frontier_size_m))
+
+        if rs.repeat_goal_count >= REPEAT_LIMIT:
+            self.get_logger().warn(
+                f'[{rs.name}] Repeatedly selecting nearly-identical goal '
+                f'({goal_x:.2f}, {goal_y:.2f}); blacklisting and searching elsewhere'
+            )
+            rs.blacklist.append((goal_x, goal_y))
+            rs.repeat_goal_count = 0
 
         send_future = rs.action_client.send_goal_async(
             goal_msg,
@@ -837,14 +1064,30 @@ class MultiRobotExplorer(Node):
                     self.get_logger().info(
                         f'[{rs.name}] Goal reached '
                         f'(total: {rs.goals_reached})')
-                # On a genuine success (including relaxed small-map cases),
-                # allow future exploration of the surrounding region by
-                # clearing any nearby blacklist entries.
-                if rs.goal_position and rs.blacklist:
-                    rs.blacklist = [
-                        bl for bl in rs.blacklist
-                        if _dist(bl, rs.goal_position) >= self.blacklist_clear_radius
-                    ]
+
+                # Stagnation heuristic: if recent goals for this robot have
+                # stayed clustered in a small region without significant change
+                # in frontier size, treat that region as exhausted and add a
+                # blacklist entry at the cluster centre.
+                if len(rs.recent_goals) >= 5:
+                    xs = [g[0] for g in rs.recent_goals]
+                    ys = [g[1] for g in rs.recent_goals]
+                    sizes = [g[2] for g in rs.recent_goals]
+                    cx = sum(xs) / len(xs)
+                    cy = sum(ys) / len(ys)
+                    max_rad = max(
+                        math.hypot(x - cx, y - cy)
+                        for x, y in zip(xs, ys)
+                    )
+                    size_span = max(sizes) - min(sizes)
+                    STAGNATION_RADIUS = 0.7  # metres
+                    STAGNATION_SIZE_EPS = 0.5  # metres of frontier-length change
+                    if max_rad < STAGNATION_RADIUS and size_span < STAGNATION_SIZE_EPS:
+                        self.get_logger().info(
+                            f'[{rs.name}] Goals have stagnated in a small region; '
+                            f'blacklisting cluster centre ({cx:.2f}, {cy:.2f})'
+                        )
+                        rs.blacklist.append((cx, cy))
         elif status == GoalStatus.STATUS_ABORTED:
             rs.goals_failed += 1
             self.get_logger().warn(
@@ -1003,6 +1246,12 @@ def main(args=None):
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
+        # Treat Ctrl+C and external shutdown events as normal exit paths.
+        pass
+    except Exception:
+        # During shutdown the rclpy context can become invalid and raise
+        # RCLError-like exceptions from the executor. Ignore these so that
+        # teardown remains quiet while still running the cleanup below.
         pass
     finally:
         # cancel all active goals

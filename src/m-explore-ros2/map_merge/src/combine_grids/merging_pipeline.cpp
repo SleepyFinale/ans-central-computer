@@ -93,6 +93,58 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   internal::writeDebugMatchingInfo(images_, image_features, pairwise_matches);
 #endif
 
+  // Guard against very weak matches even if OpenCV reports some connectivity.
+  // Require a minimum number of inliers and inlier ratio from the best pair.
+  int best_inliers = 0;
+  int best_matches = 0;
+  double best_confidence = 0.0;
+  for (const auto& mi : pairwise_matches) {
+    if (mi.matches.empty()) {
+      continue;
+    }
+    if (mi.num_inliers > best_inliers) {
+      best_inliers = mi.num_inliers;
+      best_matches = static_cast<int>(mi.matches.size());
+      best_confidence = mi.confidence;
+    }
+  }
+
+  double best_ratio = (best_matches > 0)
+                          ? (static_cast<double>(best_inliers) /
+                             static_cast<double>(best_matches))
+                          : 0.0;
+
+  const int kMinInliers = 8;
+  const double kMinInlierRatio = 0.5;
+  if (best_inliers > 0 &&
+      (best_inliers < kMinInliers || best_ratio < kMinInlierRatio)) {
+    RCLCPP_INFO(logger,
+                "[estimateTransforms] Best feature match too weak "
+                "(inliers=%d, matches=%d, ratio=%.3f, confidence=%.3f); "
+                "placing maps independently",
+                best_inliers, best_matches, best_ratio, best_confidence);
+
+    transforms_.clear();
+    transforms_.resize(images_.size());
+    matched_.assign(images_.size(), false);
+
+    // set identity for the first non-empty grid (reference frame)
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!images_[i].empty()) {
+        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+        break;
+      }
+    }
+
+    // place remaining grids at non-overlapping positions
+    assignFallbackTransforms();
+
+    RCLCPP_DEBUG(logger,
+                 "[estimateTransforms] All maps placed independently due to "
+                 "weak feature matches");
+    return true;
+  }
+
   /* use only matches that has enough confidence. leave out matches that are not
    * connected (small components) */
   good_indices = cv::detail::leaveBiggestComponent(

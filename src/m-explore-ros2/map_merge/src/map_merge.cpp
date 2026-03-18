@@ -48,6 +48,36 @@
 
 namespace map_merge
 {
+namespace
+{
+inline bool isFinite(double v)
+{
+  return std::isfinite(v);
+}
+
+inline bool isValidQuaternion(const geometry_msgs::msg::Quaternion& q)
+{
+  if (!isFinite(q.x) || !isFinite(q.y) || !isFinite(q.z) || !isFinite(q.w)) {
+    return false;
+  }
+  double qn = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+  if (!isFinite(qn) || qn < 1e-10) {
+    return false;
+  }
+  return true;
+}
+
+inline bool isValidTransform2D(const geometry_msgs::msg::TransformStamped& tf_msg)
+{
+  const auto& t = tf_msg.transform.translation;
+  const auto& q = tf_msg.transform.rotation;
+  if (!isFinite(t.x) || !isFinite(t.y) || !isFinite(t.z)) {
+    return false;
+  }
+  return isValidQuaternion(q);
+}
+}  // namespace
+
 MapMerge::MapMerge() : Node("map_merge", rclcpp::NodeOptions()
                                        .allow_undeclared_parameters(true)
                                        .automatically_declare_parameters_from_overrides(true)),
@@ -294,6 +324,13 @@ void MapMerge::publishTransforms(double merged_origin_x,
       tf_msg.header.frame_id = world_frame_;
       tf_msg.child_frame_id = name + "/map";
       tf_msg.transform = subscription.initial_pose;
+      if (!isValidTransform2D(tf_msg)) {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *this->get_clock(), 10000,
+          "Skipping invalid initial pose TF for %s/map (NaN/Inf or zero quaternion)",
+          name.c_str());
+        continue;
+      }
       tf_msgs.push_back(tf_msg);
     }
   } else {
@@ -334,10 +371,12 @@ void MapMerge::publishTransforms(double merged_origin_x,
         continue;
       }
 
-      // Skip invalid transforms (zero quaternion = no estimate yet).
-      double qn = t.rotation.x * t.rotation.x + t.rotation.y * t.rotation.y +
-                  t.rotation.z * t.rotation.z + t.rotation.w * t.rotation.w;
-      if (qn < 1e-10) {
+      // Skip invalid transforms (NaN/Inf or zero quaternion = no estimate yet).
+      if (!isValidQuaternion(t.rotation)) {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *this->get_clock(), 10000,
+          "Skipping invalid estimated transform for %s/map (NaN/Inf or zero quaternion)",
+          robot_names[i].c_str());
         continue;
       }
 
@@ -367,6 +406,13 @@ void MapMerge::publishTransforms(double merged_origin_x,
       tf_msg.transform.translation.y = tf_y;
       tf_msg.transform.translation.z = 0.0;
       tf_msg.transform.rotation = t.rotation;
+      if (!isValidTransform2D(tf_msg)) {
+        RCLCPP_WARN_THROTTLE(
+          logger_, *this->get_clock(), 10000,
+          "Skipping invalid TF for %s/map (NaN/Inf translation after conversion)",
+          robot_names[i].c_str());
+        continue;
+      }
       tf_msgs.push_back(tf_msg);
 
       RCLCPP_DEBUG(logger_,

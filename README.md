@@ -578,6 +578,58 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 ---
 
+#### 1b. `start_central.sh` reports an existing central stack that you don't see
+
+**Symptoms:**
+
+- Running `./scripts/start_central.sh` prints:
+
+  ```text
+  ERROR: A central stack appears to already be running (found existing processes):
+  ...
+  Stop the existing instance(s) (Ctrl+C in the other terminal),
+  or kill the existing processes, then re-run this script.
+  ```
+
+- You don't think any previous `start_central.sh` is running.
+
+**What the script is checking now:**
+
+- It looks only for **central-side** processes launched by `start_central.sh`:
+  - `python3 ... scripts/tf_relay_multirobot.py`
+  - `python3 ... scripts/multi_robot_explorer.py --ros-args --params-file config/multi_robot_explorer.yaml ...`
+- Robot-side SLAM/Nav2 on the SBC is **not** matched by this check.
+
+**Interactive cleanup (recommended):**
+
+- When this happens in an interactive terminal, the script will:
+  - Print the matching PID(s) and full command lines.
+  - Ask: `Kill these processes and continue? [y/N]`
+  - On `y` / `Y`, it sends `kill` to those PIDs, re-checks, and continues startup if everything stopped cleanly.
+
+**Non-interactive shells (scripts, tmux, etc.):**
+
+- If `start_central.sh` is launched from a non-interactive shell (no TTY), it **does not** kill anything by default. Instead it:
+  - Prints the matching processes.
+  - Exits with an error so you can clean up manually.
+- To clean up yourself:
+
+  ```bash
+  ps aux | grep multi_robot_explorer.py | grep -v grep
+  kill <pid>
+  ```
+
+- If you really want automatic cleanup in non-interactive runs and understand the risks, you can opt in:
+
+  ```bash
+  export CENTRAL_AUTO_KILL=true
+  ./scripts/start_central.sh
+  ```
+
+  In that mode, non-interactive shells will kill the matched central processes without prompting.
+
+---
+
 #### 2. `ROS_DOMAIN_ID` mismatch (topics not visible)
 
 **Symptoms:**

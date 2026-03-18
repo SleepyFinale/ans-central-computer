@@ -74,15 +74,84 @@ echo ""
 # We validate this using OS processes (authoritative) rather than only the
 # ROS graph, because the ROS graph can temporarily retain nodes after
 # crashes/network hiccups.
-existing_central="$(ps aux | grep -E 'python3 .*scripts/(multi_robot_explorer|tf_relay_multirobot)\.py' | grep -v grep || true)"
-if [[ -n "$existing_central" ]]; then
+ensure_no_central_stack_running() {
+    # Match only central-computer processes launched by this script:
+    #  - tf_relay_multirobot.py
+    #  - multi_robot_explorer.py using the central params file
+    local pattern_tf="python3 .*scripts/tf_relay_multirobot\\.py"
+    local pattern_explorer="python3 .*scripts/multi_robot_explorer\\.py .*--params-file ${CONFIG_DIR}/multi_robot_explorer\\.yaml"
+
+    # Collect matching PIDs + commands (skip the grep processes themselves).
+    local existing
+    existing="$(ps aux | grep -E "$pattern_tf|$pattern_explorer" | grep -v grep || true)"
+
+    if [[ -z "$existing" ]]; then
+        return 0
+    fi
+
     echo "ERROR: A central stack appears to already be running (found existing processes):"
-    echo "$existing_central"
+    echo "$existing"
     echo ""
-    echo "Stop the existing instance(s) (Ctrl+C in the other terminal),"
-    echo "or kill the existing processes, then re-run this script."
-    exit 1
-fi
+    echo "Typical causes:"
+    echo "  - An earlier run of this script is still active in another terminal or tmux pane."
+    echo "  - A previous run crashed or the terminal was closed without stopping the processes."
+    echo ""
+
+    # In non-interactive shells (e.g., launched from another script), do not
+    # attempt to prompt; just fail safe unless explicitly overridden.
+    if [[ ! -t 0 && "${CENTRAL_AUTO_KILL:-false}" != "true" ]]; then
+        echo "This shell is non-interactive; not killing processes automatically."
+        echo "To clean up manually, you can run for example:"
+        echo "  ps aux | grep multi_robot_explorer.py | grep -v grep"
+        echo "  kill <pid>"
+        echo ""
+        echo "Alternatively, re-run this script from an interactive terminal"
+        echo "to be prompted to kill the detected processes, or set"
+        echo "CENTRAL_AUTO_KILL=true if you understand the risks."
+        exit 1
+    fi
+
+    echo "The following PID(s) and command lines were detected:"
+    echo ""
+    # Pretty-print: PID and full command.
+    # ps aux format: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+    echo "$existing" | while read -r user pid rest; do
+        # 'rest' starts with %CPU; we want the command portion at the end.
+        # For clarity we just echo the original line prefixed with PID.
+        echo "  PID ${pid}: ${user} ${rest}"
+    done
+    echo ""
+
+    # If non-interactive auto-kill is explicitly enabled, skip prompt.
+    if [[ "${CENTRAL_AUTO_KILL:-false}" == "true" && ! -t 0 ]]; then
+        echo "CENTRAL_AUTO_KILL=true and non-interactive shell detected — killing matching processes without prompting..."
+        echo "$existing" | awk '{print $2}' | xargs -r kill || true
+    else
+        read -r -p "Kill these processes and continue? [y/N] " reply
+        if [[ "$reply" != "y" && "$reply" != "Y" ]]; then
+            echo "Aborting without killing any processes."
+            exit 1
+        fi
+        echo "Killing matching processes..."
+        echo "$existing" | awk '{print $2}' | xargs -r kill || true
+    fi
+
+    # Give the OS a moment, then re-check.
+    sleep 1
+    local remaining
+    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_explorer" | grep -v grep || true)"
+    if [[ -n "$remaining" ]]; then
+        echo "WARNING: Some central processes still appear to be running:"
+        echo "$remaining"
+        echo "You may need to inspect and kill these manually before re-running."
+        exit 1
+    fi
+
+    echo "All matching central processes have been terminated. Continuing startup..."
+    echo ""
+}
+
+ensure_no_central_stack_running
 
 # If the graph still shows these nodes, warn but continue.
 NODES_RAW="$(ros2 node list 2>/dev/null || true)"
@@ -261,6 +330,15 @@ else
         --params-file "${CONFIG_DIR}/map_merge/multirobot_params_unknown_poses.yaml" &
     PIDS+=($!)
     sleep 2
+
+    # ---- 2b. Map merge state monitor ----
+    # This helper publishes a coarse merge state string (NO_OVERLAP, PARTIAL,
+    # MERGED) on map_merge/merge_state so the explorer can automatically switch
+    # from per-robot local exploration to global merged exploration.
+    python3 "${SCRIPT_DIR}/map_merge_state_monitor.py" --ros-args \
+        -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
+        -p "world_frame:=map" &
+    PIDS+=($!)
 
     # ---- 3. Explorer ----
     echo "[3/3] Starting multi-robot explorer..."

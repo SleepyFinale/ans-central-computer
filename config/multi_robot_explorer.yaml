@@ -8,11 +8,27 @@ multi_robot_explorer:
     # Robot names (must match Nav2 namespaces and TF frame prefixes)
     robot_names: ['blinky', 'pinky', 'inky']
 
-    # Merged map topic (from map_merge)
+    # Merged map topic (from map_merge) used during global exploration.
     map_topic: map
 
     # TF world frame (must match map_merge world_frame)
     world_frame: map
+
+    # Explorer mode:
+    #   - auto        : start with per-robot local maps, switch to global
+    #                   merged map when map_merge reports MERGED.
+    #   - local_only  : always use per-robot local maps.
+    #   - global_only : always use the merged global map (legacy behaviour).
+    mode: local_only
+
+    # Topic on which a helper node can publish a simple merge state string
+    # (NO_OVERLAP, PARTIAL, MERGED). In auto mode this controls when the
+    # explorer switches from local to global exploration.
+    merge_state_topic: map_merge/merge_state
+
+    # Pattern for per-robot local map topics, filled with each robot name.
+    # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
+    local_map_topic_pattern: "/{robot}/map"
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
     # Matches m-explore-ros2's planner_frequency semantics.
