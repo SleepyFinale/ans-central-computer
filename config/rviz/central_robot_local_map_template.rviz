@@ -53,6 +53,46 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
       Use Timestamp: false
+    - Class: rviz_default_plugins/Map
+      Name: Global Costmap
+      Enabled: true
+      Alpha: 0.65
+      Color Scheme: costmap
+      Draw Behind: false
+      Topic:
+        Value: /__ROBOT__/global_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Filter size: 10
+      Update Topic:
+        Value: /__ROBOT__/global_costmap/costmap_updates
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Use Timestamp: false
+    - Class: rviz_default_plugins/Map
+      Name: Local Costmap
+      Enabled: true
+      Alpha: 0.65
+      Color Scheme: costmap
+      Draw Behind: false
+      Topic:
+        Value: /__ROBOT__/local_costmap/costmap
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Filter size: 10
+      Update Topic:
+        Value: /__ROBOT__/local_costmap/costmap_updates
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Use Timestamp: false
     - Class: rviz_default_plugins/LaserScan
       Name: LaserScan
       Enabled: true

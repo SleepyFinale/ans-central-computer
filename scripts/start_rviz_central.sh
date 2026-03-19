@@ -3,6 +3,7 @@
 # Start RViz for the central computer with sensible defaults.
 # - Global mode (default): show the merged /map (or single-robot /map) in frame 'map'.
 # - Local mode: show a specific robot's local map and topics using its namespace.
+#   Includes namespaced global/local costmap overlays to visualize inflated/lethal zones.
 #
 # Usage:
 #   ./scripts/start_rviz_central.sh                # global map view
@@ -115,6 +116,7 @@ else
     echo "Starting RViz in LOCAL mode for robot '${ROBOT_NAME}' using:"
     echo "  $TMP_CFG"
     echo "Fixed frame: map, map topic: /${ROBOT_NAME}/map"
+    echo "Costmap overlays: /${ROBOT_NAME}/global_costmap/costmap and /${ROBOT_NAME}/local_costmap/costmap"
     exec rviz2 -d "$TMP_CFG"
 fi
 
