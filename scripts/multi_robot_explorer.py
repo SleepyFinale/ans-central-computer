@@ -357,6 +357,11 @@ class MultiRobotExplorer(Node):
         # occupied cells (likely walls/obstacles in the current map).
         self.declare_parameter('goal_clearance_radius_m', 0.45)
         self.declare_parameter('goal_clearance_weight', 4.0)
+        # Hard safety gate for candidate goal cells:
+        # - reject goals in high-cost cells
+        # - reject goals that do not have enough local obstacle clearance
+        self.declare_parameter('goal_max_cell_cost', 80)
+        self.declare_parameter('goal_min_clearance_gate_m', 0.30)
         # Mid-route retargeting controls.
         self.declare_parameter('retarget_enable', True)
         self.declare_parameter('retarget_cooldown_sec', 12.0)
@@ -423,6 +428,12 @@ class MultiRobotExplorer(Node):
         )
         self.goal_clearance_weight = float(
             self.get_parameter('goal_clearance_weight').value
+        )
+        self.goal_max_cell_cost = int(
+            self.get_parameter('goal_max_cell_cost').value
+        )
+        self.goal_min_clearance_gate_m = float(
+            self.get_parameter('goal_min_clearance_gate_m').value
         )
         self.retarget_enable = bool(
             self.get_parameter('retarget_enable').value
@@ -888,6 +899,16 @@ class MultiRobotExplorer(Node):
             return None
         return cx, cy
 
+    def _goal_cell_cost(self, m: Optional[OccupancyGrid], x: float, y: float) -> int:
+        if m is None:
+            return 0
+        cell = self._world_to_cell(m, x, y)
+        if cell is None:
+            return 100
+        cx, cy = cell
+        idx = cy * m.info.width + cx
+        return int(m.data[idx])
+
     def _goal_clearance_m(self, m: Optional[OccupancyGrid], x: float, y: float) -> float:
         if m is None:
             return self.goal_clearance_radius_m
@@ -916,6 +937,41 @@ class MultiRobotExplorer(Node):
         shortfall = max(0.0, self.goal_clearance_radius_m - clearance)
         return self.goal_clearance_weight * shortfall
 
+    def _goal_passes_safety_gate(self, m: Optional[OccupancyGrid], x: float, y: float) -> bool:
+        cost = self._goal_cell_cost(m, x, y)
+        if cost < 0 or cost >= self.goal_max_cell_cost:
+            return False
+        clearance = self._goal_clearance_m(m, x, y)
+        return clearance >= self.goal_min_clearance_gate_m
+
+    def _log_goal_safety_rejection(
+        self,
+        rs: RobotState,
+        x: float,
+        y: float,
+        context: str,
+    ) -> None:
+        m = self._current_goal_map
+        cost = self._goal_cell_cost(m, x, y)
+        clearance = self._goal_clearance_m(m, x, y)
+        reasons: List[str] = []
+        if cost < 0:
+            reasons.append('unknown_cell')
+        elif cost >= self.goal_max_cell_cost:
+            reasons.append('high_cost')
+        if clearance < self.goal_min_clearance_gate_m:
+            reasons.append('low_clearance')
+        if not reasons:
+            reasons.append('unknown')
+        self.get_logger().debug(
+            f'[{rs.name}] reject_goal_candidate ({context}): '
+            f'goal=({x:.2f}, {y:.2f}); cost={cost}; '
+            f'clearance_m={clearance:.2f}; '
+            f'thresholds(cost<{self.goal_max_cell_cost}, '
+            f'clearance>={self.goal_min_clearance_gate_m:.2f}); '
+            f'reason={",".join(reasons)}'
+        )
+
     def _frontier_penalty(self, rs: RobotState, fr: Frontier) -> float:
         gx, gy = self._select_goal_point(rs, fr)
         return self._clearance_penalty(self._current_goal_map, gx, gy)
@@ -923,6 +979,11 @@ class MultiRobotExplorer(Node):
     def _frontier_utility(self, rs: RobotState, fr: Frontier) -> float:
         gx, gy = self._select_goal_point(rs, fr)
         if rs.position is None:
+            return -1e9
+        if not self._goal_passes_safety_gate(self._current_goal_map, gx, gy):
+            self._log_goal_safety_rejection(
+                rs, gx, gy, context='frontier_utility'
+            )
             return -1e9
         d = _dist(rs.position, (gx, gy))
         if d < self.min_goal_separation:
@@ -1085,17 +1146,39 @@ class MultiRobotExplorer(Node):
             dx = wx - rx
             dy = wy - ry
             dists = np.hypot(dx, dy)
+            grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+            costs = grid[ys.astype(np.int32), xs.astype(np.int32)]
+            valid_cost = (costs >= 0) & (costs < self.goal_max_cell_cost)
+            if np.any(valid_cost):
+                clearance_ok = np.zeros_like(valid_cost, dtype=bool)
+                valid_indices = np.flatnonzero(valid_cost)
+                for i in valid_indices:
+                    clearance = self._goal_clearance_m(m, float(wx[i]), float(wy[i]))
+                    if clearance >= self.goal_min_clearance_gate_m:
+                        clearance_ok[i] = True
+                valid_mask = valid_cost & clearance_ok
+            else:
+                valid_mask = valid_cost
 
             # Prefer cells at or beyond the configured minimum goal distance,
             # but allow closer ones if nothing meets that threshold.
             mask_far_enough = dists >= max(0.0, self.min_goal_distance)
-            if np.any(mask_far_enough):
+            safe_far = valid_mask & mask_far_enough
+            if np.any(safe_far):
+                idx = int(np.argmax(dists * safe_far))
+            elif np.any(valid_mask):
+                idx = int(np.argmax(dists * valid_mask))
+            elif np.any(mask_far_enough):
                 idx = int(np.argmax(dists * mask_far_enough))
             else:
                 idx = int(np.argmax(dists))
 
             gx = float(wx[idx])
             gy = float(wy[idx])
+            if not np.any(valid_mask):
+                self._log_goal_safety_rejection(
+                    rs, gx, gy, context='select_goal_point_fallback'
+                )
 
         return gx, gy
 
