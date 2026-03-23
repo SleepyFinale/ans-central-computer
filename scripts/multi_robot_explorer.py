@@ -66,6 +66,7 @@ class RobotState:
     last_goal_time: float = 0.0
     goal_active: bool = False
     goal_pending: bool = False
+    goal_status: str = 'none'
     position: Optional[Tuple[float, float]] = None  # current (x,y) in world
     goals_reached: int = 0
     goals_failed: int = 0
@@ -74,6 +75,8 @@ class RobotState:
     last_distance_remaining: Optional[float] = None
     last_progress_distance: Optional[float] = None
     last_progress_time: float = 0.0
+    active_goal_sent_time: float = 0.0
+    last_pose_when_goal_sent: Optional[Tuple[float, float]] = None
     initial_position: Optional[Tuple[float, float]] = None
     initial_orientation_w: float = 1.0
     returning_home: bool = False
@@ -361,6 +364,12 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('retarget_min_utility_gain', 0.8)
         self.declare_parameter('retarget_stagnation_sec', 20.0)
         self.declare_parameter('retarget_clearance_threshold_m', 0.25)
+        # Goal replacement gate controls to avoid rapid preempt/replan loops.
+        self.declare_parameter('min_goal_replan_interval_s', 4.0)
+        self.declare_parameter('min_goal_change_dist_m', 0.75)
+        self.declare_parameter('min_progress_before_replan_m', 0.25)
+        self.declare_parameter('max_stuck_time_s', 12.0)
+        self.declare_parameter('allow_replan_when_no_progress', True)
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
@@ -432,6 +441,21 @@ class MultiRobotExplorer(Node):
         )
         self.retarget_clearance_threshold_m = float(
             self.get_parameter('retarget_clearance_threshold_m').value
+        )
+        self.min_goal_replan_interval_s = float(
+            self.get_parameter('min_goal_replan_interval_s').value
+        )
+        self.min_goal_change_dist_m = float(
+            self.get_parameter('min_goal_change_dist_m').value
+        )
+        self.min_progress_before_replan_m = float(
+            self.get_parameter('min_progress_before_replan_m').value
+        )
+        self.max_stuck_time_s = float(
+            self.get_parameter('max_stuck_time_s').value
+        )
+        self.allow_replan_when_no_progress = bool(
+            self.get_parameter('allow_replan_when_no_progress').value
         )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
@@ -575,7 +599,8 @@ class MultiRobotExplorer(Node):
         msg = String()
         # Simple text state with per-robot summary; consumer tools can parse if desired.
         per_robot = ', '.join(
-            f'{rs.name}:reached={rs.goals_reached},failed={rs.goals_failed}'
+            f'{rs.name}:reached={rs.goals_reached},failed={rs.goals_failed},'
+            f'goal_status={rs.goal_status},goal_active={rs.goal_active}'
             for rs in self.robots.values()
         )
         msg.data = f'state={state}; robots=[{per_robot}]'
@@ -919,6 +944,68 @@ class MultiRobotExplorer(Node):
                 best = fr
         return best, best_u
 
+    def _robot_is_making_progress(self, rs: RobotState, now: float) -> bool:
+        if not rs.goal_active or rs.goal_position is None or rs.position is None:
+            return False
+        if rs.last_pose_when_goal_sent is None:
+            return False
+        start_dist = _dist(rs.last_pose_when_goal_sent, rs.goal_position)
+        curr_dist = _dist(rs.position, rs.goal_position)
+        return (start_dist - curr_dist) >= self.min_progress_before_replan_m
+
+    def _is_robot_stuck(self, rs: RobotState, now: float) -> bool:
+        if not self.allow_replan_when_no_progress:
+            return False
+        if not rs.goal_active:
+            return False
+        if rs.last_progress_time <= 0:
+            return (now - rs.active_goal_sent_time) > self.max_stuck_time_s
+        return (now - rs.last_progress_time) > self.max_stuck_time_s
+
+    def _log_replan_decision(
+        self,
+        rs: RobotState,
+        reason: str,
+        allow: bool,
+        now: float,
+        candidate_goal: Optional[Tuple[float, float]] = None,
+    ) -> None:
+        elapsed = now - (rs.active_goal_sent_time or now)
+        since_progress = now - (rs.last_progress_time or rs.active_goal_sent_time or now)
+        goal_delta = None
+        if candidate_goal is not None and rs.goal_position is not None:
+            goal_delta = _dist(candidate_goal, rs.goal_position)
+        prefix = 'replan' if allow else 'skip_replan'
+        details = (
+            f'[{rs.name}] {prefix}: {reason}; elapsed_since_goal={elapsed:.1f}s; '
+            f'since_progress={since_progress:.1f}s; '
+            f'goal_delta_m={(f"{goal_delta:.2f}" if goal_delta is not None else "n/a")}'
+        )
+        if allow:
+            self.get_logger().info(details)
+        else:
+            self.get_logger().debug(details)
+
+    def _should_replace_goal(
+        self,
+        rs: RobotState,
+        candidate_goal_xy: Tuple[float, float],
+        now: float,
+    ) -> Tuple[bool, str]:
+        if rs.goal_position is None or not rs.goal_active:
+            return True, 'no_active_goal'
+        if rs.goal_status in ('aborted', 'canceled', 'failed', 'succeeded'):
+            return True, f'current_goal_{rs.goal_status}'
+        if (now - rs.active_goal_sent_time) < self.min_goal_replan_interval_s:
+            return False, 'cooldown'
+        if _dist(candidate_goal_xy, rs.goal_position) < self.min_goal_change_dist_m:
+            return False, 'goal_too_similar'
+        if self._robot_is_making_progress(rs, now):
+            return False, 'robot_making_progress'
+        if self._is_robot_stuck(rs, now):
+            return True, 'stuck_timeout'
+        return False, 'no_replan_condition'
+
     def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
         if not self.retarget_enable:
             return
@@ -949,7 +1036,15 @@ class MultiRobotExplorer(Node):
         if best_u < (curr_u + self.retarget_min_utility_gain):
             return
 
+        should_replace, gate_reason = self._should_replace_goal(rs, new_goal, now)
+        if not should_replace:
+            self._log_replan_decision(
+                rs, gate_reason, allow=False, now=now, candidate_goal=new_goal)
+            return
+
         reason = 'clearance risk' if risky else 'stagnation'
+        self._log_replan_decision(
+            rs, gate_reason, allow=True, now=now, candidate_goal=new_goal)
         self.get_logger().info(
             f'[{rs.name}] Retargeting active goal due to {reason}; '
             f'old=({current_goal[0]:.2f}, {current_goal[1]:.2f}) '
@@ -1082,9 +1177,12 @@ class MultiRobotExplorer(Node):
 
         rs.goal_active = True
         rs.goal_pending = True
+        rs.goal_status = 'pending'
         rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
+        rs.active_goal_sent_time = now
+        rs.last_pose_when_goal_sent = rs.position
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = now
@@ -1161,10 +1259,13 @@ class MultiRobotExplorer(Node):
         rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
+        rs.active_goal_sent_time = now
+        rs.last_pose_when_goal_sent = rs.position
         rs.last_progress_time = now
         rs.last_progress_distance = None
         rs.goal_active = True
         rs.goal_pending = False
+        rs.goal_status = 'executing'
         rs.goal_handle = None
         self.get_logger().warn(
             f'[{rs.name}] Falling back to PoseStamped goal_pose '
@@ -1178,6 +1279,7 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] Failed to send NavigateToPose goal: {exc}')
             rs.goal_active = False
             rs.goal_pending = False
+            rs.goal_status = 'failed'
             rs.goal_handle = None
             if rs.goal_position is not None:
                 rs.blacklist.append(rs.goal_position)
@@ -1187,11 +1289,13 @@ class MultiRobotExplorer(Node):
         if not goal_handle.accepted:
             self.get_logger().warn(f'[{rs.name}] Goal rejected by Nav2')
             rs.goal_active = False
+            rs.goal_status = 'failed'
             if rs.goal_position is not None:
                 rs.blacklist.append(rs.goal_position)
             return
 
         rs.goal_handle = goal_handle
+        rs.goal_status = 'executing'
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
         rs.last_progress_time = now
@@ -1258,6 +1362,7 @@ class MultiRobotExplorer(Node):
                 rs.blacklist.append(rs.goal_position)
             rs.goal_active = False
             rs.goal_pending = False
+            rs.goal_status = 'failed'
             rs.goal_handle = None
             rs.last_distance_remaining = None
             rs.last_progress_distance = None
@@ -1283,6 +1388,7 @@ class MultiRobotExplorer(Node):
 
             if suspicious and not small_map:
                 rs.goals_failed += 1
+                rs.goal_status = 'failed'
                 self.get_logger().warn(
                     f'[{rs.name}] Goal reported success but distance_remaining='
                     f'{rs.last_distance_remaining:.2f}m > '
@@ -1292,6 +1398,7 @@ class MultiRobotExplorer(Node):
                     rs.blacklist.append(rs.goal_position)
             else:
                 rs.goals_reached += 1
+                rs.goal_status = 'succeeded'
                 if suspicious and small_map:
                     self.get_logger().info(
                         f'[{rs.name}] Goal reported success with '
@@ -1329,13 +1436,16 @@ class MultiRobotExplorer(Node):
                         rs.blacklist.append((cx, cy))
         elif status == GoalStatus.STATUS_ABORTED:
             rs.goals_failed += 1
+            rs.goal_status = 'aborted'
             self.get_logger().warn(
                 f'[{rs.name}] Goal aborted — blacklisting')
             if rs.goal_position:
                 rs.blacklist.append(rs.goal_position)
         elif status == GoalStatus.STATUS_CANCELED:
+            rs.goal_status = 'canceled'
             self.get_logger().info(f'[{rs.name}] Goal cancelled')
         else:
+            rs.goal_status = 'failed'
             self.get_logger().info(
                 f'[{rs.name}] Goal finished with status {status}')
 
@@ -1381,6 +1491,7 @@ class MultiRobotExplorer(Node):
                 pass
         rs.goal_active = False
         rs.goal_pending = False
+        rs.goal_status = 'canceled'
         rs.goal_handle = None
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
@@ -1410,9 +1521,12 @@ class MultiRobotExplorer(Node):
 
         rs.goal_active = True
         rs.goal_pending = True
+        rs.goal_status = 'pending'
         rs.goal_position = rs.initial_position
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
+        rs.active_goal_sent_time = now
+        rs.last_pose_when_goal_sent = rs.position
         rs.last_progress_time = now
         rs.last_progress_distance = None
         rs.last_distance_remaining = None
