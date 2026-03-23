@@ -93,6 +93,24 @@ multi_robot_explorer:
     # cell if the region is smaller than this.
     min_goal_distance: 0.6
 
+    # Clearance shaping for candidate goals:
+    # - goal_clearance_radius_m: desired minimum wall/obstacle clearance.
+    # - goal_clearance_weight: penalty weight when a candidate sits inside the
+    #   clearance radius from occupied map cells.
+    goal_clearance_radius_m: 0.45
+    goal_clearance_weight: 4.0
+
+    # Adaptive mid-route retargeting:
+    # - When enabled, active goals can be cancelled and reassigned before
+    #   completion if the current target becomes risky (near obstacles) or
+    #   stale (limited progress).
+    retarget_enable: true
+    retarget_cooldown_sec: 12.0
+    retarget_min_goal_shift_m: 0.5
+    retarget_min_utility_gain: 0.8
+    retarget_stagnation_sec: 20.0
+    retarget_clearance_threshold_m: 0.25
+
     # Minimum separation between the robot and a candidate goal (metres).
     # This is a safety net to avoid effectively-zero motion goals; with the
     # farthest_cell strategy we can keep this relatively small.

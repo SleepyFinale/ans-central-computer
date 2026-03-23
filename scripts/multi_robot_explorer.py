@@ -21,7 +21,7 @@ until map overlap is detected.
 import math
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -83,6 +83,7 @@ class RobotState:
     # Short history of recent goals and associated frontier sizes for
     # stagnation detection. Each entry is (x, y, frontier_size_m).
     recent_goals: deque = field(default_factory=lambda: deque(maxlen=10))
+    last_retarget_time: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +209,7 @@ def assign_frontiers(
     nearby_penalty_dist: float = 2.0,
     min_goal_separation: float = 0.25,
     blacklist_radius: float = 0.5,
+    utility_penalty_fn: Optional[Callable[[str, Frontier], float]] = None,
 ) -> Dict[str, int]:
     """Assign one frontier to each idle robot.
 
@@ -257,6 +259,8 @@ def assign_frontiers(
                 ad = _dist(fr.centroid_world, ag)
                 if ad < nearby_penalty_dist:
                     penalty += (nearby_penalty_dist - ad) * 2.0
+            if utility_penalty_fn is not None:
+                penalty += float(utility_penalty_fn(rname, fr))
             utilities[ri, fi] = gain - cost - penalty
 
     # greedy assignment: highest utility first, no double-assignment
@@ -345,6 +349,17 @@ class MultiRobotExplorer(Node):
         # when selecting a representative cell inside a frontier region so
         # that the initial goals are not almost inside Nav2's goal tolerance.
         self.declare_parameter('min_goal_distance', 0.6)
+        # Goal-clearance shaping: discourage assigning goals too close to
+        # occupied cells (likely walls/obstacles in the current map).
+        self.declare_parameter('goal_clearance_radius_m', 0.45)
+        self.declare_parameter('goal_clearance_weight', 4.0)
+        # Mid-route retargeting controls.
+        self.declare_parameter('retarget_enable', True)
+        self.declare_parameter('retarget_cooldown_sec', 12.0)
+        self.declare_parameter('retarget_min_goal_shift_m', 0.5)
+        self.declare_parameter('retarget_min_utility_gain', 0.8)
+        self.declare_parameter('retarget_stagnation_sec', 20.0)
+        self.declare_parameter('retarget_clearance_threshold_m', 0.25)
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
@@ -392,6 +407,30 @@ class MultiRobotExplorer(Node):
         )
         self.min_goal_distance = float(
             self.get_parameter('min_goal_distance').value
+        )
+        self.goal_clearance_radius_m = float(
+            self.get_parameter('goal_clearance_radius_m').value
+        )
+        self.goal_clearance_weight = float(
+            self.get_parameter('goal_clearance_weight').value
+        )
+        self.retarget_enable = bool(
+            self.get_parameter('retarget_enable').value
+        )
+        self.retarget_cooldown_sec = float(
+            self.get_parameter('retarget_cooldown_sec').value
+        )
+        self.retarget_min_goal_shift_m = float(
+            self.get_parameter('retarget_min_goal_shift_m').value
+        )
+        self.retarget_min_utility_gain = float(
+            self.get_parameter('retarget_min_utility_gain').value
+        )
+        self.retarget_stagnation_sec = float(
+            self.get_parameter('retarget_stagnation_sec').value
+        )
+        self.retarget_clearance_threshold_m = float(
+            self.get_parameter('retarget_clearance_threshold_m').value
         )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
@@ -510,7 +549,7 @@ class MultiRobotExplorer(Node):
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
             f'freq={freq:.2f} Hz, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
-            f'mode={mode}')
+            f'mode={mode}, retarget_enable={self.retarget_enable}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -671,6 +710,10 @@ class MultiRobotExplorer(Node):
         if self.visualize:
             self._publish_frontier_markers(frontiers)
 
+        now = self.get_clock().now().nanoseconds / 1e9
+        for rs in self.robots.values():
+            self._maybe_retarget_active_robot(rs, frontiers, now)
+
         # assign frontiers to idle robots
         assignments = assign_frontiers(
             self.robots,
@@ -680,6 +723,7 @@ class MultiRobotExplorer(Node):
             self.nearby_penalty_dist,
             self.min_goal_separation,
             self.blacklist_radius,
+            utility_penalty_fn=lambda rname, fr: self._frontier_penalty(self.robots[rname], fr),
         )
 
         for rname, fi in assignments.items():
@@ -694,9 +738,8 @@ class MultiRobotExplorer(Node):
         any_idle = False
 
         for name, rs in self.robots.items():
-            if rs.position is None or rs.goal_active:
+            if rs.position is None:
                 continue
-            any_idle = True
             lm = self.latest_local_maps.get(name)
             if lm is None:
                 continue
@@ -721,6 +764,13 @@ class MultiRobotExplorer(Node):
             if self.visualize:
                 self._publish_frontier_markers(frontiers)
 
+            now = self.get_clock().now().nanoseconds / 1e9
+            self._maybe_retarget_active_robot(rs, frontiers, now)
+
+            if rs.goal_active:
+                continue
+            any_idle = True
+
             # Assign a frontier for this single robot using the same utility
             # function but restricted to this robot and these frontiers.
             sub_assignments = assign_frontiers(
@@ -731,6 +781,7 @@ class MultiRobotExplorer(Node):
                 self.nearby_penalty_dist,
                 self.min_goal_separation,
                 self.blacklist_radius,
+                utility_penalty_fn=lambda _rname, fr: self._frontier_penalty(rs, fr),
             )
             if name in sub_assignments:
                 fr = frontiers[sub_assignments[name]]
@@ -799,6 +850,113 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
     # Nav2 goal management
     # -----------------------------------------------------------------------
+
+    def _world_to_cell(self, m: OccupancyGrid, x: float, y: float) -> Optional[Tuple[int, int]]:
+        res = m.info.resolution
+        ox = m.info.origin.position.x
+        oy = m.info.origin.position.y
+        cx = int((x - ox) / res)
+        cy = int((y - oy) / res)
+        if cx < 0 or cy < 0 or cx >= m.info.width or cy >= m.info.height:
+            return None
+        return cx, cy
+
+    def _goal_clearance_m(self, m: Optional[OccupancyGrid], x: float, y: float) -> float:
+        if m is None:
+            return self.goal_clearance_radius_m
+        cell = self._world_to_cell(m, x, y)
+        if cell is None:
+            return 0.0
+        cx, cy = cell
+        res = m.info.resolution
+        radius_cells = max(1, int(self.goal_clearance_radius_m / res))
+        grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+        min_clearance = self.goal_clearance_radius_m
+        y0 = max(0, cy - radius_cells)
+        y1 = min(m.info.height - 1, cy + radius_cells)
+        x0 = max(0, cx - radius_cells)
+        x1 = min(m.info.width - 1, cx + radius_cells)
+        for yy in range(y0, y1 + 1):
+            for xx in range(x0, x1 + 1):
+                if grid[yy, xx] >= OCCUPIED_THRESH:
+                    d = math.hypot((xx - cx) * res, (yy - cy) * res)
+                    if d < min_clearance:
+                        min_clearance = d
+        return min_clearance
+
+    def _clearance_penalty(self, m: Optional[OccupancyGrid], x: float, y: float) -> float:
+        clearance = self._goal_clearance_m(m, x, y)
+        shortfall = max(0.0, self.goal_clearance_radius_m - clearance)
+        return self.goal_clearance_weight * shortfall
+
+    def _frontier_penalty(self, rs: RobotState, fr: Frontier) -> float:
+        gx, gy = self._select_goal_point(rs, fr)
+        return self._clearance_penalty(self._current_goal_map, gx, gy)
+
+    def _frontier_utility(self, rs: RobotState, fr: Frontier) -> float:
+        gx, gy = self._select_goal_point(rs, fr)
+        if rs.position is None:
+            return -1e9
+        d = _dist(rs.position, (gx, gy))
+        if d < self.min_goal_separation:
+            return -1e9
+        gain = self.gain_scale * fr.size_m
+        cost = self.potential_scale * d
+        penalty = self._clearance_penalty(self._current_goal_map, gx, gy)
+        return gain - cost - penalty
+
+    def _best_frontier_for_robot(self, rs: RobotState, frontiers: List[Frontier]) -> Tuple[Optional[Frontier], float]:
+        best = None
+        best_u = -1e9
+        for fr in frontiers:
+            if any(_dist(fr.centroid_world, bl) < self.blacklist_radius for bl in rs.blacklist):
+                continue
+            u = self._frontier_utility(rs, fr)
+            if u > best_u:
+                best_u = u
+                best = fr
+        return best, best_u
+
+    def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
+        if not self.retarget_enable:
+            return
+        if not rs.goal_active or rs.goal_pending or rs.position is None or rs.goal_position is None:
+            return
+        if (now - rs.last_retarget_time) < self.retarget_cooldown_sec:
+            return
+
+        current_goal = rs.goal_position
+        curr_clearance = self._goal_clearance_m(self._current_goal_map, current_goal[0], current_goal[1])
+        no_progress_for = now - (rs.last_progress_time or rs.last_goal_time or now)
+        risky = curr_clearance < self.retarget_clearance_threshold_m
+        stale = no_progress_for > self.retarget_stagnation_sec
+        if not risky and not stale:
+            return
+
+        best_fr, best_u = self._best_frontier_for_robot(rs, frontiers)
+        if best_fr is None:
+            return
+        new_goal = self._select_goal_point(rs, best_fr)
+        if _dist(new_goal, current_goal) < self.retarget_min_goal_shift_m:
+            return
+
+        curr_u = -(
+            self.potential_scale * _dist(rs.position, current_goal)
+            + self._clearance_penalty(self._current_goal_map, current_goal[0], current_goal[1])
+        )
+        if best_u < (curr_u + self.retarget_min_utility_gain):
+            return
+
+        reason = 'clearance risk' if risky else 'stagnation'
+        self.get_logger().info(
+            f'[{rs.name}] Retargeting active goal due to {reason}; '
+            f'old=({current_goal[0]:.2f}, {current_goal[1]:.2f}) '
+            f'new=({new_goal[0]:.2f}, {new_goal[1]:.2f})'
+        )
+        self._cancel_goal(rs)
+        rs.blacklist.append(current_goal)
+        rs.last_retarget_time = now
+        self._send_goal(rs, best_fr)
 
     def _select_goal_point(self, rs: RobotState, frontier: Frontier) -> Tuple[float, float]:
         """Choose a goal point within a frontier region according to the
