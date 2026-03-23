@@ -41,6 +41,7 @@ from nav2_msgs.action import NavigateToPose
 from visualization_msgs.msg import Marker, MarkerArray
 
 import tf2_ros
+from central_explorer_event_logger import ExplorerEventLogger
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +457,7 @@ class MultiRobotExplorer(Node):
         self.paused: bool = False
         self.in_global_phase: bool = False
         self._merge_state_last: str = 'NO_OVERLAP'
+        self.event_logger = ExplorerEventLogger()
 
         # -- status publishing & control --
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
@@ -1026,6 +1028,48 @@ class MultiRobotExplorer(Node):
             rs.server_unavailable_logged = False
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
+        try:
+            m = self._current_goal_map
+            if m is not None:
+                map_meta = {
+                    'width': int(m.info.width),
+                    'height': int(m.info.height),
+                    'resolution': float(m.info.resolution),
+                    'origin': {
+                        'x': float(m.info.origin.position.x),
+                        'y': float(m.info.origin.position.y),
+                    },
+                }
+            else:
+                map_meta = {}
+            dist_to_goal = None
+            if rs.position is not None:
+                dist_to_goal = float(
+                    math.hypot(goal_x - rs.position[0], goal_y - rs.position[1])
+                )
+            self.event_logger.log_goal_selected(
+                robot=rs.name,
+                goal_x=float(goal_x),
+                goal_y=float(goal_y),
+                frame=self.world_frame,
+                map_topic=self.map_topic,
+                map_meta=map_meta,
+                merge_state=self._merge_state_last,
+                score={
+                    'frontier_size_cells': int(frontier.size),
+                    'frontier_size_m': float(frontier.size_m),
+                    'distance_to_goal_m': dist_to_goal,
+                    'utility': float(self._frontier_utility(rs, frontier)),
+                },
+                reason='frontier_assignment',
+                robot_pose_used=(
+                    {'x': float(rs.position[0]), 'y': float(rs.position[1])}
+                    if rs.position is not None else None
+                ),
+                t_ros_ns=int(self.get_clock().now().nanoseconds),
+            )
+        except Exception:
+            pass
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = PoseStamped()
@@ -1079,6 +1123,17 @@ class MultiRobotExplorer(Node):
             goal_msg,
             feedback_callback=lambda f, r=rs: self._goal_feedback_callback(f, r),
         )
+        try:
+            self.event_logger.log_goal_sent(
+                robot=rs.name,
+                goal_x=float(goal_x),
+                goal_y=float(goal_y),
+                frame=self.world_frame,
+                action_name=f'/{rs.name}/navigate_to_pose',
+                t_ros_ns=int(self.get_clock().now().nanoseconds),
+            )
+        except Exception:
+            pass
         send_future.add_done_callback(
             lambda f, r=rs: self._goal_response_callback(f, r))
         self.get_logger().info(
@@ -1164,6 +1219,15 @@ class MultiRobotExplorer(Node):
                 rs.last_progress_time = now
 
     def _goal_result_callback(self, future, rs: RobotState):
+        status_text_map = {
+            GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
+            GoalStatus.STATUS_ACCEPTED: 'ACCEPTED',
+            GoalStatus.STATUS_EXECUTING: 'EXECUTING',
+            GoalStatus.STATUS_CANCELING: 'CANCELING',
+            GoalStatus.STATUS_SUCCEEDED: 'SUCCEEDED',
+            GoalStatus.STATUS_CANCELED: 'CANCELED',
+            GoalStatus.STATUS_ABORTED: 'ABORTED',
+        }
         try:
             result = future.result()
         except Exception as exc:
@@ -1172,6 +1236,23 @@ class MultiRobotExplorer(Node):
             result = None
 
         if result is None:
+            try:
+                self.event_logger.log_goal_result(
+                    robot=rs.name,
+                    status_code=-1,
+                    status_text='RESULT_NONE',
+                    result={
+                        'goals_reached': int(rs.goals_reached),
+                        'goals_failed': int(rs.goals_failed + 1),
+                        'goal_position': (
+                            {'x': float(rs.goal_position[0]), 'y': float(rs.goal_position[1])}
+                            if rs.goal_position is not None else None
+                        ),
+                    },
+                    t_ros_ns=int(self.get_clock().now().nanoseconds),
+                )
+            except Exception:
+                pass
             rs.goals_failed += 1
             if rs.goal_position:
                 rs.blacklist.append(rs.goal_position)
@@ -1257,6 +1338,28 @@ class MultiRobotExplorer(Node):
         else:
             self.get_logger().info(
                 f'[{rs.name}] Goal finished with status {status}')
+
+        try:
+            self.event_logger.log_goal_result(
+                robot=rs.name,
+                status_code=int(status),
+                status_text=status_text_map.get(int(status), f'STATUS_{int(status)}'),
+                result={
+                    'goals_reached': int(rs.goals_reached),
+                    'goals_failed': int(rs.goals_failed),
+                    'distance_remaining': (
+                        float(rs.last_distance_remaining)
+                        if rs.last_distance_remaining is not None else None
+                    ),
+                    'goal_position': (
+                        {'x': float(rs.goal_position[0]), 'y': float(rs.goal_position[1])}
+                        if rs.goal_position is not None else None
+                    ),
+                },
+                t_ros_ns=int(self.get_clock().now().nanoseconds),
+            )
+        except Exception:
+            pass
 
         rs.goal_active = False
         rs.goal_pending = False

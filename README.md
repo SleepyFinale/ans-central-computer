@@ -533,6 +533,48 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
 
 ---
 
+## Logging and Debugging
+
+- `scripts/central_explorer_event_logger.py`:
+  - Structured JSONL logger utility (`ExplorerEventLogger`) for `multi_robot_explorer.py`
+  - Session-aware (`DEBUG_SESSION_ID` support) for robot/central correlation
+  - Built-in methods: `log_frontiers_detected`, `log_goal_selected`, `log_goal_sent`, `log_goal_result`, `log_goal_cancelled`, `log_retarget_decision`, `log_blacklist_event`, `log_state_transition`
+
+- `scripts/start_central_debug_bag.sh`:
+  - Central rosbag capture helper
+  - Auto-detects robots from `/<robot>/tf` (or accepts explicit robot args)
+  - Records central + per-robot correlation topics:
+    `/map`, `/tf`, `/tf_static`, `/explore/frontiers`, `/map_merge/merge_state`,
+    `/<robot>/map`, `/<robot>/plan`, `/<robot>/cmd_vel_nav`,
+    `/<robot>/navigate_to_pose/_action/{status,feedback,result}`
+
+Minimal integration in central `multi_robot_explorer.py`:
+
+```python
+from central_explorer_event_logger import ExplorerEventLogger
+event_logger = ExplorerEventLogger()
+
+# Example when selecting and sending a goal:
+event_logger.log_goal_selected(
+    robot=robot_name,
+    goal_x=goal_x,
+    goal_y=goal_y,
+    frame=self.world_frame,
+    map_topic=self.map_topic,
+    map_meta={"resolution": res, "width": w, "height": h, "origin_x": ox, "origin_y": oy},
+    merge_state=self.current_merge_state,
+    score={"distance": dist, "gain": gain, "utility": utility},
+    reason="best_utility",
+)
+event_logger.log_goal_sent(
+    robot=robot_name,
+    goal_x=goal_x,
+    goal_y=goal_y,
+    frame=self.world_frame,
+    action_name=f"/{robot_name}/navigate_to_pose",
+)
+```
+
 ## Troubleshooting
 
 ### Common Issues and Solutions
