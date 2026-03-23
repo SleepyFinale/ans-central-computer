@@ -32,7 +32,7 @@ multi_robot_explorer:
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
     # Matches m-explore-ros2's planner_frequency semantics.
-    explore_frequency: 1.0
+    explore_frequency: 2.0
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
     # that aren't worth navigating to.
@@ -111,16 +111,16 @@ multi_robot_explorer:
     #   completion if the current target becomes risky (near obstacles) or
     #   stale (limited progress).
     retarget_enable: true
-    retarget_cooldown_sec: 12.0
-    retarget_min_goal_shift_m: 0.5
-    retarget_min_utility_gain: 0.8
-    retarget_stagnation_sec: 20.0
-    retarget_clearance_threshold_m: 0.25
+    retarget_cooldown_sec: 5.0
+    retarget_min_goal_shift_m: 0.25
+    retarget_min_utility_gain: 0.2
+    retarget_stagnation_sec: 8.0
+    retarget_clearance_threshold_m: 0.35
     # Goal replacement gate to avoid frequent Nav2 preemption.
-    min_goal_replan_interval_s: 4.0
-    min_goal_change_dist_m: 0.75
-    min_progress_before_replan_m: 0.25
-    max_stuck_time_s: 12.0
+    min_goal_replan_interval_s: 1.5
+    min_goal_change_dist_m: 0.30
+    min_progress_before_replan_m: 0.08
+    max_stuck_time_s: 6.0
     allow_replan_when_no_progress: true
 
     # Minimum separation between the robot and a candidate goal (metres).
