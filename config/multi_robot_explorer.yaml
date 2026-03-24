@@ -31,122 +31,69 @@ multi_robot_explorer:
     local_map_topic_pattern: "/{robot}/map"
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
-    # Matches m-explore-ros2's planner_frequency semantics.
-    explore_frequency: 2.0
+    explore_frequency: 1.0
+
+    # After abort, reject, etc., wait this many seconds before assigning a
+    # new frontier (per robot).
+    post_failure_cooldown_sec: 2.0
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
     # that aren't worth navigating to.
     min_frontier_size: 0.15
 
-    # When Nav2 reports success but the last feedback still shows a non-trivial
-    # distance_remaining, the explorer can optionally treat this as a
-    # suspicious success (likely abort / early convergence) and blacklist the
-    # goal. This threshold controls how large that remaining distance must be
-    # to be considered suspicious once the map has grown beyond the initial
-    # tiny phase.
     suspicious_success_distance: 0.30
-
-    # For very small maps (both width and height below this size in metres),
-    # the suspicious-success heuristic is disabled and such goals are accepted
-    # as successes to allow the map to grow without prematurely blacklisting
-    # useful nearby frontiers.
     strict_success_min_map_size: 3.0
 
-    # Cost function weights (same semantics as explore_lite):
-    #   cost = potential_scale * distance - gain_scale * frontier_size
-    # Higher potential_scale  = prefer closer frontiers
-    # Higher gain_scale       = prefer larger frontiers
     potential_scale: 2.0
     gain_scale: 1.0
 
-    # Progress watchdog: if distance_remaining does not decrease by at least
-    # progress_min_delta within this many seconds, the goal is considered
-    # stalled and will be cancelled and blacklisted.
-    progress_timeout: 45.0
+    # Nav2 feedback: distance_remaining must shrink by at least this much
+    # (m) to count as progress (used for divert-while-moving heuristic).
     progress_min_delta: 0.05
 
-    # Distance (m) at which a frontier near another robot's active goal
-    # gets a penalty (discourages sending robots to the same area).
     nearby_penalty_dist: 2.0
 
-    # Blacklist radius (m): goals whose centroids fall within this distance
-    # of a blacklisted point will be skipped for that robot.
     blacklist_radius: 0.5
-
-    # When a robot successfully reaches a goal, blacklist entries within
-    # this radius are cleared so that region can be reconsidered later.
     blacklist_clear_radius: 0.5
 
-    # Publish frontier markers on /explore/frontiers for RViz
     visualize: true
 
-    # Goal selection strategy within each frontier region:
-    #   - centroid: use the geometric centroid of the frontier region
-    #   - farthest_cell: choose the frontier cell farthest from the robot
-    # The default is farthest_cell so that initial goals are not almost
-    # inside Nav2's goal tolerance.
     goal_point_strategy: farthest_cell
-
-    # Minimum desired distance from robot to goal (metres). When using the
-    # farthest_cell strategy, the explorer prefers frontier cells at or
-    # beyond this distance, but will fall back to the farthest available
-    # cell if the region is smaller than this.
     min_goal_distance: 0.6
 
-    # Clearance shaping for candidate goals:
-    # - goal_clearance_radius_m: desired minimum wall/obstacle clearance.
-    # - goal_clearance_weight: penalty weight when a candidate sits inside the
-    #   clearance radius from occupied map cells.
-    # Hard safety gate:
-    # - goal_max_cell_cost: reject candidate goal cells at/above this map cost.
-    # - goal_min_clearance_gate_m: reject candidates with less obstacle
-    #   clearance than this threshold.
     goal_clearance_radius_m: 0.45
     goal_clearance_weight: 4.0
     goal_max_cell_cost: 80
     goal_min_clearance_gate_m: 0.30
 
-    # Adaptive mid-route retargeting:
-    # - When enabled, active goals can be cancelled and reassigned before
-    #   completion if the current target becomes risky (near obstacles) or
-    #   stale (limited progress).
-    retarget_enable: true
-    retarget_cooldown_sec: 5.0
-    retarget_min_goal_shift_m: 0.25
-    retarget_min_utility_gain: 0.2
-    retarget_stagnation_sec: 8.0
-    retarget_clearance_threshold_m: 0.35
-    # Goal replacement gate to avoid frequent Nav2 preemption.
-    min_goal_replan_interval_s: 1.5
-    min_goal_change_dist_m: 0.30
-    min_progress_before_replan_m: 0.08
-    max_stuck_time_s: 6.0
-    allow_replan_when_no_progress: true
+    # Stuck recovery: forward command on /<robot>/cmd_vel but LiDAR (/<robot>/scan)
+    # stays effectively unchanged — e.g. wedged on something below the scan plane.
+    stuck_recovery_enable: true
+    stuck_forward_cmd_min_mps: 0.04
+    stuck_cmd_vel_stale_sec: 0.4
+    stuck_scan_unchanged_duration_sec: 5.0
+    stuck_scan_mean_change_thresh_m: 0.035
+    stuck_scan_subsample_bins: 36
+    scan_topic_pattern: "/{robot}/scan"
+    backup_duration_sec: 1.2
+    backup_linear_speed_mps: -0.12
 
-    # Minimum separation between the robot and a candidate goal (metres).
-    # This is a safety net to avoid effectively-zero motion goals; with the
-    # farthest_cell strategy we can keep this relatively small.
+    # Mid-route divert: disabled by default. Set true to allow switching to a
+    # larger frontier while the robot is advancing toward the current goal.
+    retarget_enable: false
+    retarget_cooldown_sec: 12.0
+    retarget_min_goal_shift_m: 0.5
+    retarget_min_utility_gain: 1.2
+    retarget_divert_min_frontier_size_m: 2.5
+    min_goal_replan_interval_s: 4.0
+    min_goal_change_dist_m: 0.75
+    min_progress_before_replan_m: 0.25
+
     min_goal_separation: 0.05
 
-    # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
-    # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose
-    # as a compatibility fallback.
-    #
-    # In the standard single-domain, namespaced multi-robot workflow started via
-    # scripts/start_central.sh, this flag is overridden to "false" so the
-    # explorer *only* drives robots through Nav2's NavigateToPose action
-    # servers. To temporarily re-enable the topic-based fallback in that
-    # workflow, set EXPLORER_USE_GOAL_POSE_FALLBACK=true before running
-    # start_central.sh.
     use_pose_goal_fallback: false
 
-    # Optional: after exploration completes (no frontiers), send each robot
-    # back toward its initial pose (first valid map -> <robot>/base_footprint
-    # transform seen by the central explorer).
-    return_to_init: false
     robot_base_frame: base_footprint
 
-    # Multi-robot status publishing and pause/resume control, analogous to
-    # explore/status and explore/resume in m-explore-ros2.
     status_topic: explore_multi/status
     control_topic: explore_multi/resume
