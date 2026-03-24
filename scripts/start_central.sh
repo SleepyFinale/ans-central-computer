@@ -3,8 +3,9 @@
 #
 # This is the single entry point for the central computer when using the
 # single-domain, namespaced multi-robot setup. It starts:
-#   1. TF relay        (prefix robot TF frames: odom → blinky/odom, etc.)
-#   2. Map merge       (merge individual maps into a global map)
+#   1. TF relay        (/<robot>/tf → /tf with consistent frame prefixing)
+#   1b. Single-robot only: static TF map → <robot>/map (identity bridge)
+#   2. Map merge       (multi-robot: merge maps; skipped when one robot)
 #   3. Explorer        (detect frontiers, send Nav2 action goals)
 #
 # Prerequisites:
@@ -77,13 +78,15 @@ echo ""
 ensure_no_central_stack_running() {
     # Match only central-computer processes launched by this script:
     #  - tf_relay_multirobot.py
+    #  - single_robot_world_tf_bridge.py (single-robot mode)
     #  - multi_robot_explorer.py using the central params file
     local pattern_tf="python3 .*scripts/tf_relay_multirobot\\.py"
+    local pattern_bridge="python3 .*scripts/single_robot_world_tf_bridge\\.py"
     local pattern_explorer="python3 .*scripts/multi_robot_explorer\\.py .*--params-file ${CONFIG_DIR}/multi_robot_explorer\\.yaml"
 
     # Collect matching PIDs + commands (skip the grep processes themselves).
     local existing
-    existing="$(ps aux | grep -E "$pattern_tf|$pattern_explorer" | grep -v grep || true)"
+    existing="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_explorer" | grep -v grep || true)"
 
     if [[ -z "$existing" ]]; then
         return 0
@@ -139,7 +142,7 @@ ensure_no_central_stack_running() {
     # Give the OS a moment, then re-check.
     sleep 1
     local remaining
-    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_explorer" | grep -v grep || true)"
+    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_explorer" | grep -v grep || true)"
     if [[ -n "$remaining" ]]; then
         echo "WARNING: Some central processes still appear to be running:"
         echo "$remaining"
@@ -273,29 +276,21 @@ cleanup() {
 }
 trap cleanup SIGHUP SIGINT SIGTERM EXIT
 
-# ---- 1. TF relay / world frame setup ----
+# ---- 1. TF relay (same policy for 1 or N robots) ----
+echo "[1/3] Starting TF relay (prefix_frames=true)..."
+python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
+    -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" \
+    -p "prefix_frames:=true" &
+PIDS+=($!)
+sleep 1
+
 if ((${#SELECTED_ROBOTS[@]} == 1)); then
-    # Single-robot offloaded Nav2 mode (default for one robot):
-    # - Nav2 + SLAM run on the robot.
-    # - The robot publishes TF on /<robot>/tf with frames like 'map',
-    #   '<robot>/odom', '<robot>/base_footprint'. We relay those to /tf
-    #   without changing frame IDs.
-    echo "[1/3] Single-robot mode detected — starting TF relay without frame prefixing..."
-    python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
-        -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" \
-        -p "prefix_frames:=false" &
+    SINGLE_ROBOT_BRIDGE="${SELECTED_ROBOTS[0]}"
+    echo "[1b/3] Single-robot mode — static TF map -> ${SINGLE_ROBOT_BRIDGE}/map (identity)"
+    python3 "${SCRIPT_DIR}/single_robot_world_tf_bridge.py" --ros-args \
+        -p "robot_name:=${SINGLE_ROBOT_BRIDGE}" &
     PIDS+=($!)
-    sleep 1
-else
-    # Multi-robot mode:
-    # - Nav2 + SLAM run on each robot in its own namespace.
-    # - We prefix TF frames with the robot name so map_merge and the
-    #   explorer can distinguish them.
-    echo "[1/3] Multi-robot mode detected — starting TF relay with frame prefixing..."
-    python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
-        -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" &
-    PIDS+=($!)
-    sleep 1
+    sleep 0.5
 fi
 
 if ((${#SELECTED_ROBOTS[@]} == 1)); then

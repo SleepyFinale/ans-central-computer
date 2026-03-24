@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-TF relay for multi-robot: subscribes to blinky/tf, pinky/tf, inky/tf (and _static)
-and republishes to /tf with frame ID prefixes so SLAM can see all robots.
+TF relay for multi-robot: subscribes to <robot>/tf and <robot>/tf_static and
+republishes to /tf and /tf_static.
+
+With prefix_frames=true (default), any frame id that does not already start with
+``<robot>/`` gets that prefix, **except** the world id ``map`` (never prefix
+``map``, otherwise ``map``→``<robot>/map`` from the robot becomes an invalid
+``<robot>/map``→``<robot>/map`` self-transform after prefixing).
 """
 
 import rclpy
@@ -21,6 +26,9 @@ def prefix_frame(frame_id: str, prefix: str) -> str:
     """Add prefix if frame is not already prefixed."""
     if not prefix or frame_id.startswith(prefix + '/'):
         return frame_id
+    # World frame is shared on the merged tree; robot bridges use map -> {pfx}/map.
+    if frame_id == 'map':
+        return 'map'
     return f"{prefix}/{frame_id}"
 
 
@@ -74,6 +82,8 @@ class TFRelayNode(Node):
                     # can see them.
                     t_out.header.frame_id = t.header.frame_id
                     t_out.child_frame_id = t.child_frame_id
+                if t_out.header.frame_id == t_out.child_frame_id:
+                    continue
                 out.transforms.append(t_out)
             if is_static:
                 self.tf_static_pub.publish(out)

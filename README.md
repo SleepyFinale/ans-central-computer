@@ -366,8 +366,11 @@ export TURTLEBOT3_MODEL=burger
 
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
   use_sim_time:=False \
-  use_rviz:=False
+  use_rviz:=False \
+  fleet_mode:=True
 ```
+
+Set `fleet_mode:=True` on every robot when you run **`./scripts/start_central.sh`** (tf relay + map merge or single-robot map bridge + explorer) so Nav2 uses global `/tf` and `/map`; explorer goals are in world frame `map`. Use `False` only for bench tests **without** the central stack. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
 
 This launch file (from the robot workspace, e.g. `ans-turtlebot3`) runs:
 
@@ -451,8 +454,8 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
   This script:
 
   - Detects available robot namespaces (e.g. `/blinky`, `/pinky`, `/inky`)
-  - Starts TF relay
-  - In **single-robot mode**: skips map merge and treats `/<robot>/map` in frame `map` as the world map
+  - Starts TF relay (`prefix_frames:=true` for one or many robots)
+  - In **single-robot mode**: skips map merge; publishes static TF `map` → `<robot>/map` (identity) so SLAM frame `<robot>/map` aligns with world `map`
   - In **multi-robot mode**: starts multi-robot map merge (unknown initial poses) and merges all per-robot maps into a global `/map`
   - Launches `multi_robot_explorer.py` to assign frontiers via `/<robot>/navigate_to_pose`
 
@@ -477,9 +480,10 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
     # or, when multiple robots are detected:
     Mode          = multi-robot (Nav2 on robots, map_merge enabled)
 
-  [1/3] Single-robot mode detected — starting TF relay without frame prefixing...
-  # or: [1/3] Multi-robot mode detected — starting TF relay with frame prefixing...
-  [INFO] [...] [tf_relay_multirobot]: TF relay started: merging ['<robot1>' ...] -> /tf (prefix_frames=<true|false>)
+  [1/3] Starting TF relay (prefix_frames=true)...
+  [INFO] [...] [tf_relay_multirobot]: TF relay started: merging ['<robot1>' ...] -> /tf (prefix_frames=True)
+  [1b/3] Single-robot mode — static TF map -> <robot1>/map (identity)
+  [INFO] [...] [single_robot_world_tf_bridge]: Published static TF map -> <robot1>/map (identity)
 
   [2/3] Single-robot setup detected (<robot1>) — skipping map merge.
   # or (multi-robot): [2/3] Starting map merge (unknown poses)...
@@ -507,7 +511,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
 
   **Topics published from the central stack (examples):**
 
-  - `/tf`, `/tf_static` (from TF relay)
+  - `/tf`, `/tf_static` (from TF relay; single-robot mode also runs `single_robot_world_tf_bridge` for `map` → `<robot>/map`)
   - `/explore/frontiers` (from `multi_robot_explorer`)
 
 -- **Central Terminal 2 – RViz visualization**
@@ -1020,6 +1024,8 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 2. **No map received:** In multi-robot mode, map merge publishes `/map` only after each robot’s SLAM has built an initial map. Wait 20–30 seconds after starting the robots and `start_central.sh` before expecting a global `/map`.
 3. **frame 'base_scan':** Fixed by using `scan_normalized` with correct `frame_id` (e.g. `blinky/base_scan`, `pinky/base_scan`) from the robot-side workspace. Ensure the robot-side SLAM + Nav2 launch is up to date and running.
 
+4. **Robot ignores the global plan / heads straight through obstacles** with the central explorer: Robots must launch SLAM + Nav2 with **`fleet_mode:=true`** (or `use_central_tf_map:=true`; see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)) so Nav2 listens on global `/tf` and uses merged `/map`. Otherwise namespaced Nav2 only sees `/<robot>/tf`, which omits `map` → `<robot>/map` from `map_merge` (or the single-robot static bridge), and goals in frame `map` no longer match the local costmap.
+
 ---
 
 #### 17. Central single-robot: explorer stuck on "Waiting for map on /robot_name/map"
@@ -1160,15 +1166,23 @@ ros2 topic hz /map
 
 ### Check TF Tree
 
+**Multi-robot or single-robot + central (on the central PC, `ROS_DOMAIN_ID=50`):** SLAM on each robot publishes `<robot>/map` → `<robot>/odom`. The global tree adds `map` → `<robot>/map` (from `map_merge` or `single_robot_world_tf_bridge`). Example checks (replace `pinky`):
+
 ```bash
-# Show all frames
+ros2 run tf2_ros tf2_echo map pinky/map
+ros2 run tf2_ros tf2_echo map pinky/base_footprint
+```
+
+**Standalone robot (no central stack, no `fleet_mode`):** Use the robot’s map frame and base frame, for example:
+
+```bash
+ros2 run tf2_ros tf2_echo pinky/map pinky/base_footprint
+```
+
+Other useful commands:
+
+```bash
 ros2 run tf2_ros tf2_monitor
-
-# Check specific transform
-ros2 run tf2_ros tf2_echo map base_footprint
-
-# Check transform between map and odom
-ros2 run tf2_ros tf2_echo map odom
 ```
 
 ### Check if Topics Are Publishing
@@ -1224,6 +1238,8 @@ ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 ```
 
 Reports topic publishers, TF chain connectivity, and identifies missing transforms. Run when TF wait times out or Nav2 fails to receive the map.
+
+**Regression checklist (fleet TF layout):** Deploy the same `ans-turtlebot3` revision to every Pi before relying on an updated central `start_central.sh`. On hardware, run `diagnose_multirobot_tf.py` with (1) one robot + central + `fleet_mode:=true`, (2) two robots + central + map merge, (3) one robot alone with `fleet_mode:=false`, and capture `ros2 run tf2_tools view_frames` if anything fails.
 
 ---
 

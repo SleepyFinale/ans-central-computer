@@ -82,9 +82,10 @@ flowchart TB
 
 This function already exists in your central workspace. Robots (Blinky, Pinky, Inky, etc.) now run **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
 
-- **TF stitching**: `scripts/tf_relay_multirobot.py` (merges `/blinky/tf`, `/pinky/tf`, `/inky/tf` into `/tf` with prefixes)
-- **Per-robot SLAM**: `slam_toolbox` instances on each robot, publishing `/blinky/map`, `/pinky/map`, etc.
-- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (for unknown initial poses on the central computer)
+- **TF stitching**: `scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
+- **Single-robot world link**: `scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
+- **Per-robot SLAM**: `slam_toolbox` on each robot uses TF frame `<robot>/map` and publishes `/<robot>/map`
+- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (multi-robot only; unknown initial poses on the central computer)
 
 ```mermaid
 flowchart TB

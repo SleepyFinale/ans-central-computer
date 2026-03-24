@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Diagnose multi-robot TF tree: report what's working and where it breaks.
-Run with ROS_DOMAIN_ID=50 (same as multirobot_slam and domain bridges).
+Run with ROS_DOMAIN_ID=50 (same as the fleet / central setup).
+
+Expected global chain per robot (after tf_relay + map_merge or single-robot bridge):
+  map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
 
 Usage: python3 scripts/diagnose_multirobot_tf.py
 """

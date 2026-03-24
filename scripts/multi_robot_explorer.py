@@ -860,10 +860,10 @@ class MultiRobotExplorer(Node):
     def _update_robot_positions(self):
         for rs in self.robots.values():
             # In all modes, treat the robot base frame as "<robot>/base_footprint".
-            # For multi-robot + map_merge, TF provides:
+            # TF chain on global /tf:
             #   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
-            # For offloaded single-robot mode, the robot publishes:
-            #   map -> <robot>/odom -> <robot>/base_footprint
+            # (map_merge in multi-robot; single_robot_world_tf_bridge + SLAM in
+            # single-robot central mode.)
             base_frame = f'{rs.name}/{self.robot_base_frame}'
             try:
                 t = self.tf_buffer.lookup_transform(
