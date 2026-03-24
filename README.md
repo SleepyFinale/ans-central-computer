@@ -455,7 +455,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
 
   - Detects available robot namespaces (e.g. `/blinky`, `/pinky`, `/inky`)
   - Starts TF relay (`prefix_frames:=true` for one or many robots)
-  - In **single-robot mode**: skips map merge; publishes static TF `map` → `<robot>/map` (identity) so SLAM frame `<robot>/map` aligns with world `map`
+  - In **single-robot mode**: skips map merge; publishes static TF `map` → `<robot>/map` (identity) so SLAM frame `<robot>/map` aligns with world `map`; relays `/<robot>/map` → `/map` so fleet Nav2 and global RViz see a publisher on `/map`
   - In **multi-robot mode**: starts multi-robot map merge (unknown initial poses) and merges all per-robot maps into a global `/map`
   - Launches `multi_robot_explorer.py` to assign frontiers via `/<robot>/navigate_to_pose`
 
@@ -512,6 +512,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
   **Topics published from the central stack (examples):**
 
   - `/tf`, `/tf_static` (from TF relay; single-robot mode also runs `single_robot_world_tf_bridge` for `map` → `<robot>/map`)
+  - `/map` (multi-robot: from `map_merge`; single-robot: relayed copy of `/<robot>/map` via `single_robot_map_relay.py`)
   - `/explore/frontiers` (from `multi_robot_explorer`)
 
 -- **Central Terminal 2 – RViz visualization**
@@ -1035,9 +1036,10 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 - You are running only **one** robot (e.g. Pinky) with:
 
   ```bash
-  # On the robot
+  # On the robot (use fleet_mode:=True with ./scripts/start_central.sh on the PC)
   ros2 launch turtlebot3_bringup robot.launch.py
-  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py use_sim_time:=false use_rviz:=false
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+    use_sim_time:=false use_rviz:=false fleet_mode:=True
   ```
 
 - On the central PC you start:
@@ -1086,6 +1088,7 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
   If this hangs, the robot-side SLAM node is not publishing a map yet; troubleshoot on the robot first.
 - Ensure **ROS_DOMAIN_ID=50** on both the robot and the central PC.
 - Make sure you are not also running multi-robot `map_merge` manually in single-robot mode; `./scripts/start_central.sh` will skip `map_merge` automatically when only one robot is detected.
+- With **fleet mode** and a single robot, the central script republishes `/<robot>/map` to **`/map`** (`single_robot_map_relay.py`). Verify on the PC: `ros2 topic info /map` should list a publisher after SLAM starts.
 
 ---
 
@@ -1166,9 +1169,10 @@ ros2 topic hz /map
 
 ### Check TF Tree
 
-**Multi-robot or single-robot + central (on the central PC, `ROS_DOMAIN_ID=50`):** SLAM on each robot publishes `<robot>/map` → `<robot>/odom`. The global tree adds `map` → `<robot>/map` (from `map_merge` or `single_robot_world_tf_bridge`). Example checks (replace `pinky`):
+**Multi-robot or single-robot + central (on the central PC, `ROS_DOMAIN_ID=50`):** SLAM on each robot publishes `<robot>/map` → `<robot>/odom`. The global tree adds `map` → `<robot>/map` (from `map_merge` or `single_robot_world_tf_bridge`). In **single-robot + central** mode, `start_central.sh` also relays `/<robot>/map` → `/map` for fleet Nav2 and global RViz. Example checks (replace `pinky`):
 
 ```bash
+ros2 topic info /map
 ros2 run tf2_ros tf2_echo map pinky/map
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
 ```

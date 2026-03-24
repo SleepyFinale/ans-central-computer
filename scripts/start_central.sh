@@ -5,6 +5,7 @@
 # single-domain, namespaced multi-robot setup. It starts:
 #   1. TF relay        (/<robot>/tf → /tf with consistent frame prefixing)
 #   1b. Single-robot only: static TF map → <robot>/map (identity bridge)
+#   1c. Single-robot only: relay /<robot>/map → /map (fleet Nav2 + global RViz)
 #   2. Map merge       (multi-robot: merge maps; skipped when one robot)
 #   3. Explorer        (detect frontiers, send Nav2 action goals)
 #
@@ -12,7 +13,7 @@
 #   - All robots and the central PC use the same ROS_DOMAIN_ID (typically 50)
 #   - Each robot is powered on and running:
 #       * bringup       (robot.launch.py)
-#       * SLAM + Nav2   (navigation2_slam.launch.py)
+#       * SLAM + Nav2   (navigation2_slam.launch.py fleet_mode:=True with this script)
 #   - Central PC and robots are on the same WiFi network
 #
 # Usage:
@@ -65,6 +66,8 @@ if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
 else
     echo "  Explorer frequency override = (using YAML default)"
 fi
+echo "  Robots must run SLAM+Nav2 with fleet_mode:=True when using this script"
+echo "  (global /tf + /map). See README: Robot Terminal 2 — SLAM + Nav2."
 echo ""
 
 # Prevent multiple central stacks from running at once. If you start this
@@ -79,14 +82,16 @@ ensure_no_central_stack_running() {
     # Match only central-computer processes launched by this script:
     #  - tf_relay_multirobot.py
     #  - single_robot_world_tf_bridge.py (single-robot mode)
+    #  - single_robot_map_relay.py (single-robot mode)
     #  - multi_robot_explorer.py using the central params file
     local pattern_tf="python3 .*scripts/tf_relay_multirobot\\.py"
     local pattern_bridge="python3 .*scripts/single_robot_world_tf_bridge\\.py"
+    local pattern_map_relay="python3 .*scripts/single_robot_map_relay\\.py"
     local pattern_explorer="python3 .*scripts/multi_robot_explorer\\.py .*--params-file ${CONFIG_DIR}/multi_robot_explorer\\.yaml"
 
     # Collect matching PIDs + commands (skip the grep processes themselves).
     local existing
-    existing="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_explorer" | grep -v grep || true)"
+    existing="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer" | grep -v grep || true)"
 
     if [[ -z "$existing" ]]; then
         return 0
@@ -142,7 +147,7 @@ ensure_no_central_stack_running() {
     # Give the OS a moment, then re-check.
     sleep 1
     local remaining
-    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_explorer" | grep -v grep || true)"
+    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer" | grep -v grep || true)"
     if [[ -n "$remaining" ]]; then
         echo "WARNING: Some central processes still appear to be running:"
         echo "$remaining"
@@ -289,6 +294,11 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
     echo "[1b/3] Single-robot mode — static TF map -> ${SINGLE_ROBOT_BRIDGE}/map (identity)"
     python3 "${SCRIPT_DIR}/single_robot_world_tf_bridge.py" --ros-args \
         -p "robot_name:=${SINGLE_ROBOT_BRIDGE}" &
+    PIDS+=($!)
+    sleep 0.5
+    echo "[1c/3] Single-robot mode — relay /${SINGLE_ROBOT_BRIDGE}/map -> /map"
+    python3 "${SCRIPT_DIR}/single_robot_map_relay.py" --ros-args \
+        -p "source_map:=/${SINGLE_ROBOT_BRIDGE}/map" &
     PIDS+=($!)
     sleep 0.5
 fi
