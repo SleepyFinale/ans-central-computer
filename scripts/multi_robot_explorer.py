@@ -5,15 +5,12 @@ Multi-robot frontier exploration coordinator.
 Subscribes to the merged global map, detects frontiers, and assigns
 exploration waypoints to multiple robots via their Nav2 action servers.
 
-Stuck handling: if the stack commands forward motion (/<robot>/cmd_vel)
-but subsampled LiDAR ranges barely change for a configured time — typical
-when pushing against something below the scan plane — the explorer
-blacklists the spot, briefly drives backward via cmd_vel, then resends
-the same NavigateToPose goal.
-
-Optional mid-route divert: while the robot is measurably advancing toward
-its current goal, it may switch to a substantially larger frontier if
-utility improves enough.
+Each planning cycle:
+  1. Detect frontier regions on the merged occupancy grid.
+  2. For every idle robot, pick the best unassigned frontier using a
+     utility function that balances proximity vs information gain.
+  3. Send a NavigateToPose goal in the world frame; Nav2 uses TF to
+     convert it into the robot's local frame.
 
 Handles the no-overlap case transparently: the merged map already
 contains all robot maps (placed side-by-side by map_merge), so each
@@ -31,20 +28,14 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
-from rclpy.qos import (
-    QoSProfile,
-    DurabilityPolicy,
-    ReliabilityPolicy,
-    qos_profile_sensor_data,
-)
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
-from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String as StringMsg
 from nav2_msgs.action import NavigateToPose
 from visualization_msgs.msg import Marker, MarkerArray
@@ -86,15 +77,9 @@ class RobotState:
     last_progress_time: float = 0.0
     active_goal_sent_time: float = 0.0
     last_pose_when_goal_sent: Optional[Tuple[float, float]] = None
-    # Stuck = forward cmd_vel + static LiDAR (see scan_ref_signature).
-    last_cmd_vel_linear_x: float = 0.0
-    last_cmd_vel_time: float = 0.0
-    scan_ref_signature: Optional[np.ndarray] = None
-    # Wall-clock (node sec): when we started seeing scan match ref; 0 = not static.
-    scan_unchanged_start_time: float = 0.0
-    # Stuck recovery: publish cmd_vel backup then resend pending_retry_pose.
-    stuck_recovery_until: float = 0.0
-    pending_retry_pose: Optional[Tuple[float, float]] = None
+    # Straight-line distance robot→goal; used to detect motion toward goal when
+    # Nav2 feedback is sparse so the stall watchdog does not cancel healthy drives.
+    last_dist_to_goal: Optional[float] = None
     # Track behaviour around repeated / stagnant goals. last_goal_world stores
     # the most recent goal position in world coordinates (x, y).
     last_goal_world: Optional[Tuple[float, float]] = None
@@ -108,6 +93,12 @@ class RobotState:
     # When True, a CANCELED result from Nav2 will not arm post-failure cooldown
     # (used when we cancel for retarget and immediately send a replacement goal).
     ignore_cooldown_on_next_cancel: bool = False
+    # First NavigateToPose of the current leg; retargets must stay near this.
+    retarget_anchor: Optional[Tuple[float, float]] = None
+    # Set when we cancel Nav2 after tacit "close enough" success (see plan_tick).
+    tacit_success_pending_cancel: bool = False
+    # First time (unix s) the robot was within tacit_goal_success_radius_m of goal.
+    near_goal_since: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -217,38 +208,6 @@ def detect_frontiers(
     return frontiers
 
 
-def _laser_scan_signature(msg: LaserScan, n_bins: int) -> Optional[np.ndarray]:
-    """Downsample LaserScan to n_bins min-range values for change detection."""
-    if n_bins < 4 or not msg.ranges:
-        return None
-    r = np.array(msg.ranges, dtype=np.float64)
-    n = len(r)
-    angles = msg.angle_min + np.arange(n, dtype=np.float64) * msg.angle_increment
-    valid = np.isfinite(r) & (r >= msg.range_min) & (r <= msg.range_max)
-    if not np.any(valid):
-        return None
-    span = msg.angle_max - msg.angle_min
-    if abs(span) < 1e-6:
-        return None
-    bin_idx = ((angles - msg.angle_min) / span * n_bins).astype(np.int32)
-    bin_idx = np.clip(bin_idx, 0, n_bins - 1)
-    sig = np.full(n_bins, np.nan, dtype=np.float64)
-    for b in range(n_bins):
-        m = valid & (bin_idx == b)
-        if np.any(m):
-            sig[b] = np.min(r[m])
-    if not np.any(np.isfinite(sig)):
-        return None
-    return sig
-
-
-def _scan_signature_mean_change(a: np.ndarray, b: np.ndarray) -> float:
-    m = np.isfinite(a) & np.isfinite(b)
-    if not np.any(m):
-        return 1e9
-    return float(np.mean(np.abs(a[m] - b[m])))
-
-
 # ---------------------------------------------------------------------------
 # Assignment
 # ---------------------------------------------------------------------------
@@ -268,10 +227,22 @@ def assign_frontiers(
     utility_penalty_fn: Optional[Callable[[str, Frontier], float]] = None,
     skip_frontier_fn: Optional[Callable[[str, Frontier], bool]] = None,
     robot_ready_fn: Optional[Callable[[str], bool]] = None,
-) -> Dict[str, int]:
+    goal_dist_fn: Optional[Callable[[str, Frontier], float]] = None,
+    assignment_robot_order_fn: Optional[Callable[[List[str]], List[str]]] = None,
+) -> Tuple[Dict[str, int], bool]:
     """Assign one frontier to each idle robot.
 
-    Returns {robot_name: frontier_index}.
+    Returns ({robot_name: frontier_index}, relaxed_min_separation).
+
+    If every candidate is closer than ``min_goal_separation`` (e.g. robot
+    just reached a goal on that frontier), the matrix would be empty. A
+    second pass uses separation 0 so exploration can continue; repeat-goal
+    blacklisting still avoids infinite instant-success loops.
+
+    When ``assignment_robot_order_fn`` is set, each robot (in that order)
+    picks the best still-unassigned frontier. This avoids starvation when
+    global greedy assigns the only frontier to another namespaced robot that
+    is idle but not actually exploring.
 
     Utility for (robot, frontier):
         gain_scale * frontier.size_m  -  potential_scale * distance
@@ -284,7 +255,7 @@ def assign_frontiers(
         and (robot_ready_fn is None or robot_ready_fn(name))
     }
     if not idle_robots or not frontiers:
-        return {}
+        return {}, False
 
     # already-assigned goal positions (from robots that ARE active)
     active_goals = [
@@ -293,57 +264,85 @@ def assign_frontiers(
         if rs.goal_active and rs.goal_position is not None
     ]
 
-    # build utility matrix: idle_robots × frontiers
     robot_list = list(idle_robots.keys())
+    relaxed = False
     utilities = np.full((len(robot_list), len(frontiers)), -np.inf)
 
-    for ri, rname in enumerate(robot_list):
-        rpos = idle_robots[rname].position
-        blacklist = idle_robots[rname].blacklist
-        for fi, fr in enumerate(frontiers):
-            # skip blacklisted centroids
-            if any(_dist(fr.centroid_world, bl) < blacklist_radius for bl in blacklist):
-                continue
-            if skip_frontier_fn is not None and skip_frontier_fn(rname, fr):
-                continue
+    for min_sep in (min_goal_separation, 0.0):
+        utilities.fill(-np.inf)
+        for ri, rname in enumerate(robot_list):
+            rpos = idle_robots[rname].position
+            blacklist = idle_robots[rname].blacklist
+            for fi, fr in enumerate(frontiers):
+                if any(
+                    _dist(fr.centroid_world, bl) < blacklist_radius
+                    for bl in blacklist
+                ):
+                    continue
+                if skip_frontier_fn is not None and skip_frontier_fn(rname, fr):
+                    continue
 
-            dist = _dist(rpos, fr.centroid_world)
-            # avoid goals that are effectively already within Nav2's goal
-            # tolerance around the robot; these lead to immediate "success"
-            # with no real motion
-            if dist < min_goal_separation:
-                continue
-            gain = gain_scale * fr.size_m
-            cost = potential_scale * dist
-            penalty = 0.0
-            for ag in active_goals:
-                ad = _dist(fr.centroid_world, ag)
-                if ad < nearby_penalty_dist:
-                    penalty += (nearby_penalty_dist - ad) * 2.0
-            if utility_penalty_fn is not None:
-                penalty += float(utility_penalty_fn(rname, fr))
-            utilities[ri, fi] = gain - cost - penalty
+                if goal_dist_fn is not None:
+                    dist = float(goal_dist_fn(rname, fr))
+                else:
+                    dist = _dist(rpos, fr.centroid_world)
+                # Prefer goals at least min_sep away; allow closer only on
+                # relaxed pass after a successful leg onto the frontier.
+                if dist < min_sep:
+                    continue
+                gain = gain_scale * fr.size_m
+                cost = potential_scale * dist
+                penalty = 0.0
+                for ag in active_goals:
+                    ad = _dist(fr.centroid_world, ag)
+                    if ad < nearby_penalty_dist:
+                        penalty += (nearby_penalty_dist - ad) * 2.0
+                if utility_penalty_fn is not None:
+                    penalty += float(utility_penalty_fn(rname, fr))
+                utilities[ri, fi] = gain - cost - penalty
 
-    # greedy assignment: highest utility first, no double-assignment
-    assignments: Dict[str, int] = {}
-    assigned_f = set()
-    assigned_r = set()
-
-    flat = np.argsort(utilities.ravel())[::-1]
-    for idx in flat:
-        ri = int(idx // len(frontiers))
-        fi = int(idx % len(frontiers))
-        if ri in assigned_r or fi in assigned_f:
-            continue
-        if utilities[ri, fi] <= -1e9:
-            continue
-        assignments[robot_list[ri]] = fi
-        assigned_r.add(ri)
-        assigned_f.add(fi)
-        if len(assigned_r) == len(robot_list):
+        if np.any(np.isfinite(utilities)):
+            relaxed = min_sep < min_goal_separation
             break
 
-    return assignments
+    assignments: Dict[str, int] = {}
+    assigned_f: set = set()
+    name_to_ri = {n: i for i, n in enumerate(robot_list)}
+
+    if assignment_robot_order_fn is not None:
+        for rname in assignment_robot_order_fn(list(robot_list)):
+            if rname not in name_to_ri:
+                continue
+            ri = name_to_ri[rname]
+            best_fi: Optional[int] = None
+            best_u = -1e9
+            for fi in range(len(frontiers)):
+                if fi in assigned_f:
+                    continue
+                u = utilities[ri, fi]
+                if u > best_u:
+                    best_u = u
+                    best_fi = fi
+            if best_fi is not None and best_u > -1e9:
+                assignments[rname] = best_fi
+                assigned_f.add(best_fi)
+    else:
+        assigned_r: set = set()
+        flat = np.argsort(utilities.ravel())[::-1]
+        for idx in flat:
+            ri = int(idx // len(frontiers))
+            fi = int(idx % len(frontiers))
+            if ri in assigned_r or fi in assigned_f:
+                continue
+            if utilities[ri, fi] <= -1e9:
+                continue
+            assignments[robot_list[ri]] = fi
+            assigned_r.add(ri)
+            assigned_f.add(fi)
+            if len(assigned_r) == len(robot_list):
+                break
+
+    return assignments, relaxed
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +371,15 @@ class MultiRobotExplorer(Node):
         # Match m-explore-ros2 planner_frequency semantics; default tuned in YAML.
         self.declare_parameter('explore_frequency', 1.0)
         self.declare_parameter('min_frontier_size', 0.15)
+        # Extra filter on top of min_frontier_size: do not send Nav2 goals to
+        # very small clusters (wall slivers / noise); they often fail the
+        # local controller with "Failed to make progress". Set to 0 to disable.
+        self.declare_parameter('min_frontier_cells_for_goal', 32)
         self.declare_parameter('potential_scale', 3.0)
         self.declare_parameter('gain_scale', 1.0)
-        # Nav2 feedback: minimum decrease in distance_remaining to count as progress.
+        # Progress timeout is interpreted as "no meaningful distance progress"
+        # for this many seconds before a goal is considered stalled.
+        self.declare_parameter('progress_timeout', 45.0)
         self.declare_parameter('progress_min_delta', 0.05)
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('blacklist_radius', 0.5)
@@ -386,6 +391,23 @@ class MultiRobotExplorer(Node):
         # safety net; most shaping is done via min_goal_distance.
         self.declare_parameter('min_goal_separation', 0.5)
         self.declare_parameter('suspicious_success_distance', 0.15)
+        # If NavigateToPose ends in ABORTED (e.g. controller "Failed to make
+        # progress") but the robot is within this distance of the goal in the
+        # map frame, count as reached and do not blacklist — Nav2 often aborts
+        # near the target without a clean SUCCEEDED. Use a generous value; TF
+        # vs goal can disagree with Nav2's notion of "close".
+        self.declare_parameter('tacit_goal_success_radius_m', 0.15)
+        # Also treat ABORT / tacit hold as success if Nav2 feedback
+        # distance_remaining is at or below this (metres), but only when map-frame
+        # pose is within tacit_goal_success_radius_m + this value of the goal
+        # (avoids stale distance_remaining=0 while the robot is still far away).
+        self.declare_parameter('tacit_abort_max_distance_remaining_m', 0.15)
+        # While Nav2 still has an active NavigateToPose, cancel and count
+        # success after this many seconds where pose and/or feedback indicate
+        # the goal is essentially reached (see _at_nav_goal_for_tacit_hold).
+        # This catches Nav2 never publishing SUCCEEDED while the robot is on
+        # the target. Set 0 to disable.
+        self.declare_parameter('tacit_goal_success_hold_sec', 1.0)
         # For very small initial maps, Nav2 can legitimately report success
         # with a relatively large distance_remaining because the frontier
         # centroid may still be outside the tiny explored region. To avoid
@@ -398,10 +420,18 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('status_topic', 'explore_multi/status')
         self.declare_parameter('control_topic', 'explore_multi/resume')
         # Goal selection strategy within each frontier region.
-        # - 'centroid': use the geometric centroid of the frontier region
+        # - 'centroid': centroid of the frontier; if the robot is already very
+        #   close to that centroid, pick a cell farther out but within
+        #   centroid_fallback_max_offset_from_centroid_m of the centroid.
         # - 'farthest_cell': choose the frontier cell farthest from the robot
         #   (in world distance), falling back to centroid when needed.
-        self.declare_parameter('goal_point_strategy', 'farthest_cell')
+        self.declare_parameter('goal_point_strategy', 'centroid')
+        # When using centroid: if the robot is already this close to the
+        # centroid, pick a frontier cell farther out, but only within
+        # centroid_fallback_max_offset_from_centroid_m of the centroid (avoids
+        # ping-pong across the whole frontier like unbounded farthest_cell).
+        self.declare_parameter('centroid_fallback_if_robot_closer_than_m', 0.55)
+        self.declare_parameter('centroid_fallback_max_offset_from_centroid_m', 2.5)
         # Minimum desired distance from robot to goal (metres). This is used
         # when selecting a representative cell inside a frontier region so
         # that the initial goals are not almost inside Nav2's goal tolerance.
@@ -415,28 +445,25 @@ class MultiRobotExplorer(Node):
         # - reject goals that do not have enough local obstacle clearance
         self.declare_parameter('goal_max_cell_cost', 80)
         self.declare_parameter('goal_min_clearance_gate_m', 0.30)
-        # Mid-route retarget: only while physically advancing — divert to a
-        # clearly larger frontier (see retarget_divert_min_frontier_size_m).
-        # Mid-route divert to a larger frontier (off by default; enable in YAML when stable).
-        self.declare_parameter('retarget_enable', False)
+        # Mid-route retargeting controls.
+        self.declare_parameter('retarget_enable', True)
         self.declare_parameter('retarget_cooldown_sec', 12.0)
         self.declare_parameter('retarget_min_goal_shift_m', 0.5)
-        self.declare_parameter('retarget_min_utility_gain', 1.2)
-        self.declare_parameter('retarget_divert_min_frontier_size_m', 2.5)
+        self.declare_parameter('retarget_min_utility_gain', 0.8)
+        self.declare_parameter('retarget_stagnation_sec', 20.0)
+        self.declare_parameter('retarget_clearance_threshold_m', 0.25)
+        self.declare_parameter('retarget_opportunity_enable', True)
+        self.declare_parameter('retarget_opportunity_min_utility_gain', 1.2)
+        # Retargets only pick goals within this radius (m) of the leg's first
+        # goal (retarget_anchor). Set to 0 to disable (allow distant retargets).
+        self.declare_parameter('retarget_max_offset_from_anchor_m', 3.0)
+        # Goal replacement gate controls to avoid rapid preempt/replan loops.
         self.declare_parameter('min_goal_replan_interval_s', 4.0)
         self.declare_parameter('min_goal_change_dist_m', 0.75)
         self.declare_parameter('min_progress_before_replan_m', 0.25)
+        self.declare_parameter('max_stuck_time_s', 12.0)
+        self.declare_parameter('allow_replan_when_no_progress', True)
         self.declare_parameter('post_failure_cooldown_sec', 2.0)
-        # Stuck: forward cmd_vel + LiDAR unchanged (see module docstring).
-        self.declare_parameter('stuck_recovery_enable', True)
-        self.declare_parameter('stuck_forward_cmd_min_mps', 0.04)
-        self.declare_parameter('stuck_cmd_vel_stale_sec', 0.4)
-        self.declare_parameter('stuck_scan_unchanged_duration_sec', 5.0)
-        self.declare_parameter('stuck_scan_mean_change_thresh_m', 0.035)
-        self.declare_parameter('stuck_scan_subsample_bins', 36)
-        self.declare_parameter('backup_duration_sec', 1.2)
-        self.declare_parameter('backup_linear_speed_mps', -0.12)
-        self.declare_parameter('scan_topic_pattern', '/{robot}/scan')
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
@@ -454,8 +481,12 @@ class MultiRobotExplorer(Node):
         )
         freq = self.get_parameter('explore_frequency').value
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
+        self.min_frontier_cells_for_goal = int(
+            self.get_parameter('min_frontier_cells_for_goal').value
+        )
         self.potential_scale = self.get_parameter('potential_scale').value
         self.gain_scale = self.get_parameter('gain_scale').value
+        self.progress_timeout = self.get_parameter('progress_timeout').value
         self.progress_min_delta = (
             self.get_parameter('progress_min_delta').value)
         self.nearby_penalty_dist = (
@@ -472,13 +503,28 @@ class MultiRobotExplorer(Node):
             self.get_parameter('min_goal_separation').value)
         self.suspicious_success_distance = (
             self.get_parameter('suspicious_success_distance').value)
+        self.tacit_goal_success_radius_m = float(
+            self.get_parameter('tacit_goal_success_radius_m').value
+        )
+        self.tacit_abort_max_distance_remaining_m = float(
+            self.get_parameter('tacit_abort_max_distance_remaining_m').value
+        )
+        self.tacit_goal_success_hold_sec = float(
+            self.get_parameter('tacit_goal_success_hold_sec').value
+        )
         self.strict_success_min_map_size = (
             self.get_parameter('strict_success_min_map_size').value)
         self.robot_base_frame = self.get_parameter('robot_base_frame').value
         self.status_topic = self.get_parameter('status_topic').value
         self.control_topic = self.get_parameter('control_topic').value
         self.goal_point_strategy = (
-            self.get_parameter('goal_point_strategy').value or 'farthest_cell'
+            self.get_parameter('goal_point_strategy').value or 'centroid'
+        )
+        self.centroid_fallback_if_robot_closer_than_m = float(
+            self.get_parameter('centroid_fallback_if_robot_closer_than_m').value
+        )
+        self.centroid_fallback_max_offset_from_centroid_m = float(
+            self.get_parameter('centroid_fallback_max_offset_from_centroid_m').value
         )
         self.min_goal_distance = float(
             self.get_parameter('min_goal_distance').value
@@ -507,8 +553,20 @@ class MultiRobotExplorer(Node):
         self.retarget_min_utility_gain = float(
             self.get_parameter('retarget_min_utility_gain').value
         )
-        self.retarget_divert_min_frontier_size_m = float(
-            self.get_parameter('retarget_divert_min_frontier_size_m').value
+        self.retarget_stagnation_sec = float(
+            self.get_parameter('retarget_stagnation_sec').value
+        )
+        self.retarget_clearance_threshold_m = float(
+            self.get_parameter('retarget_clearance_threshold_m').value
+        )
+        self.retarget_opportunity_enable = bool(
+            self.get_parameter('retarget_opportunity_enable').value
+        )
+        self.retarget_opportunity_min_utility_gain = float(
+            self.get_parameter('retarget_opportunity_min_utility_gain').value
+        )
+        self.retarget_max_offset_from_anchor_m = float(
+            self.get_parameter('retarget_max_offset_from_anchor_m').value
         )
         self.min_goal_replan_interval_s = float(
             self.get_parameter('min_goal_replan_interval_s').value
@@ -519,38 +577,17 @@ class MultiRobotExplorer(Node):
         self.min_progress_before_replan_m = float(
             self.get_parameter('min_progress_before_replan_m').value
         )
+        self.max_stuck_time_s = float(
+            self.get_parameter('max_stuck_time_s').value
+        )
+        self.allow_replan_when_no_progress = bool(
+            self.get_parameter('allow_replan_when_no_progress').value
+        )
         self.post_failure_cooldown_sec = float(
             self.get_parameter('post_failure_cooldown_sec').value
         )
-        self.stuck_recovery_enable = bool(
-            self.get_parameter('stuck_recovery_enable').value
-        )
-        self.stuck_forward_cmd_min_mps = float(
-            self.get_parameter('stuck_forward_cmd_min_mps').value
-        )
-        self.stuck_cmd_vel_stale_sec = float(
-            self.get_parameter('stuck_cmd_vel_stale_sec').value
-        )
-        self.stuck_scan_unchanged_duration_sec = float(
-            self.get_parameter('stuck_scan_unchanged_duration_sec').value
-        )
-        self.stuck_scan_mean_change_thresh_m = float(
-            self.get_parameter('stuck_scan_mean_change_thresh_m').value
-        )
-        self.stuck_scan_subsample_bins = int(
-            self.get_parameter('stuck_scan_subsample_bins').value
-        )
-        self.backup_duration_sec = float(
-            self.get_parameter('backup_duration_sec').value
-        )
-        self.backup_linear_speed_mps = float(
-            self.get_parameter('backup_linear_speed_mps').value
-        )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
-        )
-        self.scan_topic_pattern: str = (
-            self.get_parameter('scan_topic_pattern').value
         )
 
         # -- state --
@@ -569,6 +606,10 @@ class MultiRobotExplorer(Node):
         self._map_size_x: float = 0.0
         self._map_size_y: float = 0.0
         self.exploration_complete = False
+        # Rotate fair frontier assignment so this robot is tried first when idle.
+        self._last_goal_finished_robot: Optional[str] = None
+        self._last_no_frontier_idle_log_time: float = 0.0
+        self._last_no_assignment_log_time: float = 0.0
         self.goal_pubs: Dict[str, object] = {}
         self.paused: bool = False
         self.in_global_phase: bool = False
@@ -655,26 +696,6 @@ class MultiRobotExplorer(Node):
                 self.goal_pubs[name] = self.create_publisher(
                     PoseStamped, f'/{name}/goal_pose', 10)
 
-        self._cmd_vel_pubs: Dict[str, object] = {}
-        for name in self.robot_names:
-            self._cmd_vel_pubs[name] = self.create_publisher(
-                Twist, f'/{name}/cmd_vel', 10)
-
-        for name in self.robot_names:
-            self.create_subscription(
-                Twist,
-                f'/{name}/cmd_vel',
-                lambda msg, n=name: self._cmd_vel_callback(msg, n),
-                10,
-            )
-            scan_topic = self.scan_topic_pattern.format(robot=name)
-            self.create_subscription(
-                LaserScan,
-                scan_topic,
-                lambda msg, n=name: self._scan_callback(msg, n),
-                qos_profile_sensor_data,
-            )
-
         self._logged_waiting_for_map = False
 
         # -- planning timer --
@@ -687,7 +708,8 @@ class MultiRobotExplorer(Node):
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
             f'freq={freq:.2f} Hz, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
-            f'mode={mode}, retarget_enable={self.retarget_enable}')
+            f'mode={mode}, retarget_enable={self.retarget_enable}, '
+            f'retarget_opportunity={self.retarget_opportunity_enable}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -769,34 +791,82 @@ class MultiRobotExplorer(Node):
             return
 
         if self.paused:
+            # Still keep TF and map up to date, but do not assign new goals.
             self._update_robot_positions()
-            for rs in self.robots.values():
-                if rs.stuck_recovery_until > 0:
-                    pub = self._cmd_vel_pubs.get(rs.name)
-                    if pub is not None:
-                        pub.publish(Twist())
-                    rs.stuck_recovery_until = 0.0
-                    rs.pending_retry_pose = None
             return
 
+        # update robot positions from TF
         self._update_robot_positions()
+
         now = self.get_clock().now().nanoseconds / 1e9
-
+        # Pose-based progress: advance last_progress_time when the robot moves
+        # toward the goal in the map frame, even if Nav2 feedback is quiet.
         for rs in self.robots.values():
-            if rs.stuck_recovery_until > 0:
-                if now >= rs.stuck_recovery_until:
-                    self._finish_stuck_recovery(rs, now)
-                elif self.stuck_recovery_enable:
-                    self._publish_backup_cmd_vel(rs)
+            if not rs.goal_active or rs.goal_position is None or rs.position is None:
+                continue
+            d = _dist(rs.position, rs.goal_position)
+            if rs.last_dist_to_goal is None:
+                rs.last_dist_to_goal = d
+            elif rs.last_dist_to_goal - d >= self.progress_min_delta:
+                rs.last_progress_time = now
+                rs.last_dist_to_goal = d
+            elif d < rs.last_dist_to_goal:
+                rs.last_dist_to_goal = d
 
+        # Tacit success: Nav2 often keeps an active goal while the robot is at
+        # the pose (no SUCCEEDED). Use pose + optional distance_remaining from
+        # feedback; after hold_sec, cancel Nav2 and count success in result cb.
+        if self.tacit_goal_success_hold_sec > 0.0:
+            for rs in self.robots.values():
+                if (
+                    not rs.goal_active
+                    or rs.goal_pending
+                    or rs.goal_position is None
+                    or rs.position is None
+                    or rs.goal_handle is None
+                ):
+                    rs.near_goal_since = None
+                    continue
+                d = _dist(rs.position, rs.goal_position)
+                if self._at_nav_goal_for_tacit_hold(rs, d):
+                    rs.last_progress_time = now
+                    if rs.near_goal_since is None:
+                        rs.near_goal_since = now
+                    elif (
+                        now - rs.near_goal_since
+                        >= self.tacit_goal_success_hold_sec
+                    ):
+                        dr = rs.last_distance_remaining
+                        self.get_logger().info(
+                            f'[{rs.name}] At goal for {self.tacit_goal_success_hold_sec:.1f}s '
+                            f'(pose_dist={d:.2f}m remain={dr}) — canceling Nav2 and '
+                            'counting success'
+                        )
+                        rs.tacit_success_pending_cancel = True
+                        rs.ignore_cooldown_on_next_cancel = True
+                        try:
+                            rs.goal_handle.cancel_goal_async()
+                        except Exception:
+                            pass
+                        rs.near_goal_since = None
+                else:
+                    rs.near_goal_since = None
+
+        # Stall watchdog: cancel only if neither feedback nor pose shows progress.
         for rs in self.robots.values():
-            if (
-                self.stuck_recovery_enable
-                and rs.goal_active
-                and rs.stuck_recovery_until <= 0
-                and rs.pending_retry_pose is None
-            ):
-                self._try_begin_stuck_recovery(rs, now)
+            if not rs.goal_active or rs.last_goal_time <= 0:
+                continue
+
+            last_prog_time = rs.last_progress_time or rs.last_goal_time
+            if (now - last_prog_time) > self.progress_timeout:
+                self.get_logger().warn(
+                    f'[{rs.name}] Goal appears stalled for '
+                    f'{self.progress_timeout:.0f}s without progress '
+                    f'(feedback or motion toward goal); cancelling and blacklisting')
+                self._cancel_goal(rs)
+                if rs.goal_position:
+                    rs.blacklist.append(rs.goal_position)
+                self._arm_post_failure_cooldown(rs)
 
         if use_global:
             self._global_frontier_step()
@@ -807,6 +877,12 @@ class MultiRobotExplorer(Node):
         m = self.latest_global_map
         # Use the current global map for all goal selection in this tick.
         self._current_goal_map = m
+        now = self.get_clock().now().nanoseconds / 1e9
+        n_idle = sum(
+            1 for rs in self.robots.values()
+            if not rs.goal_active and not rs.goal_pending and rs.position is not None
+            and self._robot_may_assign_now(rs, now))
+
         frontiers = detect_frontiers(
             m.data,
             m.info.width,
@@ -823,17 +899,22 @@ class MultiRobotExplorer(Node):
                     'No frontiers remaining — exploration complete!')
                 self.exploration_complete = True
                 self._publish_status('COMPLETE')
+            elif n_idle > 0:
+                if now - self._last_no_frontier_idle_log_time >= 15.0:
+                    self._last_no_frontier_idle_log_time = now
+                    self.get_logger().warning(
+                        'Still no frontier regions on merged map while '
+                        f'{n_idle} robot(s) are idle. If unexplored space '
+                        'remains in RViz, confirm the map uses value -1 for '
+                        'unknown and 0 for free, and that free cells border '
+                        'unknown (frontier definition).'
+                    )
             return
 
         if self.exploration_complete:
             self.get_logger().info('New frontiers appeared — resuming exploration')
         self.exploration_complete = False
 
-        now = self.get_clock().now().nanoseconds / 1e9
-        n_idle = sum(
-            1 for rs in self.robots.values()
-            if not rs.goal_active and not rs.goal_pending and rs.position is not None
-            and self._explorer_may_assign_new_frontier(rs, now))
         self.get_logger().debug(
             f'{len(frontiers)} frontiers, {n_idle} idle robot(s)')
         if n_idle > 0:
@@ -847,7 +928,7 @@ class MultiRobotExplorer(Node):
             self._maybe_retarget_active_robot(rs, frontiers, now)
 
         # assign frontiers to idle robots
-        assignments = assign_frontiers(
+        assignments, relaxed_sep = assign_frontiers(
             self.robots,
             frontiers,
             self.potential_scale,
@@ -858,9 +939,20 @@ class MultiRobotExplorer(Node):
             utility_penalty_fn=lambda rname, fr: self._frontier_penalty(self.robots[rname], fr),
             skip_frontier_fn=lambda rname, fr: self._should_skip_frontier_for_assignment(
                 self.robots[rname], fr),
-            robot_ready_fn=lambda rname: self._explorer_may_assign_new_frontier(
+            robot_ready_fn=lambda rname: self._robot_may_assign_now(
                 self.robots[rname], now),
+            goal_dist_fn=self._goal_dist_for_assignment,
+            assignment_robot_order_fn=self._assignment_robot_order,
         )
+        if not assignments and n_idle > 0 and frontiers:
+            if now - self._last_no_assignment_log_time >= 15.0:
+                self._last_no_assignment_log_time = now
+                self._log_why_no_assignment(frontiers, n_idle, now)
+        if relaxed_sep and assignments:
+            self.get_logger().info(
+                'Relaxed min_goal_separation for assignment (robot on/near '
+                'frontier after a goal); repeat-goal blacklist still applies'
+            )
 
         for rname, fi in assignments.items():
             fr = frontiers[fi]
@@ -905,13 +997,13 @@ class MultiRobotExplorer(Node):
 
             if rs.goal_active or rs.goal_pending:
                 continue
-            if not self._explorer_may_assign_new_frontier(rs, now):
+            if not self._robot_may_assign_now(rs, now):
                 continue
             any_idle = True
 
             # Assign a frontier for this single robot using the same utility
             # function but restricted to this robot and these frontiers.
-            sub_assignments = assign_frontiers(
+            sub_assignments, relaxed_sep = assign_frontiers(
                 {name: rs},
                 frontiers,
                 self.potential_scale,
@@ -921,8 +1013,14 @@ class MultiRobotExplorer(Node):
                 self.blacklist_radius,
                 utility_penalty_fn=lambda _rname, fr: self._frontier_penalty(rs, fr),
                 skip_frontier_fn=lambda _rname, fr: self._should_skip_frontier_for_assignment(rs, fr),
-                robot_ready_fn=lambda _rname: self._explorer_may_assign_new_frontier(rs, now),
+                robot_ready_fn=lambda _rname: self._robot_may_assign_now(rs, now),
+                goal_dist_fn=lambda rname, fr: self._goal_dist_for_assignment(rname, fr),
             )
+            if relaxed_sep and name in sub_assignments:
+                self.get_logger().info(
+                    f'[{name}] Relaxed min_goal_separation for assignment (robot '
+                    'on/near frontier after a goal); repeat-goal blacklist still applies'
+                )
             if name in sub_assignments:
                 fr = frontiers[sub_assignments[name]]
                 self._send_goal(rs, fr)
@@ -968,41 +1066,6 @@ class MultiRobotExplorer(Node):
                     tf2_ros.ExtrapolationException):
                 # keep last known position
                 pass
-
-    def _cmd_vel_callback(self, msg: Twist, robot_name: str):
-        rs = self.robots.get(robot_name)
-        if rs is None:
-            return
-        rs.last_cmd_vel_linear_x = float(msg.linear.x)
-        rs.last_cmd_vel_time = self.get_clock().now().nanoseconds / 1e9
-
-    def _scan_callback(self, msg: LaserScan, robot_name: str):
-        rs = self.robots.get(robot_name)
-        if rs is None:
-            return
-        if not rs.goal_active or rs.stuck_recovery_until > 0:
-            rs.scan_ref_signature = None
-            rs.scan_unchanged_start_time = 0.0
-            return
-        sig = _laser_scan_signature(msg, self.stuck_scan_subsample_bins)
-        if sig is None:
-            return
-        now = self.get_clock().now().nanoseconds / 1e9
-        if rs.scan_ref_signature is None or rs.scan_ref_signature.shape != sig.shape:
-            rs.scan_ref_signature = sig.copy()
-            rs.scan_unchanged_start_time = 0.0
-            return
-        delta = _scan_signature_mean_change(rs.scan_ref_signature, sig)
-        if delta < self.stuck_scan_mean_change_thresh_m:
-            if rs.scan_unchanged_start_time <= 0.0:
-                rs.scan_unchanged_start_time = now
-        else:
-            rs.scan_ref_signature = sig.copy()
-            rs.scan_unchanged_start_time = 0.0
-
-    def _reset_stuck_scan_state(self, rs: RobotState) -> None:
-        rs.scan_ref_signature = None
-        rs.scan_unchanged_start_time = 0.0
 
     # -----------------------------------------------------------------------
     # Nav2 goal management
@@ -1098,126 +1161,27 @@ class MultiRobotExplorer(Node):
     def _robot_may_assign_now(self, rs: RobotState, now: float) -> bool:
         return now >= rs.next_assign_allowed_time
 
-    def _explorer_may_assign_new_frontier(self, rs: RobotState, now: float) -> bool:
-        if not self._robot_may_assign_now(rs, now):
-            return False
-        if rs.stuck_recovery_until > 0:
-            return False
-        if rs.pending_retry_pose is not None:
-            return False
-        return True
-
-    def _try_begin_stuck_recovery(self, rs: RobotState, now: float) -> None:
-        if not rs.goal_active or rs.goal_pending:
-            return
-        if rs.position is None or rs.goal_position is None:
-            return
-        if (now - rs.last_cmd_vel_time) > self.stuck_cmd_vel_stale_sec:
-            return
-        if rs.last_cmd_vel_linear_x < self.stuck_forward_cmd_min_mps:
-            return
-        if rs.scan_unchanged_start_time <= 0.0:
-            return
-        if (now - rs.scan_unchanged_start_time) < self.stuck_scan_unchanged_duration_sec:
-            return
-        self._begin_stuck_recovery(rs, now)
-
-    def _begin_stuck_recovery(self, rs: RobotState, now: float) -> None:
-        if rs.position is None or rs.goal_position is None:
-            return
-        self.get_logger().warn(
-            f'[{rs.name}] Stuck: forward cmd '
-            f'({rs.last_cmd_vel_linear_x:.3f} m/s) but LiDAR static for '
-            f'{self.stuck_scan_unchanged_duration_sec:.1f}s '
-            f'(mean change < {self.stuck_scan_mean_change_thresh_m:.3f} m); '
-            f'blacklisting spot, backing up, retrying same goal'
-        )
-        rs.blacklist.append(rs.position)
-        rs.pending_retry_pose = rs.goal_position
-        rs.ignore_cooldown_on_next_cancel = True
-        self._cancel_goal(rs)
-        self._reset_stuck_scan_state(rs)
-        if self.stuck_recovery_enable:
-            rs.stuck_recovery_until = now + max(0.05, self.backup_duration_sec)
-        else:
-            self._finish_stuck_recovery(rs, now)
-
-    def _publish_backup_cmd_vel(self, rs: RobotState) -> None:
-        pub = self._cmd_vel_pubs.get(rs.name)
-        if pub is None:
-            return
-        t = Twist()
-        t.linear.x = float(self.backup_linear_speed_mps)
-        pub.publish(t)
-
-    def _finish_stuck_recovery(self, rs: RobotState, now: float) -> None:
-        pub = self._cmd_vel_pubs.get(rs.name)
-        if pub is not None:
-            pub.publish(Twist())
-        rs.stuck_recovery_until = 0.0
-        target = rs.pending_retry_pose
-        rs.pending_retry_pose = None
-        if target is None:
-            return
-        self.get_logger().info(
-            f'[{rs.name}] Stuck recovery done; resending NavigateToPose '
-            f'({target[0]:.2f}, {target[1]:.2f})'
-        )
-        self._send_navigate_to_pose_xy(rs, target[0], target[1])
-
-    def _send_navigate_to_pose_xy(
-        self, rs: RobotState, goal_x: float, goal_y: float
-    ) -> None:
-        if rs.action_client is None:
-            rs.goal_active = False
-            return
-        if not rs.action_client.wait_for_server(timeout_sec=0.2):
-            self.get_logger().warn(
-                f'[{rs.name}] NavigateToPose unavailable for retry')
-            return
-
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = PoseStamped()
-        goal_msg.pose.header.frame_id = self.world_frame
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = goal_x
-        goal_msg.pose.pose.position.y = goal_y
-        goal_msg.pose.pose.position.z = 0.0
-        goal_msg.pose.pose.orientation.w = 1.0
-
-        rs.goal_active = True
-        rs.goal_pending = True
-        rs.goal_status = 'pending'
-        rs.goal_position = (goal_x, goal_y)
-        tnow = self.get_clock().now().nanoseconds / 1e9
-        rs.last_goal_time = tnow
-        rs.active_goal_sent_time = tnow
-        rs.last_pose_when_goal_sent = rs.position
-        rs.last_distance_remaining = None
-        rs.last_progress_distance = None
-        rs.last_progress_time = tnow
-        self._reset_stuck_scan_state(rs)
-
-        send_future = rs.action_client.send_goal_async(
-            goal_msg,
-            feedback_callback=lambda f, r=rs: self._goal_feedback_callback(f, r),
-        )
-        send_future.add_done_callback(
-            lambda f, r=rs: self._goal_response_callback(f, r))
-        self.get_logger().info(
-            f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
-            f'— stuck retry')
-
     def _goal_point_blacklisted(
         self, rs: RobotState, gx: float, gy: float
     ) -> bool:
         return any(
             _dist((gx, gy), bl) < self.blacklist_radius for bl in rs.blacklist)
 
+    def _frontier_too_small_for_nav_goal(self, fr: Frontier) -> bool:
+        if self.min_frontier_cells_for_goal <= 0:
+            return False
+        return fr.size < self.min_frontier_cells_for_goal
+
     def _should_skip_frontier_for_assignment(
         self, rs: RobotState, fr: Frontier
     ) -> bool:
         """True if the pose Nav2 would receive for this frontier is unusable."""
+        if self._frontier_too_small_for_nav_goal(fr):
+            self.get_logger().debug(
+                f'[{rs.name}] skip frontier: {fr.size} cells < '
+                f'min_frontier_cells_for_goal ({self.min_frontier_cells_for_goal})'
+            )
+            return True
         gx, gy = self._select_goal_point(rs, fr)
         if self._goal_point_blacklisted(rs, gx, gy):
             return True
@@ -1230,6 +1194,8 @@ class MultiRobotExplorer(Node):
         return self._clearance_penalty(self._current_goal_map, gx, gy)
 
     def _frontier_utility(self, rs: RobotState, fr: Frontier) -> float:
+        if self._frontier_too_small_for_nav_goal(fr):
+            return -1e9
         gx, gy = self._select_goal_point(rs, fr)
         if rs.position is None:
             return -1e9
@@ -1239,12 +1205,19 @@ class MultiRobotExplorer(Node):
             )
             return -1e9
         d = _dist(rs.position, (gx, gy))
-        if d < self.min_goal_separation:
+        # Degenerate only when essentially same cell; otherwise penalize
+        # closeness so retargeting still works after the robot reaches a goal
+        # on/near the frontier (same situation as assign_frontiers relaxed pass).
+        degenerate_eps = 0.02
+        if d < degenerate_eps:
             return -1e9
+        close_penalty = 0.0
+        if d < self.min_goal_separation:
+            close_penalty = (self.min_goal_separation - d) * 3.0
         gain = self.gain_scale * fr.size_m
         cost = self.potential_scale * d
         penalty = self._clearance_penalty(self._current_goal_map, gx, gy)
-        return gain - cost - penalty
+        return gain - cost - penalty - close_penalty
 
     def _best_frontier_for_robot(self, rs: RobotState, frontiers: List[Frontier]) -> Tuple[Optional[Frontier], float]:
         best = None
@@ -1260,6 +1233,39 @@ class MultiRobotExplorer(Node):
                 best = fr
         return best, best_u
 
+    def _best_frontier_for_robot_within_anchor(
+        self, rs: RobotState, frontiers: List[Frontier]
+    ) -> Tuple[Optional[Frontier], float]:
+        """Like _best_frontier_for_robot but only frontiers whose goal pose lies
+        within retarget_max_offset_from_anchor_m of the leg anchor (first goal),
+        or the current goal if the anchor was not set.
+        """
+        if self.retarget_max_offset_from_anchor_m <= 0.0:
+            return self._best_frontier_for_robot(rs, frontiers)
+        anchor = rs.retarget_anchor or rs.goal_position
+        if anchor is None:
+            return self._best_frontier_for_robot(rs, frontiers)
+        ax, ay = anchor
+        rmax = self.retarget_max_offset_from_anchor_m
+        best = None
+        best_u = -1e9
+        for fr in frontiers:
+            if any(
+                _dist(fr.centroid_world, bl) < self.blacklist_radius
+                for bl in rs.blacklist
+            ):
+                continue
+            if self._should_skip_frontier_for_assignment(rs, fr):
+                continue
+            gx, gy = self._select_goal_point(rs, fr)
+            if _dist((gx, gy), (ax, ay)) > rmax:
+                continue
+            u = self._frontier_utility(rs, fr)
+            if u > best_u:
+                best_u = u
+                best = fr
+        return best, best_u
+
     def _robot_is_making_progress(self, rs: RobotState, now: float) -> bool:
         if not rs.goal_active or rs.goal_position is None or rs.position is None:
             return False
@@ -1268,6 +1274,15 @@ class MultiRobotExplorer(Node):
         start_dist = _dist(rs.last_pose_when_goal_sent, rs.goal_position)
         curr_dist = _dist(rs.position, rs.goal_position)
         return (start_dist - curr_dist) >= self.min_progress_before_replan_m
+
+    def _is_robot_stuck(self, rs: RobotState, now: float) -> bool:
+        if not self.allow_replan_when_no_progress:
+            return False
+        if not rs.goal_active:
+            return False
+        if rs.last_progress_time <= 0:
+            return (now - rs.active_goal_sent_time) > self.max_stuck_time_s
+        return (now - rs.last_progress_time) > self.max_stuck_time_s
 
     def _log_replan_decision(
         self,
@@ -1293,10 +1308,51 @@ class MultiRobotExplorer(Node):
         else:
             self.get_logger().debug(details)
 
-    def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
-        """Divert to a new frontier only while advancing and a much larger
-        frontier offers enough extra utility (no stagnation/clearance preemption).
+    def _should_replace_goal(
+        self,
+        rs: RobotState,
+        candidate_goal_xy: Tuple[float, float],
+        now: float,
+    ) -> Tuple[bool, str]:
+        if rs.goal_position is None or not rs.goal_active:
+            return True, 'no_active_goal'
+        if rs.goal_status in ('aborted', 'canceled', 'failed', 'succeeded'):
+            return True, f'current_goal_{rs.goal_status}'
+        if (now - rs.active_goal_sent_time) < self.min_goal_replan_interval_s:
+            return False, 'cooldown'
+        if _dist(candidate_goal_xy, rs.goal_position) < self.min_goal_change_dist_m:
+            return False, 'goal_too_similar'
+        if self._robot_is_making_progress(rs, now):
+            return False, 'robot_making_progress'
+        if self._is_robot_stuck(rs, now):
+            return True, 'stuck_timeout'
+        return False, 'no_replan_condition'
+
+    def _should_replace_goal_opportunity(
+        self,
+        rs: RobotState,
+        candidate_goal_xy: Tuple[float, float],
+        now: float,
+    ) -> Tuple[bool, str]:
+        """Allow mid-route diversion to a better frontier while the robot is
+        still advancing; does not use the 'robot_making_progress' block from
+        _should_replace_goal (that gate is for *stagnation* retarget only).
         """
+        if rs.goal_position is None or not rs.goal_active:
+            return True, 'no_active_goal'
+        if (now - rs.active_goal_sent_time) < self.min_goal_replan_interval_s:
+            return False, 'cooldown'
+        if _dist(candidate_goal_xy, rs.goal_position) < self.min_goal_change_dist_m:
+            return False, 'goal_too_similar'
+        return True, 'opportunity'
+
+    def _robot_recently_showed_progress(self, rs: RobotState, now: float) -> bool:
+        """True if Nav2 feedback recently decreased distance_remaining."""
+        if rs.last_progress_time <= 0:
+            return False
+        return (now - rs.last_progress_time) < 4.0
+
+    def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
         if not self.retarget_enable:
             return
         if not rs.goal_active or rs.goal_pending or rs.position is None or rs.goal_position is None:
@@ -1305,112 +1361,338 @@ class MultiRobotExplorer(Node):
             return
         if (now - rs.last_retarget_time) < self.retarget_cooldown_sec:
             return
-        if not self._robot_is_making_progress(rs, now):
-            return
-        if (now - rs.active_goal_sent_time) < self.min_goal_replan_interval_s:
-            return
 
         current_goal = rs.goal_position
-        best_fr, best_u = self._best_frontier_for_robot(rs, frontiers)
+        best_fr, best_u = self._best_frontier_for_robot_within_anchor(rs, frontiers)
         if best_fr is None:
-            return
-        if best_fr.size_m < self.retarget_divert_min_frontier_size_m:
+            if self.retarget_max_offset_from_anchor_m > 0.0:
+                ax = rs.retarget_anchor or rs.goal_position
+                if ax is not None:
+                    self.get_logger().debug(
+                        f'[{rs.name}] Retarget skipped: no frontier with goal within '
+                        f'{self.retarget_max_offset_from_anchor_m:.1f}m of anchor '
+                        f'({ax[0]:.2f}, {ax[1]:.2f})'
+                    )
             return
         new_goal = self._select_goal_point(rs, best_fr)
         if _dist(new_goal, current_goal) < self.retarget_min_goal_shift_m:
-            return
-        if _dist(new_goal, current_goal) < self.min_goal_change_dist_m:
             return
 
         curr_u = -(
             self.potential_scale * _dist(rs.position, current_goal)
             + self._clearance_penalty(self._current_goal_map, current_goal[0], current_goal[1])
         )
-        if best_u < (curr_u + self.retarget_min_utility_gain):
-            self._log_replan_decision(
-                rs, 'insufficient_utility_gain', allow=False, now=now,
-                candidate_goal=new_goal)
+
+        # While the robot is moving toward the current goal, divert if the map
+        # now favors a frontier with substantially higher exploration utility.
+        if self.retarget_opportunity_enable:
+            advancing = (
+                self._robot_is_making_progress(rs, now)
+                or self._robot_recently_showed_progress(rs, now)
+            )
+            if advancing and best_u >= (
+                curr_u + self.retarget_opportunity_min_utility_gain
+            ):
+                ok, opp_reason = self._should_replace_goal_opportunity(
+                    rs, new_goal, now)
+                if ok:
+                    self._log_replan_decision(
+                        rs, opp_reason, allow=True, now=now, candidate_goal=new_goal)
+                    self.get_logger().info(
+                        f'[{rs.name}] Retargeting for better frontier while in motion; '
+                        f'old=({current_goal[0]:.2f}, {current_goal[1]:.2f}) '
+                        f'new=({new_goal[0]:.2f}, {new_goal[1]:.2f})'
+                    )
+                    rs.ignore_cooldown_on_next_cancel = True
+                    self._cancel_goal(rs)
+                    rs.last_retarget_time = now
+                    self._send_goal(rs, best_fr, from_retarget=True)
+                    return
+                self._log_replan_decision(
+                    rs, opp_reason, allow=False, now=now, candidate_goal=new_goal)
+
+        curr_clearance = self._goal_clearance_m(
+            self._current_goal_map, current_goal[0], current_goal[1])
+        no_progress_for = now - (rs.last_progress_time or rs.last_goal_time or now)
+        risky = curr_clearance < self.retarget_clearance_threshold_m
+        stale = no_progress_for > self.retarget_stagnation_sec
+        if not risky and not stale:
             return
 
+        if best_u < (curr_u + self.retarget_min_utility_gain):
+            return
+
+        should_replace, gate_reason = self._should_replace_goal(rs, new_goal, now)
+        if not should_replace:
+            self._log_replan_decision(
+                rs, gate_reason, allow=False, now=now, candidate_goal=new_goal)
+            return
+
+        reason = 'clearance risk' if risky else 'stagnation'
         self._log_replan_decision(
-            rs, 'divert_larger_frontier', allow=True, now=now, candidate_goal=new_goal)
+            rs, gate_reason, allow=True, now=now, candidate_goal=new_goal)
         self.get_logger().info(
-            f'[{rs.name}] Diverting to larger frontier ({best_fr.size_m:.2f}m); '
+            f'[{rs.name}] Retargeting active goal due to {reason}; '
             f'old=({current_goal[0]:.2f}, {current_goal[1]:.2f}) '
             f'new=({new_goal[0]:.2f}, {new_goal[1]:.2f})'
         )
         rs.ignore_cooldown_on_next_cancel = True
         self._cancel_goal(rs)
+        rs.blacklist.append(current_goal)
         rs.last_retarget_time = now
-        self._send_goal(rs, best_fr)
+        self._send_goal(rs, best_fr, from_retarget=True)
+
+    def _pick_frontier_cell_farthest_from_robot(
+        self,
+        rs: RobotState,
+        frontier: Frontier,
+        centroid_xy: Tuple[float, float],
+        max_offset_from_centroid: Optional[float],
+    ) -> Optional[Tuple[float, float]]:
+        """Pick a frontier cell that is far from the robot (for exploration).
+
+        If max_offset_from_centroid is set, only cells within that radius of
+        the frontier centroid are considered (centroid strategy fallback).
+        If None, all frontier cells are considered (farthest_cell strategy).
+        Returns None if no suitable cell exists.
+        """
+        if frontier.indices is None or rs.position is None:
+            return None
+        m = self._current_goal_map
+        if m is None:
+            return None
+        rx, ry = rs.position
+        ys = frontier.indices[:, 0].astype(np.float32)
+        xs = frontier.indices[:, 1].astype(np.float32)
+        res = m.info.resolution
+        ox = m.info.origin.position.x
+        oy = m.info.origin.position.y
+        wx = ox + (xs + 0.5) * res
+        wy = oy + (ys + 0.5) * res
+
+        dx = wx - rx
+        dy = wy - ry
+        dists = np.hypot(dx, dy)
+        grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+        costs = grid[ys.astype(np.int32), xs.astype(np.int32)]
+        valid_cost = (costs >= 0) & (costs < self.goal_max_cell_cost)
+        if np.any(valid_cost):
+            clearance_ok = np.zeros_like(valid_cost, dtype=bool)
+            valid_indices = np.flatnonzero(valid_cost)
+            for i in valid_indices:
+                clearance = self._goal_clearance_m(m, float(wx[i]), float(wy[i]))
+                if clearance >= self.goal_min_clearance_gate_m:
+                    clearance_ok[i] = True
+            valid_mask = valid_cost & clearance_ok
+        else:
+            valid_mask = valid_cost
+
+        if max_offset_from_centroid is not None:
+            cdx = wx - centroid_xy[0]
+            cdy = wy - centroid_xy[1]
+            mask_near_centroid = np.hypot(cdx, cdy) <= max_offset_from_centroid
+            valid_mask = valid_mask & mask_near_centroid
+            if not np.any(valid_mask):
+                return None
+
+        mask_far_enough = dists >= max(0.0, self.min_goal_distance)
+        safe_far = valid_mask & mask_far_enough
+        if np.any(safe_far):
+            idx = int(np.argmax(dists * safe_far))
+        elif np.any(valid_mask):
+            idx = int(np.argmax(dists * valid_mask))
+        elif np.any(mask_far_enough):
+            idx = int(np.argmax(dists * mask_far_enough))
+        else:
+            idx = int(np.argmax(dists))
+
+        gx = float(wx[idx])
+        gy = float(wy[idx])
+        if not np.any(valid_mask):
+            self._log_goal_safety_rejection(
+                rs, gx, gy, context='select_goal_point_fallback'
+            )
+        return gx, gy
 
     def _select_goal_point(self, rs: RobotState, frontier: Frontier) -> Tuple[float, float]:
         """Choose a goal point within a frontier region according to the
         configured strategy. Falls back to the centroid when needed.
         """
-        # Default to centroid.
         gx, gy = frontier.centroid_world
 
-        if self.goal_point_strategy == 'farthest_cell' and frontier.indices is not None and rs.position is not None:
-            rx, ry = rs.position
-            # frontier.indices is (N, 2) with (y, x) in cell coordinates.
-            ys = frontier.indices[:, 0].astype(np.float32)
-            xs = frontier.indices[:, 1].astype(np.float32)
-
-            # Convert all frontier cells to world coordinates using the map
-            # that was active when the frontier set was computed.
-            m = self._current_goal_map
-            if m is None:
-                # Fallback to centroid if, for some reason, we don't have a
-                # map associated with this frontier batch.
-                return gx, gy
-            res = m.info.resolution
-            ox = m.info.origin.position.x
-            oy = m.info.origin.position.y
-            wx = ox + (xs + 0.5) * res
-            wy = oy + (ys + 0.5) * res
-
-            # Distances from robot to each candidate cell.
-            dx = wx - rx
-            dy = wy - ry
-            dists = np.hypot(dx, dy)
-            grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
-            costs = grid[ys.astype(np.int32), xs.astype(np.int32)]
-            valid_cost = (costs >= 0) & (costs < self.goal_max_cell_cost)
-            if np.any(valid_cost):
-                clearance_ok = np.zeros_like(valid_cost, dtype=bool)
-                valid_indices = np.flatnonzero(valid_cost)
-                for i in valid_indices:
-                    clearance = self._goal_clearance_m(m, float(wx[i]), float(wy[i]))
-                    if clearance >= self.goal_min_clearance_gate_m:
-                        clearance_ok[i] = True
-                valid_mask = valid_cost & clearance_ok
-            else:
-                valid_mask = valid_cost
-
-            # Prefer cells at or beyond the configured minimum goal distance,
-            # but allow closer ones if nothing meets that threshold.
-            mask_far_enough = dists >= max(0.0, self.min_goal_distance)
-            safe_far = valid_mask & mask_far_enough
-            if np.any(safe_far):
-                idx = int(np.argmax(dists * safe_far))
-            elif np.any(valid_mask):
-                idx = int(np.argmax(dists * valid_mask))
-            elif np.any(mask_far_enough):
-                idx = int(np.argmax(dists * mask_far_enough))
-            else:
-                idx = int(np.argmax(dists))
-
-            gx = float(wx[idx])
-            gy = float(wy[idx])
-            if not np.any(valid_mask):
-                self._log_goal_safety_rejection(
-                    rs, gx, gy, context='select_goal_point_fallback'
+        if self.goal_point_strategy == 'centroid':
+            if (
+                rs.position is not None
+                and frontier.indices is not None
+                and _dist(rs.position, (gx, gy))
+                < self.centroid_fallback_if_robot_closer_than_m
+            ):
+                picked = self._pick_frontier_cell_farthest_from_robot(
+                    rs,
+                    frontier,
+                    (gx, gy),
+                    self.centroid_fallback_max_offset_from_centroid_m,
                 )
+                if picked is not None:
+                    gx, gy = picked
+
+        elif self.goal_point_strategy == 'farthest_cell':
+            if frontier.indices is not None and rs.position is not None:
+                picked = self._pick_frontier_cell_farthest_from_robot(
+                    rs, frontier, (gx, gy), None
+                )
+                if picked is not None:
+                    gx, gy = picked
 
         return gx, gy
 
-    def _send_goal(self, rs: RobotState, frontier: Frontier):
+    def _goal_dist_for_assignment(self, rname: str, fr: Frontier) -> float:
+        """Straight-line distance from robot to the goal pose for this frontier."""
+        rs = self.robots[rname]
+        if rs.position is None:
+            return float('inf')
+        gx, gy = self._select_goal_point(rs, fr)
+        return _dist(rs.position, (gx, gy))
+
+    def _assignment_robot_order(self, idle_names: List[str]) -> List[str]:
+        """Idle robots in ``robot_names`` order, rotated so the last robot
+        that completed a goal is first — avoids greedy starvation of the
+        active robot when other names are idle without Nav2.
+        """
+        ordered = [n for n in self.robot_names if n in idle_names]
+        anchor = self._last_goal_finished_robot
+        if anchor and anchor in ordered:
+            i = ordered.index(anchor)
+            return ordered[i:] + ordered[:i]
+        return ordered
+
+    def _at_nav_goal_for_tacit_hold(self, rs: RobotState, d: float) -> bool:
+        """True if map-frame distance or Nav2 feedback says we're at the goal."""
+        if d <= self.tacit_goal_success_radius_m:
+            return True
+        dr = rs.last_distance_remaining
+        # Nav2 can report distance_remaining≈0 while map-frame pose is still far
+        # (stale/initial feedback). Only use the remaining-distance hint when pose
+        # is within a small combined slack of the goal.
+        max_d_when_using_remaining = (
+            self.tacit_goal_success_radius_m
+            + self.tacit_abort_max_distance_remaining_m
+        )
+        if (
+            self.tacit_abort_max_distance_remaining_m > 0.0
+            and dr is not None
+            and math.isfinite(dr)
+            and dr >= 0.0
+            and dr <= self.tacit_abort_max_distance_remaining_m
+            and d <= max_d_when_using_remaining
+        ):
+            return True
+        return False
+
+    def _nav2_abort_tacit_success(self, rs: RobotState) -> Tuple[bool, str]:
+        """True if Nav2 ABORTED (e.g. controller gave up) but we count the leg
+        as reached: same criteria as plan-loop tacit hold.
+        """
+        if rs.goal_position is None:
+            return False, ''
+        d = (
+            _dist(rs.position, rs.goal_position)
+            if rs.position is not None
+            else float('inf')
+        )
+        if not self._at_nav_goal_for_tacit_hold(rs, d):
+            return False, ''
+        if rs.position is not None and d <= self.tacit_goal_success_radius_m:
+            return True, f'pose_dist={d:.2f}m'
+        dr = rs.last_distance_remaining
+        return True, f'distance_remaining={dr:.2f}m'
+
+    def _log_why_no_assignment(
+        self,
+        frontiers: List[Frontier],
+        n_idle: int,
+        now: float,
+    ) -> None:
+        """Throttled diagnostic when frontiers exist but assign_frontiers is empty."""
+        idle_names = [
+            n for n in self.robot_names
+            if n in self.robots
+            and not self.robots[n].goal_active
+            and not self.robots[n].goal_pending
+            and self.robots[n].position is not None
+            and self._robot_may_assign_now(self.robots[n], now)
+        ]
+        if not idle_names:
+            self.get_logger().warning(
+                'No assignment: idle count mismatch (robots in cooldown or '
+                'missing TF pose?)'
+            )
+            return
+        order = self._assignment_robot_order(idle_names)
+        rs = self.robots[order[0]]
+        fr = frontiers[0]
+        gx, gy = self._select_goal_point(rs, fr)
+        parts: List[str] = []
+        if self._frontier_too_small_for_nav_goal(fr):
+            parts.append(
+                f'cells<{self.min_frontier_cells_for_goal}'
+            )
+        if any(
+            _dist(fr.centroid_world, bl) < self.blacklist_radius
+            for bl in rs.blacklist
+        ):
+            parts.append('centroid_near_blacklist')
+        if self._goal_point_blacklisted(rs, gx, gy):
+            parts.append('goal_blacklisted')
+        if not self._goal_passes_safety_gate(self._current_goal_map, gx, gy):
+            c = self._goal_clearance_m(self._current_goal_map, gx, gy)
+            cc = self._goal_cell_cost(self._current_goal_map, gx, gy)
+            parts.append(f'safety(clear={c:.2f}m cost={cc})')
+        d = _dist(rs.position, (gx, gy)) if rs.position else None
+        self.get_logger().warning(
+            f'No frontier assigned: {n_idle} idle, {len(frontiers)} frontier(s). '
+            f'Sample robot={rs.name} vs frontier[0]: goal=({gx:.2f},{gy:.2f}) '
+            f'dist_to_goal={d:.3f}m min_sep={self.min_goal_separation} '
+            f'issues=[{",".join(parts) if parts else "none — check utility matrix"}]'
+        )
+
+    def _repeat_goal_blocks_send(
+        self,
+        rs: RobotState,
+        goal_x: float,
+        goal_y: float,
+        frontier: Frontier,
+    ) -> bool:
+        """If True, skip sending: blacklist exhausted goal and try elsewhere."""
+        REPEAT_DIST_THRESH = 0.3
+        REPEAT_LIMIT = 5
+        if rs.last_goal_world is not None:
+            lx, ly = rs.last_goal_world
+            if math.hypot(goal_x - lx, goal_y - ly) < REPEAT_DIST_THRESH:
+                rs.repeat_goal_count += 1
+            else:
+                rs.repeat_goal_count = 0
+        else:
+            rs.repeat_goal_count = 0
+
+        if rs.repeat_goal_count < REPEAT_LIMIT:
+            return False
+
+        self.get_logger().warn(
+            f'[{rs.name}] Repeatedly selecting nearly-identical goal '
+            f'({goal_x:.2f}, {goal_y:.2f}); blacklisting and searching elsewhere'
+        )
+        rs.blacklist.append((goal_x, goal_y))
+        rs.blacklist.append(frontier.centroid_world)
+        rs.repeat_goal_count = 0
+        return True
+
+    def _send_goal(
+        self,
+        rs: RobotState,
+        frontier: Frontier,
+        from_retarget: bool = False,
+    ):
         if rs.action_client is None:
             self.get_logger().warn(f'[{rs.name}] No action client available')
             rs.goal_active = False
@@ -1423,7 +1705,7 @@ class MultiRobotExplorer(Node):
                     f'on /{rs.name}/navigate_to_pose')
                 rs.server_unavailable_logged = True
             if self.use_pose_goal_fallback:
-                self._publish_pose_fallback_goal(rs, frontier)
+                self._publish_pose_fallback_goal(rs, frontier, from_retarget)
                 return
             rs.goal_active = False
             rs.goal_pending = False
@@ -1434,6 +1716,12 @@ class MultiRobotExplorer(Node):
             rs.server_unavailable_logged = False
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
+        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+            return
+
+        rs.last_goal_world = (goal_x, goal_y)
+        rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
+
         try:
             m = self._current_goal_map
             if m is not None:
@@ -1497,37 +1785,14 @@ class MultiRobotExplorer(Node):
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = now
-        self._reset_stuck_scan_state(rs)
-
-        # Update repeat-goal tracking. If we keep selecting essentially the
-        # same goal for this robot, treat the region as exhausted after a few
-        # repeats and blacklist it so other frontiers can be considered.
-        REPEAT_DIST_THRESH = 0.3  # metres
-        REPEAT_LIMIT = 5
-        frontier_size_m = float(frontier.size_m)
-
-        if rs.last_goal_world is not None:
-            lx, ly = rs.last_goal_world
-            dx = goal_x - lx
-            dy = goal_y - ly
-            if math.hypot(dx, dy) < REPEAT_DIST_THRESH:
-                rs.repeat_goal_count += 1
-            else:
-                rs.repeat_goal_count = 0
+        if rs.position is not None:
+            rs.last_dist_to_goal = _dist(rs.position, (goal_x, goal_y))
         else:
-            rs.repeat_goal_count = 0
-
-        rs.last_goal_world = (goal_x, goal_y)
-        rs.recent_goals.append((goal_x, goal_y, frontier_size_m))
-
-        if rs.repeat_goal_count >= REPEAT_LIMIT:
-            self.get_logger().warn(
-                f'[{rs.name}] Repeatedly selecting nearly-identical goal '
-                f'({goal_x:.2f}, {goal_y:.2f}); blacklisting and searching elsewhere'
-            )
-            rs.blacklist.append((goal_x, goal_y))
-            rs.blacklist.append(frontier.centroid_world)
-            rs.repeat_goal_count = 0
+            rs.last_dist_to_goal = None
+        rs.near_goal_since = None
+        rs.tacit_success_pending_cancel = False
+        if not from_retarget:
+            rs.retarget_anchor = (goal_x, goal_y)
 
         send_future = rs.action_client.send_goal_async(
             goal_msg,
@@ -1550,7 +1815,12 @@ class MultiRobotExplorer(Node):
             f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
             f'— frontier size {frontier.size_m:.2f}m ({frontier.size} cells)')
 
-    def _publish_pose_fallback_goal(self, rs: RobotState, frontier: Frontier):
+    def _publish_pose_fallback_goal(
+        self,
+        rs: RobotState,
+        frontier: Frontier,
+        from_retarget: bool = False,
+    ):
         goal_pub = self.goal_pubs.get(rs.name)
         if goal_pub is None:
             rs.goal_active = False
@@ -1558,6 +1828,13 @@ class MultiRobotExplorer(Node):
             return
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
+        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+            rs.goal_active = False
+            rs.goal_pending = False
+            return
+
+        rs.last_goal_world = (goal_x, goal_y)
+        rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
 
         goal_msg = PoseStamped()
         goal_msg.header.frame_id = self.world_frame
@@ -1575,6 +1852,12 @@ class MultiRobotExplorer(Node):
         rs.last_pose_when_goal_sent = rs.position
         rs.last_progress_time = now
         rs.last_progress_distance = None
+        if rs.position is not None:
+            rs.last_dist_to_goal = _dist(rs.position, (goal_x, goal_y))
+        else:
+            rs.last_dist_to_goal = None
+        if not from_retarget:
+            rs.retarget_anchor = (goal_x, goal_y)
         rs.goal_active = True
         rs.goal_pending = False
         rs.goal_status = 'executing'
@@ -1637,6 +1920,8 @@ class MultiRobotExplorer(Node):
                 rs.last_progress_time = now
 
     def _goal_result_callback(self, future, rs: RobotState):
+        # Fresh pose for tacit near-goal checks on ABORTED/CANCELED.
+        self._update_robot_positions()
         status_text_map = {
             GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
             GoalStatus.STATUS_ACCEPTED: 'ACCEPTED',
@@ -1681,6 +1966,7 @@ class MultiRobotExplorer(Node):
             rs.last_distance_remaining = None
             rs.last_progress_distance = None
             rs.last_progress_time = 0.0
+            rs.last_dist_to_goal = None
             self._arm_post_failure_cooldown(rs)
             return
 
@@ -1726,45 +2012,52 @@ class MultiRobotExplorer(Node):
                     self.get_logger().info(
                         f'[{rs.name}] Goal reached '
                         f'(total: {rs.goals_reached})')
-
-                # Stagnation heuristic: if recent goals for this robot have
-                # stayed clustered in a small region without significant change
-                # in frontier size, treat that region as exhausted and add a
-                # blacklist entry at the cluster centre.
-                if len(rs.recent_goals) >= 5:
-                    xs = [g[0] for g in rs.recent_goals]
-                    ys = [g[1] for g in rs.recent_goals]
-                    sizes = [g[2] for g in rs.recent_goals]
-                    cx = sum(xs) / len(xs)
-                    cy = sum(ys) / len(ys)
-                    max_rad = max(
-                        math.hypot(x - cx, y - cy)
-                        for x, y in zip(xs, ys)
-                    )
-                    size_span = max(sizes) - min(sizes)
-                    STAGNATION_RADIUS = 0.7  # metres
-                    STAGNATION_SIZE_EPS = 0.5  # metres of frontier-length change
-                    if max_rad < STAGNATION_RADIUS and size_span < STAGNATION_SIZE_EPS:
-                        self.get_logger().info(
-                            f'[{rs.name}] Goals have stagnated in a small region; '
-                            f'blacklisting cluster centre ({cx:.2f}, {cy:.2f})'
-                        )
-                        rs.blacklist.append((cx, cy))
+                self._last_goal_finished_robot = rs.name
         elif status == GoalStatus.STATUS_ABORTED:
-            rs.goals_failed += 1
-            rs.goal_status = 'aborted'
-            self.get_logger().warn(
-                f'[{rs.name}] Goal aborted — blacklisting')
-            if rs.goal_position:
-                rs.blacklist.append(rs.goal_position)
-            self._arm_post_failure_cooldown(rs)
-        elif status == GoalStatus.STATUS_CANCELED:
-            rs.goal_status = 'canceled'
-            self.get_logger().info(f'[{rs.name}] Goal cancelled')
-            if rs.ignore_cooldown_on_next_cancel:
-                rs.ignore_cooldown_on_next_cancel = False
+            tacit_ok, tacit_why = self._nav2_abort_tacit_success(rs)
+            if tacit_ok:
+                rs.goals_reached += 1
+                rs.goal_status = 'succeeded'
+                self.get_logger().info(
+                    f'[{rs.name}] Goal reached (Nav2 ABORTED; tacit success '
+                    f'{tacit_why}; total: {rs.goals_reached})'
+                )
+                self._last_goal_finished_robot = rs.name
             else:
+                rs.goals_failed += 1
+                rs.goal_status = 'aborted'
+                pd = (
+                    _dist(rs.position, rs.goal_position)
+                    if rs.position is not None and rs.goal_position is not None
+                    else None
+                )
+                self.get_logger().warn(
+                    f'[{rs.name}] Goal aborted — blacklisting '
+                    f'(pose_dist_m={pd}, distance_remaining={rs.last_distance_remaining}; '
+                    f'tacit: pose≤{self.tacit_goal_success_radius_m:.2f}m or '
+                    f'remain≤{self.tacit_abort_max_distance_remaining_m:.2f}m)'
+                )
+                if rs.goal_position:
+                    rs.blacklist.append(rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
+        elif status == GoalStatus.STATUS_CANCELED:
+            if rs.tacit_success_pending_cancel:
+                rs.tacit_success_pending_cancel = False
+                rs.ignore_cooldown_on_next_cancel = False
+                rs.goals_reached += 1
+                rs.goal_status = 'succeeded'
+                self.get_logger().info(
+                    f'[{rs.name}] Goal reached (tacit cancel near pose; '
+                    f'total: {rs.goals_reached})'
+                )
+                self._last_goal_finished_robot = rs.name
+            else:
+                rs.goal_status = 'canceled'
+                self.get_logger().info(f'[{rs.name}] Goal cancelled')
+                if rs.ignore_cooldown_on_next_cancel:
+                    rs.ignore_cooldown_on_next_cancel = False
+                else:
+                    self._arm_post_failure_cooldown(rs)
         else:
             rs.goal_status = 'failed'
             self.get_logger().info(
@@ -1799,6 +2092,8 @@ class MultiRobotExplorer(Node):
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = 0.0
+        rs.last_dist_to_goal = None
+        rs.near_goal_since = None
 
     def _cancel_goal(self, rs: RobotState):
         if rs.goal_handle is not None:
@@ -1813,6 +2108,8 @@ class MultiRobotExplorer(Node):
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = 0.0
+        rs.last_dist_to_goal = None
+        rs.near_goal_since = None
 
     # -----------------------------------------------------------------------
     # Visualisation
@@ -1901,13 +2198,8 @@ def main(args=None):
         # teardown remains quiet while still running the cleanup below.
         pass
     finally:
+        # cancel all active goals
         for rs in node.robots.values():
-            pub = node._cmd_vel_pubs.get(rs.name)
-            if pub is not None:
-                try:
-                    pub.publish(Twist())
-                except Exception:
-                    pass
             if rs.goal_active:
                 node._cancel_goal(rs)
         try:
