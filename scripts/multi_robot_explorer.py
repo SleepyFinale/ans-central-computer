@@ -99,6 +99,8 @@ class RobotState:
     tacit_success_pending_cancel: bool = False
     # First time (unix s) the robot was within tacit_goal_success_radius_m of goal.
     near_goal_since: Optional[float] = None
+    # Time when NavigateToPose action server was first seen available.
+    action_server_ready_time: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +466,10 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('max_stuck_time_s', 12.0)
         self.declare_parameter('allow_replan_when_no_progress', True)
         self.declare_parameter('post_failure_cooldown_sec', 2.0)
+        # Grace window after action server appears: early goal rejections are
+        # treated as Nav2 warm-up (lifecycle still activating) instead of
+        # blacklisting goals.
+        self.declare_parameter('goal_reject_warmup_sec', 12.0)
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
@@ -585,6 +591,9 @@ class MultiRobotExplorer(Node):
         )
         self.post_failure_cooldown_sec = float(
             self.get_parameter('post_failure_cooldown_sec').value
+        )
+        self.goal_reject_warmup_sec = float(
+            self.get_parameter('goal_reject_warmup_sec').value
         )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
@@ -1021,6 +1030,10 @@ class MultiRobotExplorer(Node):
                     f'[{name}] Relaxed min_goal_separation for assignment (robot '
                     'on/near frontier after a goal); repeat-goal blacklist still applies'
                 )
+            if name not in sub_assignments and frontiers:
+                # Mirror global-mode diagnostics so local mode does not appear
+                # "stuck" when frontiers exist but all candidates are gated.
+                self._log_why_no_assignment(frontiers, 1, now)
             if name in sub_assignments:
                 fr = frontiers[sub_assignments[name]]
                 self._send_goal(rs, fr)
@@ -1121,7 +1134,10 @@ class MultiRobotExplorer(Node):
 
     def _goal_passes_safety_gate(self, m: Optional[OccupancyGrid], x: float, y: float) -> bool:
         cost = self._goal_cell_cost(m, x, y)
-        if cost < 0 or cost >= self.goal_max_cell_cost:
+        # Frontier targets can lie on cells that are still marked unknown due to
+        # map discretization around the free/unknown boundary. Do not reject
+        # solely for unknown cost; keep hard rejection only for high-cost cells.
+        if cost >= self.goal_max_cell_cost:
             return False
         clearance = self._goal_clearance_m(m, x, y)
         return clearance >= self.goal_min_clearance_gate_m
@@ -1714,6 +1730,14 @@ class MultiRobotExplorer(Node):
             self.get_logger().info(
                 f'[{rs.name}] NavigateToPose action server is now available')
             rs.server_unavailable_logged = False
+            rs.action_server_ready_time = (
+                self.get_clock().now().nanoseconds / 1e9
+            )
+        elif rs.action_server_ready_time <= 0.0:
+            # Server was already up when first checked.
+            rs.action_server_ready_time = (
+                self.get_clock().now().nanoseconds / 1e9
+            )
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
         if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
@@ -1772,6 +1796,11 @@ class MultiRobotExplorer(Node):
         goal_msg.pose.pose.position.x = goal_x
         goal_msg.pose.pose.position.y = goal_y
         goal_msg.pose.pose.position.z = 0.0
+        # Point-goal policy: keep goal yaw neutral so Nav2 can finish on
+        # position without forcing a specific final heading.
+        goal_msg.pose.pose.orientation.x = 0.0
+        goal_msg.pose.pose.orientation.y = 0.0
+        goal_msg.pose.pose.orientation.z = 0.0
         goal_msg.pose.pose.orientation.w = 1.0
 
         rs.goal_active = True
@@ -1842,6 +1871,9 @@ class MultiRobotExplorer(Node):
         goal_msg.pose.position.x = goal_x
         goal_msg.pose.position.y = goal_y
         goal_msg.pose.position.z = 0.0
+        goal_msg.pose.orientation.x = 0.0
+        goal_msg.pose.orientation.y = 0.0
+        goal_msg.pose.orientation.z = 0.0
         goal_msg.pose.orientation.w = 1.0
 
         goal_pub.publish(goal_msg)
@@ -1883,12 +1915,29 @@ class MultiRobotExplorer(Node):
 
         rs.goal_pending = False
         if not goal_handle.accepted:
-            self.get_logger().warn(f'[{rs.name}] Goal rejected by Nav2')
+            now = self.get_clock().now().nanoseconds / 1e9
+            in_warmup = (
+                rs.action_server_ready_time > 0.0
+                and (now - rs.action_server_ready_time) < self.goal_reject_warmup_sec
+            )
+            if in_warmup:
+                elapsed = now - rs.action_server_ready_time
+                self.get_logger().warn(
+                    f'[{rs.name}] Goal rejected by Nav2 during warm-up '
+                    f'({elapsed:.1f}s since action server became available); '
+                    'will retry without blacklisting.'
+                )
+            else:
+                self.get_logger().warn(f'[{rs.name}] Goal rejected by Nav2')
             rs.goal_active = False
             rs.goal_status = 'failed'
-            if rs.goal_position is not None:
+            if rs.goal_position is not None and not in_warmup:
                 rs.blacklist.append(rs.goal_position)
-            self._arm_post_failure_cooldown(rs)
+            if in_warmup:
+                # Retry quickly while Nav2 finishes lifecycle activation.
+                rs.next_assign_allowed_time = now + 1.0
+            else:
+                self._arm_post_failure_cooldown(rs)
             return
 
         rs.goal_handle = goal_handle
@@ -2117,17 +2166,20 @@ class MultiRobotExplorer(Node):
 
     def _publish_frontier_markers(self, frontiers: List[Frontier]):
         ma = MarkerArray()
+        marker_frame = self.world_frame
 
         # delete old markers
         del_marker = Marker()
         del_marker.action = Marker.DELETEALL
-        del_marker.header.frame_id = self.world_frame
+        del_marker.header.frame_id = marker_frame
         del_marker.ns = 'frontiers'
+        # RViz can warn/drop markers if nested texture headers keep empty frame_id.
+        del_marker.texture.header.frame_id = marker_frame
         ma.markers.append(del_marker)
 
         for i, fr in enumerate(frontiers):
             m = Marker()
-            m.header.frame_id = self.world_frame
+            m.header.frame_id = marker_frame
             m.header.stamp = self.get_clock().now().to_msg()
             m.ns = 'frontiers'
             m.id = i + 1
@@ -2146,6 +2198,7 @@ class MultiRobotExplorer(Node):
             m.color.b = 0.2
             m.color.a = 0.8
             m.lifetime.sec = 5
+            m.texture.header.frame_id = marker_frame
             ma.markers.append(m)
 
         # mark assigned goals in a different colour
@@ -2153,7 +2206,7 @@ class MultiRobotExplorer(Node):
         for rs in self.robots.values():
             if rs.goal_active and rs.goal_position:
                 gm = Marker()
-                gm.header.frame_id = self.world_frame
+                gm.header.frame_id = marker_frame
                 gm.header.stamp = self.get_clock().now().to_msg()
                 gm.ns = 'goals'
                 gm.id = idx
@@ -2175,6 +2228,7 @@ class MultiRobotExplorer(Node):
                 gm.color.b = 0.0
                 gm.color.a = 1.0
                 gm.lifetime.sec = 5
+                gm.texture.header.frame_id = marker_frame
                 ma.markers.append(gm)
 
         self.marker_pub.publish(ma)

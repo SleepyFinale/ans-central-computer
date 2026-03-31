@@ -41,7 +41,10 @@ multi_robot_explorer:
 
     # After abort, reject, watchdog cancel, or other failure paths, wait this
     # many seconds before assigning a new frontier (per robot).
-    post_failure_cooldown_sec: 2.0
+    post_failure_cooldown_sec: 5.0
+    # Ignore initial action-goal rejects during Nav2 warm-up for this long
+    # after NavigateToPose action server first appears.
+    goal_reject_warmup_sec: 12.0
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
     # that aren't worth navigating to.
@@ -51,7 +54,7 @@ multi_robot_explorer:
     # frontier cells. Tiny slivers (often along walls) produce goals that
     # Nav2 plans to but the local controller cannot follow ("Failed to make
     # progress"). Set to 0 to disable. 18-cell slivers are typical failures.
-    min_frontier_cells_for_goal: 32
+    min_frontier_cells_for_goal: 8
 
     # When Nav2 reports success but the last feedback still shows a non-trivial
     # distance_remaining, the explorer can optionally treat this as a
@@ -89,7 +92,7 @@ multi_robot_explorer:
     # Progress watchdog: if neither Nav2 feedback nor straight-line motion
     # toward the goal improves by progress_min_delta within this many seconds,
     # the goal is cancelled and blacklisted.
-    progress_timeout: 90.0
+    progress_timeout: 5.0
     progress_min_delta: 0.05
 
     # Distance (m) at which a frontier near another robot's active goal
@@ -135,8 +138,8 @@ multi_robot_explorer:
     #   clearance than this threshold.
     goal_clearance_radius_m: 0.45
     goal_clearance_weight: 4.0
-    goal_max_cell_cost: 80
-    goal_min_clearance_gate_m: 0.30
+    goal_max_cell_cost: 95
+    goal_min_clearance_gate_m: 0.22
 
     # Adaptive mid-route retargeting:
     # - When enabled, active goals can be cancelled and reassigned before
@@ -147,12 +150,12 @@ multi_robot_explorer:
     retarget_cooldown_sec: 12.0
     retarget_min_goal_shift_m: 0.25
     retarget_min_utility_gain: 0.2
-    retarget_stagnation_sec: 8.0
-    retarget_clearance_threshold_m: 0.35
+    retarget_stagnation_sec: 15.0
+    retarget_clearance_threshold_m: 0.40
     # While the robot is advancing on the current goal, preempt for a new goal
     # only if frontier utility improves by at least this much (explore more
     # unknown area). Does not blacklist the old goal.
-    retarget_opportunity_enable: true
+    retarget_opportunity_enable: false
     # Raised above node default (1.2) to reduce opportunistic Nav2 preemption.
     retarget_opportunity_min_utility_gain: 1.8
     # Retargets may only pick goal poses within this distance (m) of the first
@@ -160,10 +163,10 @@ multi_robot_explorer:
     # Set to 0 to allow retargets anywhere on the map.
     retarget_max_offset_from_anchor_m: 0.5
     # Goal replacement gate to avoid frequent Nav2 preemption (node default: 4.0).
-    min_goal_replan_interval_s: 4.0
+    min_goal_replan_interval_s: 8.0
     min_goal_change_dist_m: 0.30
     min_progress_before_replan_m: 0.08
-    max_stuck_time_s: 6.0
+    max_stuck_time_s: 12.0
     allow_replan_when_no_progress: true
 
     # Minimum separation between the robot and a candidate goal (metres).
@@ -171,7 +174,7 @@ multi_robot_explorer:
     # passes this check (e.g. robot just reached a goal on that frontier), the
     # planner retries with separation 0 so exploration continues; repeat-goal
     # blacklisting still limits useless resends.
-    min_goal_separation: 0.35
+    min_goal_separation: 0.15
 
     # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
     # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose

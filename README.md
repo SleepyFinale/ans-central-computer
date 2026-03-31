@@ -370,7 +370,7 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
   fleet_mode:=True
 ```
 
-Set `fleet_mode:=True` on every robot when you run **`./scripts/start_central.sh`** (tf relay + map merge or single-robot map bridge + explorer) so Nav2 uses global `/tf` and `/map`; explorer goals are in world frame `map`. Use `False` only for bench tests **without** the central stack. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
+Set `fleet_mode:=True` on every robot when you run **`./scripts/start_central.sh`** (tf relay + map merge or single-robot map bridge + explorer) so Nav2 uses global `/tf` and `/map`; explorer goals are in world frame `map`. By default, robot launch files now use `HOSTNAME` as the robot namespace (for example host `pinky` -> namespace `pinky`), so `robot_name:=...` is optional unless you want to override it manually. Use `False` only for bench tests **without** the central stack. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
 
 This launch file (from the robot workspace, e.g. `ans-turtlebot3`) runs:
 
@@ -1026,6 +1026,35 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 3. **frame 'base_scan':** Fixed by using `scan_normalized` with correct `frame_id` (e.g. `blinky/base_scan`, `pinky/base_scan`) from the robot-side workspace. Ensure the robot-side SLAM + Nav2 launch is up to date and running.
 
 4. **Robot ignores the global plan / heads straight through obstacles** with the central explorer: Robots must launch SLAM + Nav2 with **`fleet_mode:=true`** (or `use_central_tf_map:=true`; see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)) so Nav2 listens on global `/tf` and uses merged `/map`. Otherwise namespaced Nav2 only sees `/<robot>/tf`, which omits `map` → `<robot>/map` from `map_merge` (or the single-robot static bridge), and goals in frame `map` no longer match the local costmap.
+   - Confirm each robot hostname matches its intended namespace (`hostname`, e.g. `pinky`) or override with `robot_name:=<robot>` if needed.
+
+**Stability tuning profile (Mar 2026):**
+
+- Central `config/multi_robot_explorer.yaml` tuned values:
+  - `post_failure_cooldown_sec: 5.0`
+  - `retarget_stagnation_sec: 15.0`
+  - `retarget_opportunity_enable: false`
+  - `min_goal_replan_interval_s: 8.0`
+  - `max_stuck_time_s: 12.0`
+- Robot `ans-turtlebot3` Nav2 profile is tuned in `turtlebot3_navigation2/param/humble/burger.yaml`:
+  - progress checker relaxed (`required_movement_radius: 0.10`, `movement_time_allowance: 45.0`)
+  - costmap TF timeouts increased to `0.5`
+  - local costmap size increased to `4 x 4`
+  - DWB `min_speed_theta: 0.10`
+  - local inflation radius reduced to `0.25`
+
+**A/B/C validation sequence (recommended):**
+
+1. **Run A (topology only):** use `fleet_mode:=true` + explicit `robot_name:=...`, keep prior parameters.
+2. **Run B (A + robot tuning):** apply only robot-side Nav2 tuning.
+3. **Run C (B + central tuning):** apply central explorer anti-thrashing tuning.
+
+For each run, compare:
+
+- count of `Failed to make progress` (robot `controller_server`)
+- count of `Goal canceled` (central explorer / Nav2 action status)
+- average delay from goal completion/cancel to next assigned goal
+- map growth/coverage over equal-duration runs
 
 ---
 
