@@ -203,26 +203,28 @@ The table below lists the SSH targets for each robot on the supported WiFi netwo
 | Blinky | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
 | Pinky  | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
 | Inky   | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
-| Clyde  | `clyde@<IP>`          | `clyde@<IP>`        | `clyde@<IP>`        |
+| Clyde  | clyde@192.168.0.236   | clyde@10.3.141.236  | clyde@172.20.10.16  |
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
-`scripts/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, and **Inky**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Only **Clyde** requires you to pass the robot's IP (no fixed IPs per network).
+`scripts/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Pass an optional **second argument** to override the IP (e.g. non-standard subnet).
 
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
 ```bash
 cd ~/turtlebot3_ws
 
-# Blinky, Pinky, or Inky (fixed IPs – script auto-detects SNS vs RaspAP vs Azure)
+# Any robot: fixed fleet IPs – script auto-detects SNS vs RaspAP vs Azure
 source scripts/set_robot_env.sh blinky
 # or
 source scripts/set_robot_env.sh pinky
 # or
 source scripts/set_robot_env.sh inky
+# or
+source scripts/set_robot_env.sh clyde
 
-# Clyde (pass the robot's IP address for the network you're on)
-source scripts/set_robot_env.sh clyde 192.168.0.xxx
+# Optional: force SSH target (overrides auto-detection), e.g.
+# source scripts/set_robot_env.sh clyde 192.168.0.236
 ```
 
 Then SSH into the robot:
@@ -453,7 +455,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
 
   This script:
 
-  - Detects available robot namespaces (e.g. `/blinky`, `/pinky`, `/inky`)
+  - Detects available robot namespaces (e.g. `/blinky`, `/pinky`, `/inky`, `/clyde`)
   - Starts TF relay (`prefix_frames:=true` for one or many robots)
   - In **single-robot mode**: skips map merge; publishes static TF `map` → `<robot>/map` (identity) so SLAM frame `<robot>/map` aligns with world `map`; relays `/<robot>/map` → `/map` so fleet Nav2 and global RViz see a publisher on `/map`
   - In **multi-robot mode**: starts multi-robot map merge (unknown initial poses) and merges all per-robot maps into a global `/map`
@@ -503,7 +505,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
 
   **What to look for:**
 
-  - `ROS_DOMAIN_ID` printed as `50` and the expected robot filter (e.g. `-bpi` when you pass `./scripts/start_central.sh -bpi`).
+  - `ROS_DOMAIN_ID` printed as `50` and the expected robot filter (e.g. `-bpi` or full fleet `-bpic` when you pass `./scripts/start_central.sh -bpic`).
   - The **list of detected robots** matches the robots you actually have running.
   - TF relay starts without errors (`tf_relay_multirobot` node up).
   - In multi-robot mode, map merge starts and no errors are reported about missing input maps.
@@ -1144,7 +1146,7 @@ Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the ro
 cd ~/turtlebot3_ws
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde <IP>
+source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde [optional IP override]
 
 python3 scripts/pose_jump_monitor.py
 ```

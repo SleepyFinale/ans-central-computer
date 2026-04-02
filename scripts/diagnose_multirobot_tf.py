@@ -18,6 +18,9 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from tf2_ros import Buffer, TransformListener
 
+# Fleet order for TF diagnostics (must match namespaces / multi_robot_explorer).
+ROBOTS = ['blinky', 'pinky', 'inky', 'clyde']
+
 
 def qos_transient():
     return QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -28,7 +31,7 @@ class TFDiagnostics(Node):
         super().__init__('tf_diagnostics')
         self.buffer = Buffer()
         TransformListener(self.buffer, self)
-        self.robots = ['blinky', 'pinky', 'inky']
+        self.robots = list(ROBOTS)
         self.results = []
 
     def log(self, msg: str, ok: bool | None = None):
@@ -51,21 +54,10 @@ class TFDiagnostics(Node):
         time.sleep(0.5)
         rclpy.spin_once(self, timeout_sec=0.5)
 
-        critical_topics = [
-            '/tf',
-            '/tf_static',
-            '/blinky/tf',
-            '/pinky/tf',
-            '/inky/tf',
-            '/map',
-        ]
+        critical_topics = ['/tf', '/tf_static'] + [f'/{r}/tf' for r in self.robots] + ['/map']
         # Laser scans stay on the robots; they are optional from the
         # central PC's point of view (Nav2 + SLAM use them locally).
-        optional_scan_topics = [
-            '/blinky/scan',
-            '/pinky/scan',
-            '/inky/scan',
-        ]
+        optional_scan_topics = [f'/{r}/scan' for r in self.robots]
 
         for topic in critical_topics:
             try:
@@ -96,34 +88,21 @@ class TFDiagnostics(Node):
         #   - map -> <robot>/map from map_merge
         #   - full chain map -> <robot>/base_footprint
         now = rclpy.time.Time()
-        critical_checks = [
-            ('blinky/odom', 'blinky/base_footprint',
-             'Robot TF (odom->base_footprint): blinky'),
-            ('pinky/odom', 'pinky/base_footprint',
-             'Robot TF (odom->base_footprint): pinky'),
-            ('inky/odom', 'inky/base_footprint',
-             'Robot TF (odom->base_footprint): inky'),
-            ('map', 'blinky/map',
-             'World TF (map_merge): map->blinky/map'),
-            ('map', 'pinky/map',
-             'World TF (map_merge): map->pinky/map'),
-            ('map', 'inky/map',
-             'World TF (map_merge): map->inky/map'),
-            ('map', 'blinky/base_footprint',
-             'Explorer chain: map->blinky/base_footprint'),
-            ('map', 'pinky/base_footprint',
-             'Explorer chain: map->pinky/base_footprint'),
-            ('map', 'inky/base_footprint',
-             'Explorer chain: map->inky/base_footprint'),
-        ]
-        optional_checks = [
-            ('blinky/map', 'blinky/odom',
-             'SLAM TF: blinky/map->blinky/odom'),
-            ('pinky/map', 'pinky/odom',
-             'SLAM TF: pinky/map->pinky/odom'),
-            ('inky/map', 'inky/odom',
-             'SLAM TF: inky/map->inky/odom'),
-        ]
+        critical_checks = []
+        optional_checks = []
+        for r in self.robots:
+            critical_checks.extend([
+                (f'{r}/odom', f'{r}/base_footprint',
+                 f'Robot TF (odom->base_footprint): {r}'),
+                ('map', f'{r}/map',
+                 f'World TF (map_merge): map->{r}/map'),
+                ('map', f'{r}/base_footprint',
+                 f'Explorer chain: map->{r}/base_footprint'),
+            ])
+            optional_checks.append(
+                (f'{r}/map', f'{r}/odom',
+                 f'SLAM TF: {r}/map->{r}/odom'),
+            )
         for parent, child, desc in critical_checks:
             try:
                 self.buffer.lookup_transform(child, parent, now)
@@ -177,12 +156,13 @@ class TFDiagnostics(Node):
         if miss_count > 0:
             print(f'Issues found ({miss_count} critical). Check [MISSING] items above.')
             print('\nTypical causes:')
-            if not any('Topic /blinky/tf:' in r and '[OK]' in r for r in self.results):
-                print('  - /blinky/tf: domain bridges or Blinky robot not running')
-            if not any('Topic /pinky/tf:' in r and '[OK]' in r for r in self.results):
-                print('  - /pinky/tf: domain bridges or Pinky robot not running')
-            if not any('Topic /inky/tf:' in r and '[OK]' in r for r in self.results):
-                print('  - /inky/tf: domain bridges or Inky robot not running')
+            for r in self.robots:
+                label = r.capitalize()
+                topic_key = f'Topic /{r}/tf:'
+                if not any(topic_key in res and '[OK]' in res for res in self.results):
+                    print(
+                        f'  - /{r}/tf: domain bridges or {label} robot not running'
+                    )
             if any('Robot TF (odom->base_footprint):' in r and '[MISSING]' in r for r in self.results):
                 print('  - odom->base_footprint: base TF on the robot or tf_relay may not be running.')
             if any('World TF (map_merge):' in r and '[MISSING]' in r for r in self.results):

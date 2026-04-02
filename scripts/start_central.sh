@@ -21,6 +21,7 @@
 #   ./scripts/start_central.sh
 #   ./scripts/start_central.sh -b      # only Blinky
 #   ./scripts/start_central.sh -pi     # only Pinky + Inky
+#   ./scripts/start_central.sh -bpic   # Blinky, Pinky, Inky, Clyde (subset must appear on the graph)
 
 set -e
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Set ROBOT_SSH for the selected robot.
-# Auto-detects WiFi (SNS, RaspAP, or Azure) to pick the correct IP for Blinky/Pinky/Inky.
+# Auto-detects WiFi (SNS, RaspAP, or Azure) to pick the correct IP for Blinky, Pinky, Inky, and Clyde.
 # Must be sourced so variables apply to the current shell:
 #   source scripts/set_robot_env.sh blinky
 
@@ -8,7 +8,7 @@ set_robot_usage() {
   echo "Usage: source scripts/set_robot_env.sh <robot> [ip]"
   echo ""
   echo "  robot   One of: blinky, pinky, inky, clyde"
-  echo "  ip      Optional. Required for clyde if not using hostname."
+  echo "  ip      Optional. Override auto-detected IP (e.g. non-standard network)."
   echo ""
   echo "  WiFi auto-detection: Script detects SNS (Lab), RaspAP (RPi), or Azure and uses the right IP."
   echo ""
@@ -17,7 +17,7 @@ set_robot_usage() {
   echo "  Blinky  blinky@192.168.0.158 blinky@10.3.141.220  blinky@172.20.10.13"
   echo "  Pinky   pinky@192.168.0.194  pinky@10.3.141.194   pinky@172.20.10.14"
   echo "  Inky    inky@192.168.0.139   inky@10.3.141.139    inky@172.20.10.15"
-  echo "  Clyde   clyde@<IP>           clyde@<IP>           clyde@<IP>"
+  echo "  Clyde   clyde@192.168.0.236  clyde@10.3.141.236  clyde@172.20.10.16"
 }
 
 # Detect current WiFi SSID. Returns "SNS", "RaspAP", "Azure", or empty if unknown/not connected.
@@ -47,7 +47,7 @@ get_network_from_ssid() {
 robot=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
 ip="${2:-}"
 
-# Robot IPs by network (SNS vs RaspAP vs Azure). Clyde uses user-provided IP.
+# Robot IPs by network (SNS vs RaspAP vs Azure). Matches ans-turtlebot3 switch_wifi.sh.
 BLINKY_LAB=192.168.0.158
 BLINKY_AZURE=172.20.10.13
 BLINKY_RPI=10.3.141.220
@@ -57,6 +57,9 @@ PINKY_RPI=10.3.141.194
 INKY_LAB=192.168.0.139
 INKY_RPI=10.3.141.139
 INKY_AZURE=172.20.10.15
+CLYDE_LAB=192.168.0.236
+CLYDE_RPI=10.3.141.236
+CLYDE_AZURE=172.20.10.16
 
 case "$robot" in
   blinky)
@@ -101,10 +104,19 @@ case "$robot" in
   clyde)
     if [ -n "$ip" ]; then
       export ROBOT_SSH="clyde@$ip"
-      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH"
+      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (manual IP override)"
     else
-      unset ROBOT_SSH 2>/dev/null || true
-      echo "Robot: Clyde  ROBOT_SSH not set (pass IP: source scripts/set_robot_env.sh clyde <IP>)"
+      ssid=$(get_wifi_ssid)
+      net=$(get_network_from_ssid "$ssid")
+      case "$net" in
+        lab)   export ROBOT_SSH="clyde@$CLYDE_LAB" ;;
+        rpi)   export ROBOT_SSH="clyde@$CLYDE_RPI" ;;
+        azure) export ROBOT_SSH="clyde@$CLYDE_AZURE" ;;
+        *)     export ROBOT_SSH="clyde@$CLYDE_LAB"
+               echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
+               ;;
+      esac
+      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     fi
     ;;
   "")

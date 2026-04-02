@@ -1,5 +1,6 @@
-# Map merge params for Blinky + Pinky with UNKNOWN initial poses
-# Expects /blinky/map and /pinky/map from SLAM instances.
+# Map merge params for the multi-robot fleet (unknown initial poses).
+# Expects /<robot>/map from each robot's SLAM (e.g. Blinky, Pinky, Inky, Clyde).
+# map_merge discovers inputs by topic; add/remove robots via running stacks, not this file.
 #
 # How it works:
 #   - Pose estimation uses AKAZE feature matching to detect map overlap.
@@ -10,7 +11,7 @@
 #     transitions automatically from independent to feature-matched.
 #
 # TF: map_merge publishes world_frame -> <robot>/map for every robot.
-# Full chain: map -> blinky/map -> blinky/odom -> blinky/base_footprint
+# Full chain (example): map -> blinky/map -> blinky/odom -> blinky/base_footprint
 # No tf_map_odom_fallback needed.
 
 map_merge:

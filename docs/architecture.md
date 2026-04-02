@@ -52,7 +52,8 @@ flowchart TB
     direction TB
     r1["Robot: Blinky (ns=/blinky, ROS_DOMAIN_ID=50)"]
     r2["Robot: Pinky (ns=/pinky, ROS_DOMAIN_ID=50)"]
-    rN["Robot: Inky/Clyde/... (ns=/inky,/clyde, ROS_DOMAIN_ID=50)"]
+    r3["Robot: Inky (ns=/inky, ROS_DOMAIN_ID=50)"]
+    r4["Robot: Clyde (ns=/clyde, ROS_DOMAIN_ID=50)"]
   end
 
   subgraph Central["Central Computer (Shared Domain: ROS_DOMAIN_ID=50)"]
@@ -80,7 +81,7 @@ flowchart TB
 
 ## Function: GlobalMapping (multi-robot SLAM + map merge) — matches current workspace
 
-This function already exists in your central workspace. Robots (Blinky, Pinky, Inky, etc.) now run **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
+This function already exists in your central workspace. The fleet (Blinky, Pinky, Inky, Clyde) runs **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
 
 - **TF stitching**: `scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
 - **Single-robot world link**: `scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
@@ -97,6 +98,8 @@ flowchart TB
       tfRelay["script: scripts/tf_relay_multirobot.py"]
       slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
+      slamI["node: slam_toolbox (Inky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
+      slamC["node: slam_toolbox (Clyde on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       mapMerge["node: multirobot_map_merge/map_merge\nconfig/map_merge/multirobot_params_unknown_poses.yaml"]
     end
 
@@ -104,24 +107,34 @@ flowchart TB
       direction TB
       bMap["topic:/blinky/map (nav_msgs/OccupancyGrid)"]
       pMap["topic:/pinky/map (nav_msgs/OccupancyGrid)"]
+      iMap["topic:/inky/map (nav_msgs/OccupancyGrid)"]
+      cMap["topic:/clyde/map (nav_msgs/OccupancyGrid)"]
       gMap["topic:/map (nav_msgs/OccupancyGrid)"]
 
       bTF["topic:/blinky/tf + /blinky/tf_static (tf2_msgs/TFMessage)"]
       pTF["topic:/pinky/tf + /pinky/tf_static (tf2_msgs/TFMessage)"]
+      iTF["topic:/inky/tf + /inky/tf_static (tf2_msgs/TFMessage)"]
+      cTF["topic:/clyde/tf + /clyde/tf_static (tf2_msgs/TFMessage)"]
       gTF["topic:/tf + /tf_static (tf2_msgs/TFMessage)"]
 
-      tfChain["TF chains (intended):\nmap -> blinky/map -> blinky/odom -> blinky/base_footprint\nmap -> pinky/map -> pinky/odom -> pinky/base_footprint"]
+      tfChain["TF per robot after merge:\nmap -> robot/map -> robot/odom -> robot/base_footprint\n(robot in blinky, pinky, inky, clyde)"]
     end
 
     bTF -->|"script: prefix+merge"| tfRelay
     pTF -->|"script: prefix+merge"| tfRelay
+    iTF -->|"script: prefix+merge"| tfRelay
+    cTF -->|"script: prefix+merge"| tfRelay
     tfRelay -->|"topic:/tf + /tf_static"| gTF
 
     slamB -->|"topic:/blinky/map"| bMap
     slamP -->|"topic:/pinky/map"| pMap
+    slamI -->|"topic:/inky/map"| iMap
+    slamC -->|"topic:/clyde/map"| cMap
 
     bMap -->|"map_merge inputs"| mapMerge
     pMap -->|"map_merge inputs"| mapMerge
+    iMap -->|"map_merge inputs"| mapMerge
+    cMap -->|"map_merge inputs"| mapMerge
     mapMerge -->|"topic:/map"| gMap
     mapMerge -->|"tf: map-><robot>/map (publish_tf)"| tfChain
   end

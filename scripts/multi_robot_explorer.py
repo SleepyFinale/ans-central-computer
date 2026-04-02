@@ -357,7 +357,7 @@ class MultiRobotExplorer(Node):
         super().__init__('multi_robot_explorer')
 
         # -- parameters --
-        self.declare_parameter('robot_names', ['blinky', 'pinky'])
+        self.declare_parameter('robot_names', ['blinky', 'pinky', 'inky', 'clyde'])
         self.declare_parameter('map_topic', 'map')
         self.declare_parameter('world_frame', 'map')
         # New parameters to control local-vs-global behaviour.

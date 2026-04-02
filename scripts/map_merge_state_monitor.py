@@ -31,7 +31,7 @@ class MapMergeStateMonitor(Node):
     def __init__(self) -> None:
         super().__init__('map_merge_state_monitor')
 
-        self.declare_parameter('robot_names', ['blinky', 'pinky', 'inky'])
+        self.declare_parameter('robot_names', ['blinky', 'pinky', 'inky', 'clyde'])
         self.declare_parameter('world_frame', 'map')
         self.declare_parameter('robot_map_suffix', '/map')
         # Maximum allowed motion (m) for a robot map frame over the dwell time

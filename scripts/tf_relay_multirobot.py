@@ -36,7 +36,7 @@ class TFRelayNode(Node):
     def __init__(self):
         super().__init__('tf_relay_multirobot')
 
-        self.declare_parameter('robot_prefixes', ['blinky', 'pinky', 'inky'])
+        self.declare_parameter('robot_prefixes', ['blinky', 'pinky', 'inky', 'clyde'])
         self.declare_parameter('prefix_frames', True)
         self.robot_prefixes = self.get_parameter('robot_prefixes').value
         self.prefix_frames = self.get_parameter('prefix_frames').value

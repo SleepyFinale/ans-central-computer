@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#
+# Sources ROS 2 Humble plus this workspace install/ overlay.
+#
+# Fleet: use ROS_DOMAIN_ID=50 on central PC and every robot (see robot README).
+# Per-robot SSH targets: source scripts/set_robot_env.sh <blinky|pinky|inky|clyde>
+# Namespaces match hostnames: /blinky, /pinky, /inky, /clyde.
 
 # Base ROS 2 Humble underlay
 if [ -f /opt/ros/humble/setup.bash ]; then
