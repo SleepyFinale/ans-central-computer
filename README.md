@@ -14,7 +14,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
 4. [Multi-Robot SLAM](#multi-robot-slam)
    - [Robot Terminal 1: Robot Bringup](#robot-terminal-1-robot-bringup)
    - [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)
-   - [Central Terminals: start_central.sh + RViz](#central-terminals-start_centralsh--rviz)
+   - [Central Terminals: RViz + start_central.sh](#central-terminals-rviz--start_centralsh)
 5. [Troubleshooting](#troubleshooting)
 6. [Diagnostic Commands](#diagnostic-commands)
 7. [Additional Resources](#additional-resources)
@@ -267,7 +267,7 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
 - Robot environment is set (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)): `source scripts/set_robot_env.sh <robot>` — this sets `ROBOT_SSH` appropriately.
 
-**Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC, then start the central stack on the remote PC.
+**Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC. On the **central PC**, open **RViz first**, then run **`start_central.sh`** (see [Central Terminals](#central-terminals-rviz--start_centralsh)). The robot `navigation2_slam.launch.py` and the central coordinator **depend on each other** when using the default `fleet_mode:=auto`: the launch defers Nav2 until global TF is ready from the central stack, while the explorer on the central PC waits until maps and Nav2’s action servers exist before it can drive exploration (details under [Robot Terminal 2](#robot-terminal-2-slam--nav2) and the central section).
 
 ---
 
@@ -366,13 +366,10 @@ ros2 topic echo /<robot>/scan --once  # Should show laser scan data
 source scripts/ros_robot_env.bash
 export TURTLEBOT3_MODEL=burger
 
-ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
-  use_sim_time:=False \
-  use_rviz:=False \
-  fleet_mode:=True
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
 ```
 
-Set `fleet_mode:=True` on every robot when you run **`./scripts/start_central.sh`** (tf relay + map merge or single-robot map bridge + explorer) so Nav2 uses global `/tf` and `/map`; explorer goals are in world frame `map`. By default, robot launch files now use `HOSTNAME` as the robot namespace (for example host `pinky` -> namespace `pinky`), so `robot_name:=...` is optional unless you want to override it manually. Use `False` only for bench tests **without** the central stack. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
+When you use **`./scripts/start_central.sh`** on the central PC, set **`fleet_mode:=true`** on every robot so Nav2 uses global `/tf` and `/map` and explorer goals stay in world frame `map`. The launch file’s default is **`fleet_mode:=auto`**, which is usually equivalent for a full bring-up: it starts SLAM and the laser normalizer immediately, then runs a **global** TF wait (`map` → `<robot>/odom` on `/tf`) **before** starting Nav2. Until the central stack publishes the world ↔ robot map bridge and merged TF (TF relay plus single-robot static `map` → `<robot>/map` or multi-robot map merge), that wait has nothing to join, so the robot terminal may look like it “stops” after SLAM—the process is blocking on TF, not crashed. After you run **`start_central.sh`**, the chain becomes valid, the wait exits, Nav2 comes up, and the launch continues. On the central side, `multi_robot_explorer` may log that it is **waiting for the map** and will not send `NavigateToPose` goals until map data and Nav2’s action server are available, so the two sides unblock each other as the graph fills in. **`fleet_mode:=true`** skips that automatic global wait and starts Nav2 right after the usual odom→base wait (still use the central stack so global `/tf` and `/map` match the fleet layout). Use **`fleet_mode:=false`** only for bench tests **without** the central stack. Robot launch files default to `HOSTNAME` as the namespace (for example host `pinky` → `pinky`), so `robot_name:=...` is optional unless you override it. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
 
 This launch file (from the robot workspace, e.g. `ans-turtlebot3`) runs:
 
@@ -416,10 +413,12 @@ all **namespaced per robot** (e.g. `/<robot>/...`) so multiple robots can share 
 
 You will also see the individual Nav2 lifecycle nodes configuring and activating their costmaps and behavior tree, similar to the detailed output shown above.
 
+With default **`fleet_mode:=auto`**, the launch inserts another **`wait_for_tf`** pass that needs **`map` → `<robot>/odom`** on the **global** `/tf` feed before Nav2 is started, so Nav2’s process lines appear only **after** the central stack is up (or if you use **`fleet_mode:=true`**, which skips that auto wait). The log block above shows the Nav2 section once that prerequisite is satisfied.
+
 **What to look for:**
 
 - SLAM Toolbox and the laser scan normalizer both start without errors.
-- The TF wait script (`wait_for_tf`) reports that `<robot>/odom -> <robot>/base_footprint` is ready.
+- `wait_for_tf` finishes the odom→base check; with **`fleet_mode:=auto`**, a further wait on **`map` → `<robot>/odom`** may block until **`start_central.sh`** publishes the world/robot TF bridge—then Nav2 proceeds.
 - Nav2 lifecycle nodes reach the **Managed nodes are active** state.
 - Namespaced SLAM + Nav2 topics publishing for your robot, for example:
   - `/robot/scan_normalized`
@@ -438,15 +437,36 @@ ros2 topic echo /<robot>/map --once           # Should show map data after SLAM 
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
 ```
 
-At this point, the robot is fully brought up with SLAM + Nav2 running **on the SBC**. Next, start the central coordination stack.
+With **`fleet_mode:=auto`** (the default if you do not pass `fleet_mode`), Nav2 may still be starting **after** you open the central terminals; SLAM should already be publishing `/<robot>/map`. Repeat Robot Terminal 1 and 2 for each robot, then use two terminals on the **central PC** as follows.
 
 ---
 
-### Central Terminals: start_central.sh + RViz
+### Central Terminals: RViz + start_central.sh
 
-After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot Terminal 1 and 2 for each robot you want to use), use two terminals on the **central PC**:
+After at least one robot is running bringup and `navigation2_slam.launch.py` (SLAM running; Nav2 may still be waiting on global TF until the steps below), use two terminals on the **central PC**. **Start RViz in the first terminal** so you can watch `/map` and TF as they come up; **run `start_central.sh` in the second**.
 
-- **Central Terminal 1 – coordinator stack**
+- **Central Terminal 1 – RViz visualization**
+
+  ```bash
+  cd ~/turtlebot3_ws
+  source /opt/ros/humble/setup.bash
+  source install/setup.bash
+
+  # Global merged map (default):
+  ./scripts/start_rviz_central.sh
+
+  # Or explicitly:
+  ./scripts/start_rviz_central.sh --global
+
+  # Per-robot local map view (namespaced topics):
+  ./scripts/start_rviz_central.sh --local <robot>
+  # or shorthand:
+  ./scripts/start_rviz_central.sh -r <robot>
+  ```
+
+  In **global mode**, RViz loads the workspace config `config/rviz/central_global_map.rviz` with the fixed frame set to `map` and the global `/map` topic (from map merge in multi-robot mode, or the single robot's relayed `/map` in single-robot mode). In **local mode**, it uses a per-robot template so you see that robot's namespaced map and navigation topics (for example `/<robot>/map`, `/<robot>/scan_normalized`, `/<robot>/plan`) while still using `map` as the fixed frame.
+
+- **Central Terminal 2 – coordinator stack**
 
   ```bash
   cd ~/turtlebot3_ws
@@ -509,7 +529,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
   - The **list of detected robots** matches the robots you actually have running.
   - TF relay starts without errors (`tf_relay_multirobot` node up).
   - In multi-robot mode, map merge starts and no errors are reported about missing input maps.
-  - `multi_robot_explorer` starts for the selected robots and logs that it is waiting for the (merged or single-robot) map.
+  - `multi_robot_explorer` starts for the selected robots and logs that it is waiting for the (merged or single-robot) map until SLAM (and merge, if any) produce data; it will not command Nav2 until `/<robot>/navigate_to_pose` is available.
 
   **Topics published from the central stack (examples):**
 
@@ -517,26 +537,7 @@ After at least one robot is running bringup + SLAM + Nav2 as above (repeat Robot
   - `/map` (multi-robot: from `map_merge`; single-robot: relayed copy of `/<robot>/map` via `single_robot_map_relay.py`)
   - `/explore/frontiers` (from `multi_robot_explorer`)
 
--- **Central Terminal 2 – RViz visualization**
-
-  ```bash
-  cd ~/turtlebot3_ws
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
-
-  # Global merged map (default):
-  ./scripts/start_rviz_central.sh
-
-  # Or explicitly:
-  ./scripts/start_rviz_central.sh --global
-
-  # Per-robot local map view (namespaced topics):
-  ./scripts/start_rviz_central.sh --local <robot>
-  # or shorthand:
-  ./scripts/start_rviz_central.sh -r <robot>
-  ```
-
-  In **global mode**, RViz loads the workspace config `config/rviz/central_global_map.rviz` with the fixed frame set to `map` and the global `/map` topic (from map merge in multi-robot mode, or the single robot's `/map` in single-robot mode). In **local mode**, it uses a per-robot template so you see that robot's namespaced map and navigation topics (for example `/<robot>/map`, `/<robot>/scan_normalized`, `/<robot>/plan`) while still using `map` as the fixed frame.
+  The script’s final `wait` keeps the terminal open until you press Ctrl+C; that is normal. If the robot launch was blocked in **`fleet_mode:=auto`** waiting for global TF, starting this stack allows Nav2 on the robot to finish activating shortly afterward.
 
 ---
 
@@ -966,7 +967,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ### Central parameter files
 
-When running only the central stack (`./scripts/start_central.sh`) and RViz helper (`./scripts/start_rviz_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
+When running the RViz helper (`./scripts/start_rviz_central.sh`) and the central stack (`./scripts/start_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
 
 - `config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, progress watchdogs, optional return-to-origin, and status/control topics).
 - `config/map_merge/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
