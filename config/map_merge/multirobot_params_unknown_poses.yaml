@@ -29,3 +29,5 @@ map_merge:
     origin_margin: 0.10  # or 0.15 if your environment is larger
     # Publish TF: world_frame -> <robot>/map (converts estimated pixel transforms to metric TF)
     publish_tf: true
+    # Until pose estimates exist, publish identity map-><robot>/map so tf2 registers ``map`` (Nav2 global_costmap).
+    publish_provisional_tf: true

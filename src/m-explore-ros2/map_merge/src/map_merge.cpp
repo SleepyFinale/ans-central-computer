@@ -99,6 +99,9 @@ logger_(this->get_logger())
   if (!this->has_parameter("world_frame")) this->declare_parameter<std::string>("world_frame", "world");
   if (!this->has_parameter("origin_margin")) this->declare_parameter<double>("origin_margin", 0.05);
   if (!this->has_parameter("publish_tf")) this->declare_parameter<bool>("publish_tf", true);
+  if (!this->has_parameter("publish_provisional_tf")) {
+    this->declare_parameter<bool>("publish_provisional_tf", true);
+  }
 
   this->get_parameter("merging_rate", merging_rate_);
   this->get_parameter("discovery_rate", discovery_rate_);
@@ -112,6 +115,7 @@ logger_(this->get_logger())
   this->get_parameter("world_frame", world_frame_);
   this->get_parameter("origin_margin", origin_margin_);
   this->get_parameter("publish_tf", publish_tf_);
+  this->get_parameter("publish_provisional_tf", publish_provisional_tf_);
 
 
   /* publishing */
@@ -360,72 +364,95 @@ void MapMerge::publishTransforms(double merged_origin_x,
     }
 
     if (transforms.size() != robot_names.size()) {
-      return;
+      RCLCPP_WARN_THROTTLE(
+        logger_, *this->get_clock(), 10000,
+        "Pipeline transform count (%zu) != robot count (%zu); publishing per-robot TF where possible",
+        transforms.size(), robot_names.size());
     }
 
     const double res = static_cast<double>(resolution);
 
-    for (size_t i = 0; i < transforms.size(); ++i) {
-      const auto& t = transforms[i];
+    for (size_t i = 0; i < robot_names.size(); ++i) {
       if (robot_names[i].empty() || !grids[i]) {
         continue;
       }
 
-      // Skip invalid transforms (NaN/Inf or zero quaternion = no estimate yet).
-      if (!isValidQuaternion(t.rotation)) {
+      bool have_metric_tf = false;
+      if (i < transforms.size() && isValidQuaternion(transforms[i].rotation)) {
+        const auto& t = transforms[i];
+        double robot_origin_x = grids[i]->info.origin.position.x;
+        double robot_origin_y = grids[i]->info.origin.position.y;
+
+        // 2D rotation angle from the quaternion (only z and w are non-zero).
+        double theta = 2.0 * std::atan2(t.rotation.z, t.rotation.w);
+        double cos_t = std::cos(theta);
+        double sin_t = std::sin(theta);
+
+        // Pipeline translations are in pixels; convert to meters.
+        double tx_m = t.translation.x * res;
+        double ty_m = t.translation.y * res;
+
+        // t_world = -R * O_robot + T_pixels*res + O_merged
+        double tf_x = -cos_t * robot_origin_x + sin_t * robot_origin_y
+                       + tx_m + merged_origin_x;
+        double tf_y = -sin_t * robot_origin_x - cos_t * robot_origin_y
+                       + ty_m + merged_origin_y;
+
+        geometry_msgs::msg::TransformStamped tf_msg;
+        tf_msg.header.stamp = now;
+        tf_msg.header.frame_id = world_frame_;
+        tf_msg.child_frame_id = robot_names[i] + "/map";
+        tf_msg.transform.translation.x = tf_x;
+        tf_msg.transform.translation.y = tf_y;
+        tf_msg.transform.translation.z = 0.0;
+        tf_msg.transform.rotation = t.rotation;
+        if (isValidTransform2D(tf_msg)) {
+          tf_msgs.push_back(tf_msg);
+          have_metric_tf = true;
+          RCLCPP_DEBUG(logger_,
+                       "TF %s -> %s/map: (%.3f, %.3f) theta=%.2f° "
+                       "[pixel T=(%.1f,%.1f) grid_origin=(%.2f,%.2f)]",
+                       world_frame_.c_str(), robot_names[i].c_str(),
+                       tf_x, tf_y, theta * 180.0 / M_PI,
+                       t.translation.x, t.translation.y,
+                       robot_origin_x, robot_origin_y);
+        } else {
+          RCLCPP_WARN_THROTTLE(
+            logger_, *this->get_clock(), 10000,
+            "Invalid metric TF for %s/map after conversion; trying provisional if enabled",
+            robot_names[i].c_str());
+        }
+      } else if (i < transforms.size()) {
         RCLCPP_WARN_THROTTLE(
           logger_, *this->get_clock(), 10000,
-          "Skipping invalid estimated transform for %s/map (NaN/Inf or zero quaternion)",
+          "No valid pose estimate yet for %s/map (invalid quaternion); "
+          "using provisional TF if enabled",
           robot_names[i].c_str());
-        continue;
-      }
-
-      double robot_origin_x = grids[i]->info.origin.position.x;
-      double robot_origin_y = grids[i]->info.origin.position.y;
-
-      // 2D rotation angle from the quaternion (only z and w are non-zero).
-      double theta = 2.0 * std::atan2(t.rotation.z, t.rotation.w);
-      double cos_t = std::cos(theta);
-      double sin_t = std::sin(theta);
-
-      // Pipeline translations are in pixels; convert to meters.
-      double tx_m = t.translation.x * res;
-      double ty_m = t.translation.y * res;
-
-      // t_world = -R * O_robot + T_pixels*res + O_merged
-      double tf_x = -cos_t * robot_origin_x + sin_t * robot_origin_y
-                     + tx_m + merged_origin_x;
-      double tf_y = -sin_t * robot_origin_x - cos_t * robot_origin_y
-                     + ty_m + merged_origin_y;
-
-      geometry_msgs::msg::TransformStamped tf_msg;
-      tf_msg.header.stamp = now;
-      tf_msg.header.frame_id = world_frame_;
-      tf_msg.child_frame_id = robot_names[i] + "/map";
-      tf_msg.transform.translation.x = tf_x;
-      tf_msg.transform.translation.y = tf_y;
-      tf_msg.transform.translation.z = 0.0;
-      tf_msg.transform.rotation = t.rotation;
-      if (!isValidTransform2D(tf_msg)) {
-        RCLCPP_WARN_THROTTLE(
+      } else if (publish_provisional_tf_) {
+        RCLCPP_INFO_THROTTLE(
           logger_, *this->get_clock(), 10000,
-          "Skipping invalid TF for %s/map (NaN/Inf translation after conversion)",
-          robot_names[i].c_str());
-        continue;
+          "No pipeline transform for %s yet; publishing provisional identity %s -> %s/map",
+          robot_names[i].c_str(), world_frame_.c_str(), robot_names[i].c_str());
       }
-      tf_msgs.push_back(tf_msg);
 
-      RCLCPP_DEBUG(logger_,
-                   "TF %s -> %s/map: (%.3f, %.3f) theta=%.2f° "
-                   "[pixel T=(%.1f,%.1f) grid_origin=(%.2f,%.2f)]",
-                   world_frame_.c_str(), robot_names[i].c_str(),
-                   tf_x, tf_y, theta * 180.0 / M_PI,
-                   t.translation.x, t.translation.y,
-                   robot_origin_x, robot_origin_y);
+      if (!have_metric_tf && publish_provisional_tf_) {
+        geometry_msgs::msg::TransformStamped prov;
+        prov.header.stamp = now;
+        prov.header.frame_id = world_frame_;
+        prov.child_frame_id = robot_names[i] + "/map";
+        prov.transform.translation.x = 0.0;
+        prov.transform.translation.y = 0.0;
+        prov.transform.translation.z = 0.0;
+        prov.transform.rotation.w = 1.0;
+        prov.transform.rotation.x = 0.0;
+        prov.transform.rotation.y = 0.0;
+        prov.transform.rotation.z = 0.0;
+        tf_msgs.push_back(prov);
+      }
     }
   }
 
-  if (!tf_msgs.empty()) {
+  if (!tf_msgs.empty() && tf_broadcaster_) {
     tf_broadcaster_->sendTransform(tf_msgs);
     RCLCPP_INFO_ONCE(logger_, "Publishing TF for %zu robot(s): %s -> <robot>/map",
                      tf_msgs.size(), world_frame_.c_str());

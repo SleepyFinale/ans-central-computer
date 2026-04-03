@@ -269,6 +269,28 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 **Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC. On the **central PC**, open **RViz first**, then run **`start_central.sh`** (see [Central Terminals](#central-terminals-rviz--start_centralsh)). The robot `navigation2_slam.launch.py` and the central coordinator **depend on each other** when using the default `fleet_mode:=auto`: the launch defers Nav2 until global TF is ready from the central stack, while the explorer on the central PC waits until maps and Nav2’s action servers exist before it can drive exploration (details under [Robot Terminal 2](#robot-terminal-2-slam--nav2) and the central section).
 
+**Recommended order (multi-robot, fewer surprises):**
+
+1. Central: `start_rviz_central.sh`, then `./scripts/start_central.sh` (TF relay + map_merge + explorer).
+2. Each robot: bringup, then `navigation2_slam.launch.py` with **`fleet_mode:=true`** if the central stack is already running (Nav2 starts sooner; still requires global `/tf` and `/map` from the PC).
+3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` transforms while pose estimates are pending (`publish_provisional_tf` in [`config/map_merge/multirobot_params_unknown_poses.yaml`](config/map_merge/multirobot_params_unknown_poses.yaml)) so the `map` frame exists for Nav2 sooner.
+
+**Faster robot Nav2 startup (optional):**
+
+```bash
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+  use_sim_time:=false use_rviz:=false fleet_mode:=true
+```
+
+**More patience with `auto` (optional):**
+
+```bash
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+  use_sim_time:=false use_rviz:=false fleet_mode:=auto auto_fleet_wait_timeout_sec:=600.0
+```
+
+Single-robot + central is unchanged: `start_central.sh` still uses the static `map` → `<robot>/map` bridge and map relay instead of `map_merge`.
+
 ---
 
 ### Robot Terminal 1: Robot Bringup
@@ -1025,7 +1047,9 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
    ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
    ```
 
-2. **No map received:** In multi-robot mode, map merge publishes `/map` only after each robot’s SLAM has built an initial map. Wait 20–30 seconds after starting the robots and `start_central.sh` before expecting a global `/map`.
+   If Nav2 reports **`map` missing from TF**, confirm `map_merge` has `publish_tf` and `publish_provisional_tf` enabled (see **Troubleshooting** item **19**).
+
+2. **No map received:** In multi-robot mode, map merge publishes `/map` only after each robot’s SLAM has built an initial map. Wait 20–30 seconds after starting the robots and `start_central.sh` before expecting a global `/map`. Remember that **`/map` alone does not create the `map` TF frame**; `map_merge` must also publish `map` → `<robot>/map` on `/tf`.
 3. **frame 'base_scan':** Fixed by using `scan_normalized` with correct `frame_id` (e.g. `blinky/base_scan`, `pinky/base_scan`) from the robot-side workspace. Ensure the robot-side SLAM + Nav2 launch is up to date and running.
 
 4. **Robot ignores the global plan / heads straight through obstacles** with the central explorer: Robots must launch SLAM + Nav2 with **`fleet_mode:=true`** (or `use_central_tf_map:=true`; see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)) so Nav2 listens on global `/tf` and uses merged `/map`. Otherwise namespaced Nav2 only sees `/<robot>/tf`, which omits `map` → `<robot>/map` from `map_merge` (or the single-robot static bridge), and goals in frame `map` no longer match the local costmap.
@@ -1179,6 +1203,34 @@ These settings help you focus on larger corrections that are more likely to conf
 
 ---
 
+#### 19. Nav2: `Invalid frame ID "map" ... frame does not exist` (global_costmap / planner_server)
+
+**Symptoms:**
+
+- Repeated logs such as: `Timed out waiting for transform from <robot>/base_footprint to map` with `Invalid frame ID "map" passed to canTransform argument target_frame - frame does not exist`.
+
+**Cause:** Fleet Nav2 uses `global_frame: map` and listens on global `/tf` (see `navigation_launch_multirobot.py` on the robot). The frame **`map` is registered in tf2 only when a transform involving it is received on `/tf` or `/tf_static`**—typically **`map` → `<robot>/map`** from **`map_merge`** on the central PC (or the single-robot static bridge). The merged **`/map` OccupancyGrid** message’s `header.frame_id` is **not** enough: it does not add `map` to the TF buffer.
+
+**Verify (same `ROS_DOMAIN_ID` on central and robot):**
+
+```bash
+cd ~/turtlebot3_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=50   # if that is your fleet domain
+
+ros2 run tf2_ros tf2_echo map pinky/map          # replace pinky
+ros2 run tf2_ros tf2_echo map pinky/base_footprint
+ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+```
+
+**Fixes:**
+
+- Ensure `./scripts/start_central.sh` is running and `map_merge` has **`publish_tf: true`** (default). With **unknown poses**, keep **`publish_provisional_tf: true`** so identity `map` → `<robot>/map` is broadcast until pose estimates are valid ([`config/map_merge/multirobot_params_unknown_poses.yaml`](config/map_merge/multirobot_params_unknown_poses.yaml)).
+- If you start robots before the central stack, use **`fleet_mode:=auto`** and wait, or start central first and use **`fleet_mode:=true`** on robots (see [Multi-Robot SLAM](#multi-robot-slam) startup bullets).
+
+---
+
 ## Diagnostic Commands
 
 Use these commands to diagnose issues and verify system status:
@@ -1208,6 +1260,8 @@ ros2 topic info /map
 ros2 run tf2_ros tf2_echo map pinky/map
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
 ```
+
+For a scripted pass/fail report over all fleet names, run `ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py` (see **Troubleshooting** item **19** if `map` is missing from TF).
 
 **Standalone robot (no central stack, no `fleet_mode`):** Use the robot’s map frame and base frame, for example:
 

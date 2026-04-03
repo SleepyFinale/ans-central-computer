@@ -6,6 +6,16 @@ Run with ROS_DOMAIN_ID=50 (same as the fleet / central setup).
 Expected global chain per robot (after tf_relay + map_merge or single-robot bridge):
   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
 
+Equivalent manual checks (central PC or robot, same ROS_DOMAIN_ID):
+
+  ros2 run tf2_ros tf2_echo map <robot>/map
+  ros2 run tf2_ros tf2_echo map <robot>/base_footprint
+
+If Nav2 logs ``Invalid frame ID "map" ... frame does not exist``, the TF buffer
+has no ``map`` frame yet: merged ``/map`` OccupancyGrid metadata alone does not
+register ``map`` in tf2. You need ``map_merge`` (or the single-robot bridge) to
+publish ``map -> <robot>/map`` on ``/tf``.
+
 Usage: python3 scripts/diagnose_multirobot_tf.py
 """
 
@@ -15,6 +25,7 @@ import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from tf2_ros import Buffer, TransformListener
 
@@ -87,7 +98,11 @@ class TFDiagnostics(Node):
         #   - odom -> base_footprint for each robot (via tf_relay)
         #   - map -> <robot>/map from map_merge
         #   - full chain map -> <robot>/base_footprint
-        now = rclpy.time.Time()
+        #
+        # tf2_ros: lookup_transform(target_frame, source_frame, time, ...)
+        # e.g. pose of base in odom: target=odom, source=base_footprint
+        now = self.get_clock().now()
+        lookup_timeout = Duration(seconds=2.0)
         critical_checks = []
         optional_checks = []
         for r in self.robots:
@@ -103,15 +118,17 @@ class TFDiagnostics(Node):
                 (f'{r}/map', f'{r}/odom',
                  f'SLAM TF: {r}/map->{r}/odom'),
             )
-        for parent, child, desc in critical_checks:
+        for target, source, desc in critical_checks:
             try:
-                self.buffer.lookup_transform(child, parent, now)
+                self.buffer.lookup_transform(
+                    target, source, now, timeout=lookup_timeout)
                 self.log(f'{desc}', ok=True)
             except Exception as e:
                 self.log(f'{desc}: {e}', ok=False)
-        for parent, child, desc in optional_checks:
+        for target, source, desc in optional_checks:
             try:
-                self.buffer.lookup_transform(child, parent, now)
+                self.buffer.lookup_transform(
+                    target, source, now, timeout=lookup_timeout)
                 self.log(f'{desc}', ok=True)
             except Exception:
                 self.log(f'{desc}: not yet (slam_toolbox publishes after map build)', ok=None)
@@ -166,11 +183,14 @@ class TFDiagnostics(Node):
             if any('Robot TF (odom->base_footprint):' in r and '[MISSING]' in r for r in self.results):
                 print('  - odom->base_footprint: base TF on the robot or tf_relay may not be running.')
             if any('World TF (map_merge):' in r and '[MISSING]' in r for r in self.results):
-                print('  - map-><robot>/map: map_merge may not be running, or publish_tf may be false.')
-            if any('SLAM TF:' in r and '[MISSING]' in r for r in self.results):
-                print('  - <robot>/map-><robot>/odom: slam_toolbox on that robot may not be publishing yet.')
+                print('  - map-><robot>/map: map_merge may not be running, publish_tf false, or pose '
+                      'estimates not ready yet (see publish_provisional_tf in map_merge params).')
             if any('Explorer chain:' in r and '[MISSING]' in r for r in self.results):
                 print('  - Explorer chain: ensure map_merge, slam_toolbox, tf_relay, and all robots are running.')
+                print('  - Nav2 "Invalid frame ID map": run tf2_echo map <robot>/base_footprint; '
+                      'need map_merge map-><robot>/map on /tf (not just /map topic).')
+            if any('SLAM TF:' in r and '[MISSING]' in r for r in self.results):
+                print('  - <robot>/map-><robot>/odom: slam_toolbox on that robot may not be publishing yet.')
         else:
             print('All critical checks passed. Multi-robot Nav2 and explorer should work.')
             print('Optional [INFO] items (SLAM TF) appear once slam_toolbox builds maps.')

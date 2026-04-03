@@ -84,6 +84,8 @@ private:
   std::string world_frame_;
   bool have_initial_poses_;
   bool publish_tf_;
+  /** When true (unknown poses), publish identity map-><robot>/map until pose estimates are valid so tf2 has a ``map`` frame for Nav2. */
+  bool publish_provisional_tf_{true};
   /** Origin margin in meters; adds padding so map bounds extend beyond (0,0) to avoid Nav2 "sensor out of map bounds" (e.g. 0.05). */
   double origin_margin_;
 
