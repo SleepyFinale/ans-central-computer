@@ -1211,8 +1211,7 @@ Use `scripts/plot_live_xy_fade.py` on the central PC to visualize position updat
 
 ```bash
 cd ~/turtlebot3_ws
-source /opt/ros/humble/setup.bash
-source install/setup.bash
+source scripts/ros_robot_env.bash
 
 python3 scripts/plot_live_xy_fade.py
 ```
