@@ -89,11 +89,16 @@ multi_robot_explorer:
     potential_scale: 2.0
     gain_scale: 1.0
 
-    # Progress watchdog: if neither Nav2 feedback nor straight-line motion
-    # toward the goal improves by progress_min_delta within this many seconds,
-    # the goal is cancelled and blacklisted.
+    # Progress watchdog: if goal-directed progress does not improve by
+    # progress_min_delta for progress_timeout seconds, cancellation still
+    # requires no recent physical motion (from TF pose deltas) within
+    # motion_progress_window_sec.
     progress_timeout: 5.0
     progress_min_delta: 0.05
+    # Minimum TF pose displacement (m) to count as robot movement.
+    motion_progress_min_delta_m: 0.03
+    # How recent motion must be (s) to suppress stall cancellation.
+    motion_progress_window_sec: 2.0
 
     # Distance (m) at which a frontier near another robot's active goal
     # gets a penalty (discourages sending robots to the same area).

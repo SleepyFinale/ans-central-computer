@@ -101,6 +101,13 @@ class RobotState:
     near_goal_since: Optional[float] = None
     # Time when NavigateToPose action server was first seen available.
     action_server_ready_time: float = 0.0
+    # Last sampled world-frame pose used to detect physical motion.
+    last_motion_sample_pose: Optional[Tuple[float, float]] = None
+    # Time of last_motion_sample_pose.
+    last_motion_sample_time: float = 0.0
+    # Last time meaningful physical movement (>= motion_progress_min_delta_m)
+    # was observed from TF poses.
+    last_motion_time: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +390,8 @@ class MultiRobotExplorer(Node):
         # for this many seconds before a goal is considered stalled.
         self.declare_parameter('progress_timeout', 45.0)
         self.declare_parameter('progress_min_delta', 0.05)
+        self.declare_parameter('motion_progress_min_delta_m', 0.03)
+        self.declare_parameter('motion_progress_window_sec', 2.0)
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('blacklist_radius', 0.5)
         self.declare_parameter('blacklist_clear_radius', 0.5)
@@ -495,6 +504,12 @@ class MultiRobotExplorer(Node):
         self.progress_timeout = self.get_parameter('progress_timeout').value
         self.progress_min_delta = (
             self.get_parameter('progress_min_delta').value)
+        self.motion_progress_min_delta_m = float(
+            self.get_parameter('motion_progress_min_delta_m').value
+        )
+        self.motion_progress_window_sec = float(
+            self.get_parameter('motion_progress_window_sec').value
+        )
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
@@ -808,6 +823,21 @@ class MultiRobotExplorer(Node):
         self._update_robot_positions()
 
         now = self.get_clock().now().nanoseconds / 1e9
+        # Physical motion progress: update when TF pose displacement exceeds
+        # threshold, regardless of whether motion is directly goal-seeking.
+        for rs in self.robots.values():
+            if rs.position is None:
+                continue
+            if rs.last_motion_sample_pose is None:
+                rs.last_motion_sample_pose = rs.position
+                rs.last_motion_sample_time = now
+                continue
+            motion_delta = _dist(rs.position, rs.last_motion_sample_pose)
+            if motion_delta >= self.motion_progress_min_delta_m:
+                rs.last_motion_time = now
+                rs.last_motion_sample_pose = rs.position
+                rs.last_motion_sample_time = now
+
         # Pose-based progress: advance last_progress_time when the robot moves
         # toward the goal in the map frame, even if Nav2 feedback is quiet.
         for rs in self.robots.values():
@@ -866,12 +896,24 @@ class MultiRobotExplorer(Node):
             if not rs.goal_active or rs.last_goal_time <= 0:
                 continue
 
-            last_prog_time = rs.last_progress_time or rs.last_goal_time
-            if (now - last_prog_time) > self.progress_timeout:
+            last_goal_progress_time = rs.last_progress_time or rs.last_goal_time
+            goal_progress_age = now - last_goal_progress_time
+            motion_progress_age = (
+                (now - rs.last_motion_time)
+                if rs.last_motion_time > 0.0 else float('inf')
+            )
+            no_recent_motion = (
+                motion_progress_age > self.motion_progress_window_sec
+            )
+            if goal_progress_age > self.progress_timeout and no_recent_motion:
                 self.get_logger().warn(
                     f'[{rs.name}] Goal appears stalled for '
                     f'{self.progress_timeout:.0f}s without progress '
-                    f'(feedback or motion toward goal); cancelling and blacklisting')
+                    f'(goal_progress_age={goal_progress_age:.1f}s, '
+                    f'motion_progress_age={motion_progress_age:.1f}s, '
+                    f'motion_window={self.motion_progress_window_sec:.1f}s); '
+                    'cancelling and blacklisting'
+                )
                 self._cancel_goal(rs)
                 if rs.goal_position:
                     rs.blacklist.append(rs.goal_position)
@@ -1283,6 +1325,11 @@ class MultiRobotExplorer(Node):
         return best, best_u
 
     def _robot_is_making_progress(self, rs: RobotState, now: float) -> bool:
+        if (
+            rs.last_motion_time > 0.0
+            and (now - rs.last_motion_time) <= self.motion_progress_window_sec
+        ):
+            return True
         if not rs.goal_active or rs.goal_position is None or rs.position is None:
             return False
         if rs.last_pose_when_goal_sent is None:
@@ -1295,6 +1342,11 @@ class MultiRobotExplorer(Node):
         if not self.allow_replan_when_no_progress:
             return False
         if not rs.goal_active:
+            return False
+        if (
+            rs.last_motion_time > 0.0
+            and (now - rs.last_motion_time) <= self.motion_progress_window_sec
+        ):
             return False
         if rs.last_progress_time <= 0:
             return (now - rs.active_goal_sent_time) > self.max_stuck_time_s
@@ -1310,6 +1362,10 @@ class MultiRobotExplorer(Node):
     ) -> None:
         elapsed = now - (rs.active_goal_sent_time or now)
         since_progress = now - (rs.last_progress_time or rs.active_goal_sent_time or now)
+        since_motion = (
+            (now - rs.last_motion_time)
+            if rs.last_motion_time > 0.0 else float('inf')
+        )
         goal_delta = None
         if candidate_goal is not None and rs.goal_position is not None:
             goal_delta = _dist(candidate_goal, rs.goal_position)
@@ -1317,6 +1373,7 @@ class MultiRobotExplorer(Node):
         details = (
             f'[{rs.name}] {prefix}: {reason}; elapsed_since_goal={elapsed:.1f}s; '
             f'since_progress={since_progress:.1f}s; '
+            f'since_motion={since_motion:.1f}s; '
             f'goal_delta_m={(f"{goal_delta:.2f}" if goal_delta is not None else "n/a")}'
         )
         if allow:
@@ -1363,7 +1420,12 @@ class MultiRobotExplorer(Node):
         return True, 'opportunity'
 
     def _robot_recently_showed_progress(self, rs: RobotState, now: float) -> bool:
-        """True if Nav2 feedback recently decreased distance_remaining."""
+        """True if either goal-distance or physical motion updated recently."""
+        if (
+            rs.last_motion_time > 0.0
+            and (now - rs.last_motion_time) <= self.motion_progress_window_sec
+        ):
+            return True
         if rs.last_progress_time <= 0:
             return False
         return (now - rs.last_progress_time) < 4.0
@@ -1814,6 +1876,9 @@ class MultiRobotExplorer(Node):
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = now
+        rs.last_motion_sample_pose = rs.position
+        rs.last_motion_sample_time = now
+        rs.last_motion_time = now
         if rs.position is not None:
             rs.last_dist_to_goal = _dist(rs.position, (goal_x, goal_y))
         else:
@@ -1884,6 +1949,9 @@ class MultiRobotExplorer(Node):
         rs.last_pose_when_goal_sent = rs.position
         rs.last_progress_time = now
         rs.last_progress_distance = None
+        rs.last_motion_sample_pose = rs.position
+        rs.last_motion_sample_time = now
+        rs.last_motion_time = now
         if rs.position is not None:
             rs.last_dist_to_goal = _dist(rs.position, (goal_x, goal_y))
         else:
@@ -1971,6 +2039,7 @@ class MultiRobotExplorer(Node):
     def _goal_result_callback(self, future, rs: RobotState):
         # Fresh pose for tacit near-goal checks on ABORTED/CANCELED.
         self._update_robot_positions()
+        now = self.get_clock().now().nanoseconds / 1e9
         status_text_map = {
             GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
             GoalStatus.STATUS_ACCEPTED: 'ACCEPTED',
@@ -2016,6 +2085,9 @@ class MultiRobotExplorer(Node):
             rs.last_progress_distance = None
             rs.last_progress_time = 0.0
             rs.last_dist_to_goal = None
+            rs.last_motion_time = 0.0
+            rs.last_motion_sample_pose = rs.position
+            rs.last_motion_sample_time = now
             self._arm_post_failure_cooldown(rs)
             return
 
@@ -2142,9 +2214,13 @@ class MultiRobotExplorer(Node):
         rs.last_progress_distance = None
         rs.last_progress_time = 0.0
         rs.last_dist_to_goal = None
+        rs.last_motion_time = 0.0
+        rs.last_motion_sample_pose = rs.position
+        rs.last_motion_sample_time = now
         rs.near_goal_since = None
 
     def _cancel_goal(self, rs: RobotState):
+        now = self.get_clock().now().nanoseconds / 1e9
         if rs.goal_handle is not None:
             try:
                 rs.goal_handle.cancel_goal_async()
@@ -2158,6 +2234,9 @@ class MultiRobotExplorer(Node):
         rs.last_progress_distance = None
         rs.last_progress_time = 0.0
         rs.last_dist_to_goal = None
+        rs.last_motion_time = 0.0
+        rs.last_motion_sample_pose = rs.position
+        rs.last_motion_sample_time = now
         rs.near_goal_since = None
 
     # -----------------------------------------------------------------------
