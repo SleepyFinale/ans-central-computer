@@ -948,6 +948,9 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 **Fix:** The Nav2 params in `turtlebot3_navigation2/param/humble/burger.yaml` are already tuned to reduce this: global costmap uses smaller inflation (0.32 m radius, cost_scaling_factor 5.0) and local costmap inflation is 0.45 m. If it still happens:
 
+- New default behavior tree (`navigate_to_pose_w_replanning_and_recovery_with_lethal_escape.xml`) now retries planning/control after explicit costmap clears and keeps backup/spin/wait recoveries active.
+- During central exploration, `multi_robot_explorer.py` listens to `/<robot>/nav2_lethal_inflation` and temporarily holds the current goal while Nav2 reports lethal space, so aborted goals are not blacklisted just for this transient state.
+- Check lethal-state signal: `ros2 topic echo /<robot>/nav2_lethal_inflation`
 - Wait for recovery (wait → backup → spin) to move the robot into free space; often the next plan then succeeds.
 - Drive the robot slightly away from the wall/corner so its center is in clearly free space.
 - Optionally reduce `inflation_radius` further in the global/local costmap in the same param file, then rebuild and restart Nav2.

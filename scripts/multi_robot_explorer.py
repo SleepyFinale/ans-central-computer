@@ -37,7 +37,7 @@ from std_msgs.msg import Bool, String
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
 from std_msgs.msg import String as StringMsg
-from nav2_msgs.action import NavigateToPose
+from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from visualization_msgs.msg import Marker, MarkerArray
 
 import tf2_ros
@@ -108,6 +108,30 @@ class RobotState:
     # Last time meaningful physical movement (>= motion_progress_min_delta_m)
     # was observed from TF poses.
     last_motion_time: float = 0.0
+    # True while Nav2 costmap marks the robot position as lethal/in-collision.
+    nav2_lethal_active: bool = False
+    # First timestamp when nav2_lethal_active became True.
+    nav2_lethal_since: float = 0.0
+    # Goal to preserve while robot is in lethal space; resent after recovery.
+    held_goal_position: Optional[Tuple[float, float]] = None
+    # Async Nav2 path preflight (compute_path_to_pose before navigate_to_pose).
+    path_precheck_client: Optional[object] = None
+    path_precheck_goal_handle: Optional[object] = None
+    path_precheck_in_progress: bool = False
+    path_precheck_frontier: Optional[Frontier] = None
+    path_precheck_from_retarget: bool = False
+    path_precheck_goal_xy: Optional[Tuple[float, float]] = None
+    path_precheck_started_time: float = 0.0
+    # First time compute_path_to_pose wait_for_server succeeded (Nav2 warm-up).
+    path_precheck_server_seen_time: float = 0.0
+    # Session start pose in world frame (recorded on first TF once maps are ready).
+    start_pose_xy: Optional[Tuple[float, float]] = None
+    # True while a return-home NavigateToPose is active or pending.
+    homing_active: bool = False
+    # True after successful home, skip (already near start), or max failures.
+    return_home_done: bool = False
+    # Count of failed homing attempts (precheck abort, Nav2 failure, stall cancel).
+    return_home_failures: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -430,6 +454,9 @@ class MultiRobotExplorer(Node):
         # Status + control topics (multi-robot aware counterpart of explore/status, explore/resume).
         self.declare_parameter('status_topic', 'explore_multi/status')
         self.declare_parameter('control_topic', 'explore_multi/resume')
+        self.declare_parameter('return_to_start_enable', True)
+        self.declare_parameter('return_to_start_skip_if_within_m', 0.25)
+        self.declare_parameter('return_to_start_max_attempts', 5)
         # Goal selection strategy within each frontier region.
         # - 'centroid': centroid of the frontier; if the robot is already very
         #   close to that centroid, pick a cell farther out but within
@@ -479,9 +506,24 @@ class MultiRobotExplorer(Node):
         # treated as Nav2 warm-up (lifecycle still activating) instead of
         # blacklisting goals.
         self.declare_parameter('goal_reject_warmup_sec', 12.0)
+        # Hold active goals while robot is marked "in lethal space" by Nav2
+        # and suppress watchdog/blacklisting for planner-start-in-lethal cases.
+        self.declare_parameter('lethal_hold_enabled', True)
+        self.declare_parameter(
+            'nav2_lethal_topic_pattern', '/{robot}/nav2_lethal_inflation')
+        self.declare_parameter('skip_blacklist_on_nav2_lethal', True)
+        self.declare_parameter('lethal_hold_max_sec', 30.0)
+        self.declare_parameter('lethal_retry_delay_sec', 0.5)
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
+        # Call /<robot>/compute_path_to_pose before NavigateToPose so goals
+        # Nav2 cannot plan through the global costmap are skipped here.
+        self.declare_parameter('nav2_path_precheck_enable', True)
+        self.declare_parameter('nav2_path_precheck_timeout_sec', 3.0)
+        self.declare_parameter('nav2_path_min_poses', 2)
+        # Must match planner_server.planner_plugins id (e.g. GridBased in burger.yaml).
+        self.declare_parameter('nav2_path_precheck_planner_id', 'GridBased')
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -538,6 +580,15 @@ class MultiRobotExplorer(Node):
         self.robot_base_frame = self.get_parameter('robot_base_frame').value
         self.status_topic = self.get_parameter('status_topic').value
         self.control_topic = self.get_parameter('control_topic').value
+        self.return_to_start_enable = bool(
+            self.get_parameter('return_to_start_enable').value
+        )
+        self.return_to_start_skip_if_within_m = float(
+            self.get_parameter('return_to_start_skip_if_within_m').value
+        )
+        self.return_to_start_max_attempts = max(
+            1, int(self.get_parameter('return_to_start_max_attempts').value)
+        )
         self.goal_point_strategy = (
             self.get_parameter('goal_point_strategy').value or 'centroid'
         )
@@ -610,8 +661,36 @@ class MultiRobotExplorer(Node):
         self.goal_reject_warmup_sec = float(
             self.get_parameter('goal_reject_warmup_sec').value
         )
+        self.lethal_hold_enabled = bool(
+            self.get_parameter('lethal_hold_enabled').value
+        )
+        self.nav2_lethal_topic_pattern = str(
+            self.get_parameter('nav2_lethal_topic_pattern').value
+        )
+        self.skip_blacklist_on_nav2_lethal = bool(
+            self.get_parameter('skip_blacklist_on_nav2_lethal').value
+        )
+        self.lethal_hold_max_sec = float(
+            self.get_parameter('lethal_hold_max_sec').value
+        )
+        self.lethal_retry_delay_sec = float(
+            self.get_parameter('lethal_retry_delay_sec').value
+        )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
+        )
+        self.nav2_path_precheck_enable: bool = bool(
+            self.get_parameter('nav2_path_precheck_enable').value
+        )
+        self.nav2_path_precheck_timeout_sec: float = float(
+            self.get_parameter('nav2_path_precheck_timeout_sec').value
+        )
+        self.nav2_path_min_poses: int = max(
+            1, int(self.get_parameter('nav2_path_min_poses').value)
+        )
+        _pid = self.get_parameter('nav2_path_precheck_planner_id').value
+        self.nav2_path_precheck_planner_id: str = (
+            str(_pid).strip() if _pid is not None else ''
         )
 
         # -- state --
@@ -630,11 +709,16 @@ class MultiRobotExplorer(Node):
         self._map_size_x: float = 0.0
         self._map_size_y: float = 0.0
         self.exploration_complete = False
+        # Set true once past waiting-for-map so start poses can be recorded.
+        self._explorer_planning_ready: bool = False
+        self._return_home_status_published: str = ''
         # Rotate fair frontier assignment so this robot is tried first when idle.
         self._last_goal_finished_robot: Optional[str] = None
         self._last_no_frontier_idle_log_time: float = 0.0
         self._last_no_assignment_log_time: float = 0.0
+        self._return_home_no_pose_logged: set = set()
         self.goal_pubs: Dict[str, object] = {}
+        self.lethal_subs: Dict[str, object] = {}
         self.paused: bool = False
         self.in_global_phase: bool = False
         self._merge_state_last: str = 'NO_OVERLAP'
@@ -715,7 +799,17 @@ class MultiRobotExplorer(Node):
             rs = RobotState(name=name)
             rs.action_client = ActionClient(
                 self, NavigateToPose, f'/{name}/navigate_to_pose')
+            rs.path_precheck_client = ActionClient(
+                self, ComputePathToPose, f'/{name}/compute_path_to_pose')
             self.robots[name] = rs
+            if self.lethal_hold_enabled:
+                topic = self.nav2_lethal_topic_pattern.format(robot=name)
+                self.lethal_subs[name] = self.create_subscription(
+                    Bool,
+                    topic,
+                    lambda msg, rname=name: self._nav2_lethal_callback(msg, rname),
+                    10,
+                )
             if self.use_pose_goal_fallback:
                 self.goal_pubs[name] = self.create_publisher(
                     PoseStamped, f'/{name}/goal_pose', 10)
@@ -733,7 +827,8 @@ class MultiRobotExplorer(Node):
             f'freq={freq:.2f} Hz, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
             f'mode={mode}, retarget_enable={self.retarget_enable}, '
-            f'retarget_opportunity={self.retarget_opportunity_enable}')
+            f'retarget_opportunity={self.retarget_opportunity_enable}, '
+            f'nav2_path_precheck={self.nav2_path_precheck_enable}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -813,6 +908,8 @@ class MultiRobotExplorer(Node):
                 self._logged_waiting_for_map = True
                 self._publish_status('WAITING_FOR_MAP')
             return
+
+        self._explorer_planning_ready = True
 
         if self.paused:
             # Still keep TF and map up to date, but do not assign new goals.
@@ -895,6 +992,19 @@ class MultiRobotExplorer(Node):
         for rs in self.robots.values():
             if not rs.goal_active or rs.last_goal_time <= 0:
                 continue
+            if self.lethal_hold_enabled and rs.nav2_lethal_active:
+                hold_age = now - rs.nav2_lethal_since if rs.nav2_lethal_since > 0.0 else 0.0
+                if self.lethal_hold_max_sec > 0.0 and hold_age > self.lethal_hold_max_sec:
+                    self.get_logger().warn(
+                        f'[{rs.name}] lethal hold timeout after {hold_age:.1f}s; '
+                        'resuming normal watchdog behavior'
+                    )
+                    rs.nav2_lethal_active = False
+                    rs.nav2_lethal_since = 0.0
+                else:
+                    if rs.goal_position is not None and rs.held_goal_position is None:
+                        rs.held_goal_position = rs.goal_position
+                    continue
 
             last_goal_progress_time = rs.last_progress_time or rs.last_goal_time
             goal_progress_age = now - last_goal_progress_time
@@ -915,14 +1025,144 @@ class MultiRobotExplorer(Node):
                     'cancelling and blacklisting'
                 )
                 self._cancel_goal(rs)
-                if rs.goal_position:
+                if rs.homing_active:
+                    self._return_home_note_failure(rs)
+                elif rs.goal_position:
                     rs.blacklist.append(rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
+
+        if self.lethal_hold_enabled:
+            for rs in self.robots.values():
+                if rs.nav2_lethal_active:
+                    continue
+                if rs.held_goal_position is None:
+                    continue
+                if rs.goal_active or rs.goal_pending:
+                    continue
+                if not self._robot_may_assign_now(rs, now):
+                    continue
+                self._resend_held_goal(rs)
+
+        for rs in self.robots.values():
+            if not rs.path_precheck_in_progress:
+                continue
+            if rs.path_precheck_started_time <= 0.0:
+                continue
+            if (
+                now - rs.path_precheck_started_time
+                < self.nav2_path_precheck_timeout_sec
+            ):
+                continue
+            self.get_logger().warn(
+                f'[{rs.name}] Nav2 path precheck timed out after '
+                f'{self.nav2_path_precheck_timeout_sec:.1f}s; skipping goal'
+            )
+            xy = rs.path_precheck_goal_xy
+            self._abort_path_precheck(
+                rs,
+                cancel_action=True,
+                blacklist_xy=xy,
+                cooldown=True,
+            )
 
         if use_global:
             self._global_frontier_step()
         else:
             self._local_frontier_step()
+
+        self._return_home_tick(use_global, now)
+        self._maybe_publish_return_home_status()
+
+    def _reset_return_home_state_when_exploration_resumes(self):
+        self._return_home_status_published = ''
+        self._return_home_no_pose_logged.clear()
+        for rs in self.robots.values():
+            if rs.homing_active and (rs.goal_active or rs.goal_pending):
+                self._cancel_goal(rs)
+            rs.return_home_done = False
+            rs.homing_active = False
+            rs.return_home_failures = 0
+
+    def _return_home_tick(self, use_global: bool, now: float):
+        if not self.return_to_start_enable or not self.exploration_complete:
+            return
+
+        for rs in self.robots.values():
+            if rs.return_home_done:
+                continue
+            if rs.start_pose_xy is None:
+                if rs.name not in self._return_home_no_pose_logged:
+                    self._return_home_no_pose_logged.add(rs.name)
+                    self.get_logger().warn(
+                        f'[{rs.name}] Return home skipped: start pose was never recorded'
+                    )
+                rs.return_home_done = True
+                continue
+            if rs.goal_active or rs.goal_pending or rs.path_precheck_in_progress:
+                continue
+            if not self._robot_may_assign_now(rs, now):
+                continue
+            if rs.return_home_failures >= self.return_to_start_max_attempts:
+                self.get_logger().warn(
+                    f'[{rs.name}] Return home abandoned after '
+                    f'{self.return_to_start_max_attempts} failed attempt(s)'
+                )
+                rs.return_home_done = True
+                continue
+            sx, sy = rs.start_pose_xy
+            if rs.position is not None:
+                if _dist(rs.position, rs.start_pose_xy) <= self.return_to_start_skip_if_within_m:
+                    self.get_logger().info(
+                        f'[{rs.name}] Within {self.return_to_start_skip_if_within_m:.2f}m of '
+                        'start — skipping NavigateToPose for return home'
+                    )
+                    rs.return_home_done = True
+                    continue
+            if use_global:
+                self._current_goal_map = self.latest_global_map
+            else:
+                self._current_goal_map = self.latest_local_maps.get(rs.name)
+            if self._current_goal_map is None:
+                continue
+
+            rs.repeat_goal_count = 0
+            rs.homing_active = True
+            proxy = Frontier(
+                centroid_world=(sx, sy),
+                size=max(1, self.min_frontier_cells_for_goal),
+                size_m=max(self.min_frontier_size, 0.01),
+                cells=max(1, self.min_frontier_cells_for_goal),
+                indices=None,
+            )
+            self.get_logger().info(
+                f'[{rs.name}] Return home: sending goal to start '
+                f'({sx:.2f}, {sy:.2f})'
+            )
+            self._send_goal(rs, proxy)
+            if (
+                not rs.goal_active
+                and not rs.goal_pending
+                and not rs.path_precheck_in_progress
+            ):
+                rs.homing_active = False
+
+    def _maybe_publish_return_home_status(self):
+        if not self.return_to_start_enable or not self.exploration_complete:
+            return
+        if all(rs.return_home_done for rs in self.robots.values()):
+            if self._return_home_status_published != 'HOME_COMPLETE':
+                self._return_home_status_published = 'HOME_COMPLETE'
+                self._publish_status('HOME_COMPLETE')
+            return
+        finishing_explore = any(
+            rs.goal_active and not rs.homing_active and not rs.return_home_done
+            for rs in self.robots.values()
+        )
+        if finishing_explore:
+            return
+        if self._return_home_status_published not in ('HOMING', 'HOME_COMPLETE'):
+            self._return_home_status_published = 'HOMING'
+            self._publish_status('HOMING')
 
     def _global_frontier_step(self):
         m = self.latest_global_map
@@ -964,6 +1204,7 @@ class MultiRobotExplorer(Node):
 
         if self.exploration_complete:
             self.get_logger().info('New frontiers appeared — resuming exploration')
+            self._reset_return_home_state_when_exploration_resumes()
         self.exploration_complete = False
 
         self.get_logger().debug(
@@ -1080,6 +1321,13 @@ class MultiRobotExplorer(Node):
                 fr = frontiers[sub_assignments[name]]
                 self._send_goal(rs, fr)
 
+        if any_frontiers:
+            if self.exploration_complete:
+                self.get_logger().info(
+                    'New frontiers appeared — resuming exploration (local mode)')
+                self._reset_return_home_state_when_exploration_resumes()
+            self.exploration_complete = False
+
         if not any_frontiers:
             if not self.exploration_complete and any_idle:
                 self.get_logger().info(
@@ -1116,6 +1364,11 @@ class MultiRobotExplorer(Node):
                     t.transform.translation.x,
                     t.transform.translation.y,
                 )
+                if self._explorer_planning_ready and rs.start_pose_xy is None:
+                    rs.start_pose_xy = (
+                        t.transform.translation.x,
+                        t.transform.translation.y,
+                    )
             except (tf2_ros.LookupException,
                     tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException):
@@ -1212,9 +1465,89 @@ class MultiRobotExplorer(Node):
             f'reason={",".join(reasons)}'
         )
 
+    def _return_home_note_failure(self, rs: RobotState) -> None:
+        if not rs.homing_active:
+            return
+        rs.homing_active = False
+        rs.return_home_failures += 1
+        self.get_logger().warn(
+            f'[{rs.name}] Return home attempt failed '
+            f'({rs.return_home_failures}/{self.return_to_start_max_attempts})'
+        )
+
+    def _blacklist_or_home_fail(
+        self,
+        rs: RobotState,
+        xy: Optional[Tuple[float, float]],
+    ) -> None:
+        if xy is None:
+            return
+        if rs.homing_active:
+            self._return_home_note_failure(rs)
+            return
+        if not self._should_skip_blacklist_due_to_lethal(rs):
+            rs.blacklist.append(xy)
+        else:
+            rs.held_goal_position = xy
+
     def _arm_post_failure_cooldown(self, rs: RobotState) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
         rs.next_assign_allowed_time = now + max(0.0, self.post_failure_cooldown_sec)
+
+    def _should_skip_blacklist_due_to_lethal(self, rs: RobotState) -> bool:
+        return (
+            self.lethal_hold_enabled
+            and self.skip_blacklist_on_nav2_lethal
+            and rs.nav2_lethal_active
+        )
+
+    def _resend_held_goal(self, rs: RobotState) -> None:
+        goal = rs.held_goal_position
+        if goal is None:
+            return
+        gx, gy = goal
+        self.get_logger().info(
+            f'[{rs.name}] Nav2 lethal cleared; resending held goal ({gx:.2f}, {gy:.2f})'
+        )
+        rs.repeat_goal_count = 0
+        rs.last_goal_world = None
+        proxy_frontier = Frontier(
+            centroid_world=(gx, gy),
+            size=max(1, self.min_frontier_cells_for_goal),
+            size_m=max(self.min_frontier_size, 0.01),
+            cells=max(1, self.min_frontier_cells_for_goal),
+            indices=None,
+        )
+        self._send_goal(rs, proxy_frontier)
+        if rs.goal_active or rs.goal_pending:
+            rs.held_goal_position = None
+
+    def _nav2_lethal_callback(self, msg: Bool, robot_name: str):
+        rs = self.robots.get(robot_name)
+        if rs is None:
+            return
+        lethal_now = bool(msg.data)
+        now = self.get_clock().now().nanoseconds / 1e9
+        if lethal_now == rs.nav2_lethal_active:
+            return
+        rs.nav2_lethal_active = lethal_now
+        if lethal_now:
+            rs.nav2_lethal_since = now
+            if rs.goal_position is not None:
+                rs.held_goal_position = rs.goal_position
+            self.get_logger().warn(
+                f'[{rs.name}] Nav2 reports lethal-space state; holding current goal'
+            )
+            return
+        rs.nav2_lethal_since = 0.0
+        if rs.held_goal_position is not None:
+            rs.next_assign_allowed_time = min(
+                rs.next_assign_allowed_time,
+                now + max(0.0, self.lethal_retry_delay_sec),
+            )
+            self.get_logger().info(
+                f'[{rs.name}] Nav2 lethal-space state cleared'
+            )
 
     def _robot_may_assign_now(self, rs: RobotState, now: float) -> bool:
         return now >= rs.next_assign_allowed_time
@@ -1432,6 +1765,8 @@ class MultiRobotExplorer(Node):
 
     def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
         if not self.retarget_enable:
+            return
+        if rs.homing_active:
             return
         if not rs.goal_active or rs.goal_pending or rs.position is None or rs.goal_position is None:
             return
@@ -1756,6 +2091,14 @@ class MultiRobotExplorer(Node):
         if rs.repeat_goal_count < REPEAT_LIMIT:
             return False
 
+        if rs.homing_active:
+            self.get_logger().warn(
+                f'[{rs.name}] Return-home goal repeated too often; counting failure'
+            )
+            self._return_home_note_failure(rs)
+            rs.repeat_goal_count = 0
+            return True
+
         self.get_logger().warn(
             f'[{rs.name}] Repeatedly selecting nearly-identical goal '
             f'({goal_x:.2f}, {goal_y:.2f}); blacklisting and searching elsewhere'
@@ -1765,91 +2108,180 @@ class MultiRobotExplorer(Node):
         rs.repeat_goal_count = 0
         return True
 
-    def _send_goal(
+    def _abort_path_precheck(
+        self,
+        rs: RobotState,
+        *,
+        cancel_action: bool,
+        blacklist_xy: Optional[Tuple[float, float]],
+        cooldown: bool,
+    ) -> None:
+        if cancel_action and rs.path_precheck_goal_handle is not None:
+            try:
+                rs.path_precheck_goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+        rs.path_precheck_goal_handle = None
+        rs.path_precheck_in_progress = False
+        rs.path_precheck_frontier = None
+        rs.path_precheck_from_retarget = False
+        rs.path_precheck_goal_xy = None
+        rs.path_precheck_started_time = 0.0
+        rs.goal_pending = False
+        if blacklist_xy is not None:
+            self._blacklist_or_home_fail(rs, blacklist_xy)
+        if cooldown:
+            self._arm_post_failure_cooldown(rs)
+
+    def _path_precheck_transient_fail(self, rs: RobotState, detail: str) -> None:
+        """Planner compute_path_to_pose rejected the goal or send failed.
+
+        Nav2's planner server rejects goals while server_active_ is false
+        (lifecycle still activating), even if wait_for_server() is true.
+        Do not blacklist — retry shortly like NavigateToPose warm-up.
+        """
+        self._abort_path_precheck(
+            rs,
+            cancel_action=False,
+            blacklist_xy=None,
+            cooldown=False,
+        )
+        now = self.get_clock().now().nanoseconds / 1e9
+        retry_s = 1.0
+        if (
+            rs.path_precheck_server_seen_time > 0.0
+            and (now - rs.path_precheck_server_seen_time)
+            < self.goal_reject_warmup_sec
+        ):
+            retry_s = 0.5
+        rs.next_assign_allowed_time = max(
+            rs.next_assign_allowed_time, now + retry_s)
+        self.get_logger().info(
+            f'[{rs.name}] Path precheck {detail}; '
+            f'retry in {retry_s:.1f}s (planner may still be activating)'
+        )
+
+    def _begin_nav2_path_precheck(
         self,
         rs: RobotState,
         frontier: Frontier,
-        from_retarget: bool = False,
-    ):
-        if rs.action_client is None:
-            self.get_logger().warn(f'[{rs.name}] No action client available')
-            rs.goal_active = False
+        goal_x: float,
+        goal_y: float,
+        from_retarget: bool,
+    ) -> None:
+        rs.goal_pending = True
+        rs.goal_active = False
+        rs.path_precheck_in_progress = True
+        rs.path_precheck_frontier = frontier
+        rs.path_precheck_from_retarget = from_retarget
+        rs.path_precheck_goal_xy = (goal_x, goal_y)
+        rs.path_precheck_started_time = (
+            self.get_clock().now().nanoseconds / 1e9
+        )
+
+        cp_goal = ComputePathToPose.Goal()
+        cp_goal.use_start = False
+        cp_goal.planner_id = self.nav2_path_precheck_planner_id
+        cp_goal.goal.header.frame_id = self.world_frame
+        cp_goal.goal.header.stamp = self.get_clock().now().to_msg()
+        cp_goal.goal.pose.position.x = goal_x
+        cp_goal.goal.pose.position.y = goal_y
+        cp_goal.goal.pose.position.z = 0.0
+        cp_goal.goal.pose.orientation.x = 0.0
+        cp_goal.goal.pose.orientation.y = 0.0
+        cp_goal.goal.pose.orientation.z = 0.0
+        cp_goal.goal.pose.orientation.w = 1.0
+
+        send_future = rs.path_precheck_client.send_goal_async(cp_goal)
+        send_future.add_done_callback(
+            lambda f, r=rs: self._path_precheck_goal_response_callback(f, r))
+        self.get_logger().info(
+            f'[{rs.name}] Nav2 path precheck → ({goal_x:.2f}, {goal_y:.2f})'
+        )
+
+    def _path_precheck_goal_response_callback(self, future, rs: RobotState):
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Path precheck send failed: {exc}')
+            self._path_precheck_transient_fail(rs, f'send failed ({exc})')
             return
 
-        if not rs.action_client.wait_for_server(timeout_sec=0.2):
-            if not rs.server_unavailable_logged:
-                self.get_logger().warn(
-                    f'[{rs.name}] NavigateToPose action server not available '
-                    f'on /{rs.name}/navigate_to_pose')
-                rs.server_unavailable_logged = True
-            if self.use_pose_goal_fallback:
-                self._publish_pose_fallback_goal(rs, frontier, from_retarget)
-                return
-            rs.goal_active = False
-            rs.goal_pending = False
-            return
-        if rs.server_unavailable_logged:
-            self.get_logger().info(
-                f'[{rs.name}] NavigateToPose action server is now available')
-            rs.server_unavailable_logged = False
-            rs.action_server_ready_time = (
-                self.get_clock().now().nanoseconds / 1e9
-            )
-        elif rs.action_server_ready_time <= 0.0:
-            # Server was already up when first checked.
-            rs.action_server_ready_time = (
-                self.get_clock().now().nanoseconds / 1e9
-            )
-
-        goal_x, goal_y = self._select_goal_point(rs, frontier)
-        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+        if not goal_handle.accepted:
+            self._path_precheck_transient_fail(
+                rs, 'goal rejected (planner server inactive during lifecycle)')
             return
 
-        rs.last_goal_world = (goal_x, goal_y)
-        rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
+        rs.path_precheck_goal_handle = goal_handle
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda f, r=rs: self._path_precheck_result_callback(f, r))
+
+    def _path_precheck_result_callback(self, future, rs: RobotState):
+        rs.path_precheck_goal_handle = None
+        rs.path_precheck_in_progress = False
+        goal_xy = rs.path_precheck_goal_xy
+        frontier = rs.path_precheck_frontier
+        from_retarget = rs.path_precheck_from_retarget
+        rs.path_precheck_frontier = None
+        rs.path_precheck_goal_xy = None
+        rs.path_precheck_from_retarget = False
+        rs.path_precheck_started_time = 0.0
+        rs.goal_pending = False
 
         try:
-            m = self._current_goal_map
-            if m is not None:
-                map_meta = {
-                    'width': int(m.info.width),
-                    'height': int(m.info.height),
-                    'resolution': float(m.info.resolution),
-                    'origin': {
-                        'x': float(m.info.origin.position.x),
-                        'y': float(m.info.origin.position.y),
-                    },
-                }
-            else:
-                map_meta = {}
-            dist_to_goal = None
-            if rs.position is not None:
-                dist_to_goal = float(
-                    math.hypot(goal_x - rs.position[0], goal_y - rs.position[1])
-                )
-            self.event_logger.log_goal_selected(
-                robot=rs.name,
-                goal_x=float(goal_x),
-                goal_y=float(goal_y),
-                frame=self.world_frame,
-                map_topic=self.map_topic,
-                map_meta=map_meta,
-                merge_state=self._merge_state_last,
-                score={
-                    'frontier_size_cells': int(frontier.size),
-                    'frontier_size_m': float(frontier.size_m),
-                    'distance_to_goal_m': dist_to_goal,
-                    'utility': float(self._frontier_utility(rs, frontier)),
-                },
-                reason='frontier_assignment',
-                robot_pose_used=(
-                    {'x': float(rs.position[0]), 'y': float(rs.position[1])}
-                    if rs.position is not None else None
-                ),
-                t_ros_ns=int(self.get_clock().now().nanoseconds),
+            wrapped = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Path precheck result error: {exc}')
+            self._blacklist_or_home_fail(rs, goal_xy)
+            self._arm_post_failure_cooldown(rs)
+            return
+
+        status = wrapped.status
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            labels = {
+                GoalStatus.STATUS_ABORTED: 'ABORTED',
+                GoalStatus.STATUS_CANCELED: 'CANCELED',
+                GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
+            }
+            st = labels.get(int(status), f'status_{int(status)}')
+            self.get_logger().info(
+                f'[{rs.name}] Path precheck failed ({st}); skipping NavigateToPose'
             )
-        except Exception:
-            pass
+            self._blacklist_or_home_fail(rs, goal_xy)
+            self._arm_post_failure_cooldown(rs)
+            return
+
+        result = wrapped.result
+        path = result.path if result is not None else None
+        nposes = len(path.poses) if path is not None else 0
+        if nposes < self.nav2_path_min_poses:
+            self.get_logger().info(
+                f'[{rs.name}] Path precheck: plan too short '
+                f'({nposes} < {self.nav2_path_min_poses}); skipping goal'
+            )
+            self._blacklist_or_home_fail(rs, goal_xy)
+            self._arm_post_failure_cooldown(rs)
+            return
+
+        if frontier is None or goal_xy is None:
+            return
+        goal_x, goal_y = goal_xy
+        self._dispatch_navigate_to_pose(
+            rs, frontier, goal_x, goal_y, from_retarget)
+
+    def _dispatch_navigate_to_pose(
+        self,
+        rs: RobotState,
+        frontier: Frontier,
+        goal_x: float,
+        goal_y: float,
+        from_retarget: bool,
+    ) -> None:
+        rs.last_goal_world = (goal_x, goal_y)
+        rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = PoseStamped()
@@ -1858,8 +2290,6 @@ class MultiRobotExplorer(Node):
         goal_msg.pose.pose.position.x = goal_x
         goal_msg.pose.pose.position.y = goal_y
         goal_msg.pose.pose.position.z = 0.0
-        # Point-goal policy: keep goal yaw neutral so Nav2 can finish on
-        # position without forcing a specific final heading.
         goal_msg.pose.pose.orientation.x = 0.0
         goal_msg.pose.pose.orientation.y = 0.0
         goal_msg.pose.pose.orientation.z = 0.0
@@ -1908,6 +2338,113 @@ class MultiRobotExplorer(Node):
         self.get_logger().info(
             f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
             f'— frontier size {frontier.size_m:.2f}m ({frontier.size} cells)')
+
+    def _send_goal(
+        self,
+        rs: RobotState,
+        frontier: Frontier,
+        from_retarget: bool = False,
+    ):
+        if rs.action_client is None:
+            self.get_logger().warn(f'[{rs.name}] No action client available')
+            rs.goal_active = False
+            if rs.homing_active:
+                self._return_home_note_failure(rs)
+            return
+
+        if not rs.action_client.wait_for_server(timeout_sec=0.2):
+            if not rs.server_unavailable_logged:
+                self.get_logger().warn(
+                    f'[{rs.name}] NavigateToPose action server not available '
+                    f'on /{rs.name}/navigate_to_pose')
+                rs.server_unavailable_logged = True
+            if self.use_pose_goal_fallback:
+                self._publish_pose_fallback_goal(rs, frontier, from_retarget)
+                return
+            rs.goal_active = False
+            rs.goal_pending = False
+            if rs.homing_active:
+                self._return_home_note_failure(rs)
+            return
+        if rs.server_unavailable_logged:
+            self.get_logger().info(
+                f'[{rs.name}] NavigateToPose action server is now available')
+            rs.server_unavailable_logged = False
+            rs.action_server_ready_time = (
+                self.get_clock().now().nanoseconds / 1e9
+            )
+        elif rs.action_server_ready_time <= 0.0:
+            # Server was already up when first checked.
+            rs.action_server_ready_time = (
+                self.get_clock().now().nanoseconds / 1e9
+            )
+
+        goal_x, goal_y = self._select_goal_point(rs, frontier)
+        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+            return
+
+        try:
+            m = self._current_goal_map
+            if m is not None:
+                map_meta = {
+                    'width': int(m.info.width),
+                    'height': int(m.info.height),
+                    'resolution': float(m.info.resolution),
+                    'origin': {
+                        'x': float(m.info.origin.position.x),
+                        'y': float(m.info.origin.position.y),
+                    },
+                }
+            else:
+                map_meta = {}
+            dist_to_goal = None
+            if rs.position is not None:
+                dist_to_goal = float(
+                    math.hypot(goal_x - rs.position[0], goal_y - rs.position[1])
+                )
+            self.event_logger.log_goal_selected(
+                robot=rs.name,
+                goal_x=float(goal_x),
+                goal_y=float(goal_y),
+                frame=self.world_frame,
+                map_topic=self.map_topic,
+                map_meta=map_meta,
+                merge_state=self._merge_state_last,
+                score={
+                    'frontier_size_cells': int(frontier.size),
+                    'frontier_size_m': float(frontier.size_m),
+                    'distance_to_goal_m': dist_to_goal,
+                    'utility': float(self._frontier_utility(rs, frontier)),
+                },
+                reason='frontier_assignment',
+                robot_pose_used=(
+                    {'x': float(rs.position[0]), 'y': float(rs.position[1])}
+                    if rs.position is not None else None
+                ),
+                t_ros_ns=int(self.get_clock().now().nanoseconds),
+            )
+        except Exception:
+            pass
+
+        if (
+            self.nav2_path_precheck_enable
+            and rs.path_precheck_client is not None
+        ):
+            if rs.path_precheck_in_progress:
+                return
+            if rs.path_precheck_client.wait_for_server(timeout_sec=0.2):
+                now_ts = self.get_clock().now().nanoseconds / 1e9
+                if rs.path_precheck_server_seen_time <= 0.0:
+                    rs.path_precheck_server_seen_time = now_ts
+                self._begin_nav2_path_precheck(
+                    rs, frontier, goal_x, goal_y, from_retarget)
+                return
+            self.get_logger().debug(
+                f'[{rs.name}] compute_path_to_pose unavailable; '
+                'NavigateToPose without precheck')
+
+        self._dispatch_navigate_to_pose(
+            rs, frontier, goal_x, goal_y, from_retarget)
 
     def _publish_pose_fallback_goal(
         self,
@@ -1976,8 +2513,12 @@ class MultiRobotExplorer(Node):
             rs.goal_pending = False
             rs.goal_status = 'failed'
             rs.goal_handle = None
-            if rs.goal_position is not None:
+            if rs.homing_active:
+                self._return_home_note_failure(rs)
+            elif rs.goal_position is not None and not self._should_skip_blacklist_due_to_lethal(rs):
                 rs.blacklist.append(rs.goal_position)
+            elif rs.goal_position is not None:
+                rs.held_goal_position = rs.goal_position
             self._arm_post_failure_cooldown(rs)
             return
 
@@ -2000,7 +2541,12 @@ class MultiRobotExplorer(Node):
             rs.goal_active = False
             rs.goal_status = 'failed'
             if rs.goal_position is not None and not in_warmup:
-                rs.blacklist.append(rs.goal_position)
+                if rs.homing_active:
+                    self._return_home_note_failure(rs)
+                elif not self._should_skip_blacklist_due_to_lethal(rs):
+                    rs.blacklist.append(rs.goal_position)
+                else:
+                    rs.held_goal_position = rs.goal_position
             if in_warmup:
                 # Retry quickly while Nav2 finishes lifecycle activation.
                 rs.next_assign_allowed_time = now + 1.0
@@ -2039,6 +2585,7 @@ class MultiRobotExplorer(Node):
     def _goal_result_callback(self, future, rs: RobotState):
         # Fresh pose for tacit near-goal checks on ABORTED/CANCELED.
         self._update_robot_positions()
+        was_homing = rs.homing_active
         now = self.get_clock().now().nanoseconds / 1e9
         status_text_map = {
             GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
@@ -2075,8 +2622,12 @@ class MultiRobotExplorer(Node):
             except Exception:
                 pass
             rs.goals_failed += 1
-            if rs.goal_position:
+            if was_homing:
+                self._return_home_note_failure(rs)
+            elif rs.goal_position and not self._should_skip_blacklist_due_to_lethal(rs):
                 rs.blacklist.append(rs.goal_position)
+            elif rs.goal_position:
+                rs.held_goal_position = rs.goal_position
             rs.goal_active = False
             rs.goal_pending = False
             rs.goal_status = 'failed'
@@ -2094,55 +2645,74 @@ class MultiRobotExplorer(Node):
         status = result.status
 
         if status == GoalStatus.STATUS_SUCCEEDED:
-            # Only apply the "suspicious success" heuristic once the map has
-            # grown beyond a minimum physical size. On tiny initial maps,
-            # SLAM + Nav2 can legitimately succeed while still reporting a
-            # non-trivial distance_remaining because the frontier centroid
-            # lies just outside the currently known free space.
-            small_map = (
-                self._map_size_x < self.strict_success_min_map_size
-                and self._map_size_y < self.strict_success_min_map_size
-            )
-            suspicious = (
-                rs.last_distance_remaining is not None
-                and rs.last_distance_remaining > self.suspicious_success_distance
-            )
-
-            if suspicious and not small_map:
-                rs.goals_failed += 1
-                rs.goal_status = 'failed'
-                self.get_logger().warn(
-                    f'[{rs.name}] Goal reported success but distance_remaining='
-                    f'{rs.last_distance_remaining:.2f}m > '
-                    f'{self.suspicious_success_distance:.2f}m — treating as '
-                    f'failure and blacklisting')
-                if rs.goal_position:
-                    rs.blacklist.append(rs.goal_position)
-                self._arm_post_failure_cooldown(rs)
-            else:
-                rs.goals_reached += 1
-                rs.goal_status = 'succeeded'
-                if suspicious and small_map:
-                    self.get_logger().info(
-                        f'[{rs.name}] Goal reported success with '
-                        f'distance_remaining={rs.last_distance_remaining:.2f}m '
-                        f'on a small map (~{self._map_size_x:.1f}x'
-                        f'{self._map_size_y:.1f}m); accepting as success to '
-                        f'grow the initial map')
-                else:
-                    self.get_logger().info(
-                        f'[{rs.name}] Goal reached '
-                        f'(total: {rs.goals_reached})')
-                self._last_goal_finished_robot = rs.name
-        elif status == GoalStatus.STATUS_ABORTED:
-            tacit_ok, tacit_why = self._nav2_abort_tacit_success(rs)
-            if tacit_ok:
+            if was_homing:
+                rs.homing_active = False
+                rs.return_home_done = True
                 rs.goals_reached += 1
                 rs.goal_status = 'succeeded'
                 self.get_logger().info(
-                    f'[{rs.name}] Goal reached (Nav2 ABORTED; tacit success '
-                    f'{tacit_why}; total: {rs.goals_reached})'
+                    f'[{rs.name}] Return home succeeded (NavigateToPose)'
                 )
+                self._last_goal_finished_robot = rs.name
+            else:
+                # Only apply the "suspicious success" heuristic once the map has
+                # grown beyond a minimum physical size. On tiny initial maps,
+                # SLAM + Nav2 can legitimately succeed while still reporting a
+                # non-trivial distance_remaining because the frontier centroid
+                # lies just outside the currently known free space.
+                small_map = (
+                    self._map_size_x < self.strict_success_min_map_size
+                    and self._map_size_y < self.strict_success_min_map_size
+                )
+                suspicious = (
+                    rs.last_distance_remaining is not None
+                    and rs.last_distance_remaining > self.suspicious_success_distance
+                )
+
+                if suspicious and not small_map:
+                    rs.goals_failed += 1
+                    rs.goal_status = 'failed'
+                    self.get_logger().warn(
+                        f'[{rs.name}] Goal reported success but distance_remaining='
+                        f'{rs.last_distance_remaining:.2f}m > '
+                        f'{self.suspicious_success_distance:.2f}m — treating as '
+                        f'failure and blacklisting')
+                    if rs.goal_position:
+                        rs.blacklist.append(rs.goal_position)
+                    self._arm_post_failure_cooldown(rs)
+                else:
+                    rs.goals_reached += 1
+                    rs.goal_status = 'succeeded'
+                    if suspicious and small_map:
+                        self.get_logger().info(
+                            f'[{rs.name}] Goal reported success with '
+                            f'distance_remaining={rs.last_distance_remaining:.2f}m '
+                            f'on a small map (~{self._map_size_x:.1f}x'
+                            f'{self._map_size_y:.1f}m); accepting as success to '
+                            f'grow the initial map')
+                    else:
+                        self.get_logger().info(
+                            f'[{rs.name}] Goal reached '
+                            f'(total: {rs.goals_reached})')
+                    self._last_goal_finished_robot = rs.name
+        elif status == GoalStatus.STATUS_ABORTED:
+            tacit_ok, tacit_why = self._nav2_abort_tacit_success(rs)
+            if tacit_ok:
+                if was_homing:
+                    rs.homing_active = False
+                    rs.return_home_done = True
+                rs.goals_reached += 1
+                rs.goal_status = 'succeeded'
+                if was_homing:
+                    self.get_logger().info(
+                        f'[{rs.name}] Return home succeeded (Nav2 tacit: {tacit_why}; '
+                        f'total: {rs.goals_reached})'
+                    )
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal reached (Nav2 ABORTED; tacit success '
+                        f'{tacit_why}; total: {rs.goals_reached})'
+                    )
                 self._last_goal_finished_robot = rs.name
             else:
                 rs.goals_failed += 1
@@ -2152,37 +2722,59 @@ class MultiRobotExplorer(Node):
                     if rs.position is not None and rs.goal_position is not None
                     else None
                 )
-                self.get_logger().warn(
-                    f'[{rs.name}] Goal aborted — blacklisting '
-                    f'(pose_dist_m={pd}, distance_remaining={rs.last_distance_remaining}; '
-                    f'tacit: pose≤{self.tacit_goal_success_radius_m:.2f}m or '
-                    f'remain≤{self.tacit_abort_max_distance_remaining_m:.2f}m)'
-                )
-                if rs.goal_position:
-                    rs.blacklist.append(rs.goal_position)
+                if self._should_skip_blacklist_due_to_lethal(rs):
+                    self.get_logger().warn(
+                        f'[{rs.name}] Goal aborted while Nav2 lethal hold active; '
+                        'keeping goal and skipping blacklist'
+                    )
+                    if rs.goal_position:
+                        rs.held_goal_position = rs.goal_position
+                else:
+                    self.get_logger().warn(
+                        f'[{rs.name}] Goal aborted — blacklisting '
+                        f'(pose_dist_m={pd}, distance_remaining={rs.last_distance_remaining}; '
+                        f'tacit: pose≤{self.tacit_goal_success_radius_m:.2f}m or '
+                        f'remain≤{self.tacit_abort_max_distance_remaining_m:.2f}m)'
+                    )
+                    if rs.goal_position:
+                        self._blacklist_or_home_fail(rs, rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
         elif status == GoalStatus.STATUS_CANCELED:
             if rs.tacit_success_pending_cancel:
                 rs.tacit_success_pending_cancel = False
                 rs.ignore_cooldown_on_next_cancel = False
+                if was_homing:
+                    rs.homing_active = False
+                    rs.return_home_done = True
                 rs.goals_reached += 1
                 rs.goal_status = 'succeeded'
-                self.get_logger().info(
-                    f'[{rs.name}] Goal reached (tacit cancel near pose; '
-                    f'total: {rs.goals_reached})'
-                )
+                if was_homing:
+                    self.get_logger().info(
+                        f'[{rs.name}] Return home succeeded (tacit cancel; '
+                        f'total: {rs.goals_reached})'
+                    )
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal reached (tacit cancel near pose; '
+                        f'total: {rs.goals_reached})'
+                    )
                 self._last_goal_finished_robot = rs.name
             else:
                 rs.goal_status = 'canceled'
                 self.get_logger().info(f'[{rs.name}] Goal cancelled')
                 if rs.ignore_cooldown_on_next_cancel:
                     rs.ignore_cooldown_on_next_cancel = False
+                elif was_homing:
+                    self._return_home_note_failure(rs)
+                    self._arm_post_failure_cooldown(rs)
                 else:
                     self._arm_post_failure_cooldown(rs)
         else:
             rs.goal_status = 'failed'
             self.get_logger().info(
                 f'[{rs.name}] Goal finished with status {status}')
+            if was_homing:
+                self._return_home_note_failure(rs)
             self._arm_post_failure_cooldown(rs)
 
         try:
@@ -2221,6 +2813,13 @@ class MultiRobotExplorer(Node):
 
     def _cancel_goal(self, rs: RobotState):
         now = self.get_clock().now().nanoseconds / 1e9
+        if rs.path_precheck_in_progress:
+            self._abort_path_precheck(
+                rs,
+                cancel_action=True,
+                blacklist_xy=None,
+                cooldown=False,
+            )
         if rs.goal_handle is not None:
             try:
                 rs.goal_handle.cancel_goal_async()

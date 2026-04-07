@@ -39,12 +39,32 @@ multi_robot_explorer:
     # 1.0 Hz reduces rapid goal preemption with Nav2 after failures.
     explore_frequency: 1.0
 
+    # Call /<robot>/compute_path_to_pose (same Nav2 planner + global costmap as
+    # navigation) before each NavigateToPose. Failed or empty plans skip the
+    # goal so the explorer picks another frontier.
+    nav2_path_precheck_enable: true
+    nav2_path_precheck_timeout_sec: 3.0
+    nav2_path_min_poses: 2
+    # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
+    nav2_path_precheck_planner_id: "GridBased"
+
     # After abort, reject, watchdog cancel, or other failure paths, wait this
     # many seconds before assigning a new frontier (per robot).
     post_failure_cooldown_sec: 5.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
     goal_reject_warmup_sec: 12.0
+    # Robot-side helper topic (from turtlebot3_navigation2/nav2_lethal_watch.py):
+    # when true, the robot is currently in a lethal Nav2 costmap cell.
+    nav2_lethal_topic_pattern: "/{robot}/nav2_lethal_inflation"
+    # While lethal is active, hold the current goal, skip watchdog cancel-driven
+    # blacklisting, and resend the held goal once lethal clears.
+    lethal_hold_enabled: true
+    skip_blacklist_on_nav2_lethal: true
+    # Safety valve so a stale lethal signal cannot suppress watchdog forever.
+    lethal_hold_max_sec: 30.0
+    # Delay before resending held goal after lethal clears.
+    lethal_retry_delay_sec: 0.5
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
     # that aren't worth navigating to.
@@ -194,6 +214,12 @@ multi_robot_explorer:
     use_pose_goal_fallback: false
 
     robot_base_frame: base_footprint
+
+    # After exploration_complete (no frontiers), send each idle robot to its
+    # recorded start pose in map frame (first TF after maps are available).
+    return_to_start_enable: true
+    return_to_start_skip_if_within_m: 0.25
+    return_to_start_max_attempts: 5
 
     # Multi-robot status publishing and pause/resume control, analogous to
     # explore/status and explore/resume in m-explore-ros2.
