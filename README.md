@@ -1203,6 +1203,45 @@ These settings help you focus on larger corrections that are more likely to conf
 
 ---
 
+#### Live XY trail from `/blinky/odometry/fix`
+
+Use `scripts/plot_live_xy_fade.py` on the central PC to visualize position updates as a moving 2D trail. The newest point is highlighted, and older points fade by colormap age so direction of motion is easy to see.
+
+**Usage (on central PC):**
+
+```bash
+cd ~/turtlebot3_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+python3 scripts/plot_live_xy_fade.py
+```
+
+**Optional arguments:**
+
+```bash
+python3 scripts/plot_live_xy_fade.py \
+  --topic /blinky/odometry/gps \
+  --history 1000 \
+  --rate 15 \
+  --cmap viridis
+```
+
+- `--topic`: ROS 2 odometry topic to subscribe to.
+- `--history`: number of recent points kept in the trail.
+- `--rate`: plot refresh frequency in Hz.
+- `--cmap`: matplotlib colormap for age coloring.
+
+If the window stays empty, verify the topic is active:
+
+```bash
+ros2 topic echo /blinky/odometry/fix --once
+```
+
+Stop with Ctrl+C to close the node and plot cleanly.
+
+---
+
 #### 19. Nav2: `Invalid frame ID "map" ... frame does not exist` (global_costmap / planner_server)
 
 **Symptoms:**
