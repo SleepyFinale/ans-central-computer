@@ -109,10 +109,10 @@ multi_robot_explorer:
     potential_scale: 2.0
     gain_scale: 1.0
 
-    # Progress watchdog: if goal-directed progress does not improve by
-    # progress_min_delta for progress_timeout seconds, cancellation still
-    # requires no recent physical motion (from TF pose deltas) within
-    # motion_progress_window_sec.
+    # Stall watchdog: cancellation is based on physical TF pose stagnation.
+    # If a robot has an active goal and is not near goal, it is canceled only
+    # after progress_timeout seconds without meaningful physical movement.
+    # This avoids false stalls while taking non-linear detours around obstacles.
     progress_timeout: 5.0
     progress_min_delta: 0.05
     # Minimum TF pose displacement (m) to count as robot movement.
@@ -188,7 +188,7 @@ multi_robot_explorer:
     # While the robot is advancing on the current goal, preempt for a new goal
     # only if frontier utility improves by at least this much (explore more
     # unknown area). Does not blacklist the old goal.
-    retarget_opportunity_enable: false
+    retarget_opportunity_enable: true
     # Raised above node default (1.2) to reduce opportunistic Nav2 preemption.
     retarget_opportunity_min_utility_gain: 1.8
     # Retargets may only pick goal poses within this distance (m) of the first

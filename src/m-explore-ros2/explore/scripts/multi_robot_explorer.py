@@ -76,6 +76,10 @@ class RobotState:
     last_progress_distance: Optional[float] = None
     last_progress_time: float = 0.0
     active_goal_sent_time: float = 0.0
+    # Monotonic per-robot sequence for NavigateToPose goals sent by explorer.
+    goal_seq_counter: int = 0
+    # Sequence id for the currently active/pending goal callbacks.
+    active_goal_seq: int = 0
     last_pose_when_goal_sent: Optional[Tuple[float, float]] = None
     # Straight-line distance robot→goal; used to detect motion toward goal when
     # Nav2 feedback is sparse so the stall watchdog does not cancel healthy drives.
@@ -999,7 +1003,8 @@ class MultiRobotExplorer(Node):
                 else:
                     rs.near_goal_since = None
 
-        # Stall watchdog: cancel only if neither feedback nor pose shows progress.
+        # Stall watchdog: cancel only when movement is expected but TF pose has
+        # remained effectively stagnant for progress_timeout seconds.
         for rs in self.robots.values():
             if not rs.goal_active or rs.last_goal_time <= 0:
                 continue
@@ -1017,22 +1022,24 @@ class MultiRobotExplorer(Node):
                         rs.held_goal_position = rs.goal_position
                     continue
 
-            last_goal_progress_time = rs.last_progress_time or rs.last_goal_time
-            goal_progress_age = now - last_goal_progress_time
-            motion_progress_age = (
+            if rs.goal_pending or rs.goal_position is None or rs.position is None:
+                continue
+
+            dist_to_goal = _dist(rs.position, rs.goal_position)
+            if dist_to_goal <= self.tacit_goal_success_radius_m:
+                # Close enough to goal: let tacit success / Nav2 result handling
+                # decide completion instead of watchdog cancellation.
+                continue
+
+            pose_stagnation_age = (
                 (now - rs.last_motion_time)
                 if rs.last_motion_time > 0.0 else float('inf')
             )
-            no_recent_motion = (
-                motion_progress_age > self.motion_progress_window_sec
-            )
-            if goal_progress_age > self.progress_timeout and no_recent_motion:
+            if pose_stagnation_age > self.progress_timeout:
                 self.get_logger().warn(
                     f'[{rs.name}] Goal appears stalled for '
-                    f'{self.progress_timeout:.0f}s without progress '
-                    f'(goal_progress_age={goal_progress_age:.1f}s, '
-                    f'motion_progress_age={motion_progress_age:.1f}s, '
-                    f'motion_window={self.motion_progress_window_sec:.1f}s); '
+                    f'{self.progress_timeout:.0f}s without physical movement '
+                    f'(pose_stagnation_age={pose_stagnation_age:.1f}s); '
                     'cancelling and blacklisting'
                 )
                 self._cancel_goal(rs)
@@ -2345,6 +2352,9 @@ class MultiRobotExplorer(Node):
         rs.goal_active = True
         rs.goal_pending = True
         rs.goal_status = 'pending'
+        rs.goal_seq_counter += 1
+        goal_seq = rs.goal_seq_counter
+        rs.active_goal_seq = goal_seq
         rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
@@ -2367,7 +2377,10 @@ class MultiRobotExplorer(Node):
 
         send_future = rs.action_client.send_goal_async(
             goal_msg,
-            feedback_callback=lambda f, r=rs: self._goal_feedback_callback(f, r),
+            feedback_callback=(
+                lambda f, r=rs, seq=goal_seq:
+                self._goal_feedback_callback(f, r, seq)
+            ),
         )
         try:
             self.event_logger.log_goal_sent(
@@ -2381,7 +2394,7 @@ class MultiRobotExplorer(Node):
         except Exception:
             pass
         send_future.add_done_callback(
-            lambda f, r=rs: self._goal_response_callback(f, r))
+            lambda f, r=rs, seq=goal_seq: self._goal_response_callback(f, r, seq))
         self.get_logger().info(
             f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
             f'— frontier size {frontier.size_m:.2f}m ({frontier.size} cells)')
@@ -2538,6 +2551,8 @@ class MultiRobotExplorer(Node):
         goal_msg.pose.orientation.w = 1.0
 
         goal_pub.publish(goal_msg)
+        rs.goal_seq_counter += 1
+        rs.active_goal_seq = rs.goal_seq_counter
         rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
@@ -2562,7 +2577,13 @@ class MultiRobotExplorer(Node):
             f'[{rs.name}] Falling back to PoseStamped goal_pose '
             f'({goal_x:.2f}, {goal_y:.2f})')
 
-    def _goal_response_callback(self, future, rs: RobotState):
+    def _goal_response_callback(self, future, rs: RobotState, goal_seq: int):
+        if goal_seq != rs.active_goal_seq:
+            self.get_logger().debug(
+                f'[{rs.name}] Ignoring stale goal response (seq={goal_seq}, '
+                f'active_seq={rs.active_goal_seq})'
+            )
+            return
         try:
             goal_handle = future.result()
         except Exception as exc:
@@ -2572,6 +2593,7 @@ class MultiRobotExplorer(Node):
             rs.goal_pending = False
             rs.goal_status = 'failed'
             rs.goal_handle = None
+            rs.active_goal_seq = 0
             if rs.homing_active:
                 self._return_home_note_failure(rs)
             elif rs.goal_position is not None and not self._should_skip_blacklist_due_to_lethal(rs):
@@ -2599,6 +2621,7 @@ class MultiRobotExplorer(Node):
                 self.get_logger().warn(f'[{rs.name}] Goal rejected by Nav2')
             rs.goal_active = False
             rs.goal_status = 'failed'
+            rs.active_goal_seq = 0
             if rs.goal_position is not None and not in_warmup:
                 if rs.homing_active:
                     self._return_home_note_failure(rs)
@@ -2622,9 +2645,11 @@ class MultiRobotExplorer(Node):
 
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            lambda f, r=rs: self._goal_result_callback(f, r))
+            lambda f, r=rs, seq=goal_seq: self._goal_result_callback(f, r, seq))
 
-    def _goal_feedback_callback(self, feedback_msg, rs: RobotState):
+    def _goal_feedback_callback(self, feedback_msg, rs: RobotState, goal_seq: int):
+        if goal_seq != rs.active_goal_seq:
+            return
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
         feedback = feedback_msg.feedback
@@ -2641,7 +2666,13 @@ class MultiRobotExplorer(Node):
                 rs.last_progress_distance = float(dist)
                 rs.last_progress_time = now
 
-    def _goal_result_callback(self, future, rs: RobotState):
+    def _goal_result_callback(self, future, rs: RobotState, goal_seq: int):
+        if goal_seq != rs.active_goal_seq:
+            self.get_logger().debug(
+                f'[{rs.name}] Ignoring stale goal result (seq={goal_seq}, '
+                f'active_seq={rs.active_goal_seq})'
+            )
+            return
         # Fresh pose for tacit near-goal checks on ABORTED/CANCELED.
         self._update_robot_positions()
         was_homing = rs.homing_active
@@ -2861,6 +2892,7 @@ class MultiRobotExplorer(Node):
         rs.goal_active = False
         rs.goal_pending = False
         rs.goal_handle = None
+        rs.active_goal_seq = 0
         rs.last_distance_remaining = None
         rs.last_progress_distance = None
         rs.last_progress_time = 0.0
