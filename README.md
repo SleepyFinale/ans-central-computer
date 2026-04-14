@@ -1279,7 +1279,7 @@ ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 **Classify what you are seeing (RViz):**
 
 | Visual | Meaning | Typical cause |
-|--------|---------|----------------|
+| ------ | ------- | ------------- |
 | Path crosses **gray / dark** cells | **Unknown** space (`track_unknown_space`) | Normal for exploration: frontiers sit on the free/unknown border and Nav2 is configured with **`allow_unknown: true`** in robot [`burger.yaml`](src/turtlebot3/turtlebot3_navigation2/param/humble/burger.yaml) (`GridBased`). Paths may legitimately traverse unknown until the map grows. |
 | Path hugs **yellow gradient** next to walls | **Inflation** (high cost, not lethal) | Global/local **inflation** was too small or DWB **path-hugging** critics dominated **BaseObstacle**. Widen `inflation_radius` on both costmaps, raise `cost_travel_multiplier`, and favour obstacle avoidance in DWB (see robot `burger.yaml` and **Stability tuning profile** in the `ans-turtlebot3` README). |
 | Path crosses **black / deep red** | **Occupied / lethal** | Abnormal: check **fleet TF** (`map` → `<robot>/map`), `fleet_mode:=true` with `start_central.sh`, and SLAM **map→odom** jumps (see **§13**, **§16**, **§19**). |
