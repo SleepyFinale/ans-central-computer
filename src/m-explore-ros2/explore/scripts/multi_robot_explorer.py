@@ -94,9 +94,13 @@ class RobotState:
     last_retarget_time: float = 0.0
     # Silence new assignments until this time (unix sec) after abort/cancel watchdog.
     next_assign_allowed_time: float = 0.0
-    # When True, a CANCELED result from Nav2 will not arm post-failure cooldown
-    # (used when we cancel for retarget and immediately send a replacement goal).
+    # When True, the next CANCELED result from Nav2 will not arm post-failure
+    # cooldown (used when we cancel for retarget and immediately send a replacement
+    # goal). ABORTED-as-cancel is gated on retarget_abort_blacklist_suppress_seq.
     ignore_cooldown_on_next_cancel: bool = False
+    # NavigateToPose goal_seq for the replacement goal after retarget; Nav2 may
+    # report ABORTED while tearing down the cancelled goal — do not blacklist.
+    retarget_abort_blacklist_suppress_seq: Optional[int] = None
     # First NavigateToPose of the current leg; retargets must stay near this.
     retarget_anchor: Optional[Tuple[float, float]] = None
     # Set when we cancel Nav2 after tacit "close enough" success (see plan_tick).
@@ -2355,6 +2359,8 @@ class MultiRobotExplorer(Node):
         rs.goal_seq_counter += 1
         goal_seq = rs.goal_seq_counter
         rs.active_goal_seq = goal_seq
+        if from_retarget:
+            rs.retarget_abort_blacklist_suppress_seq = goal_seq
         rs.goal_position = (goal_x, goal_y)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
@@ -2804,6 +2810,40 @@ class MultiRobotExplorer(Node):
                         f'{tacit_why}; total: {rs.goals_reached})'
                     )
                 self._last_goal_finished_robot = rs.name
+            elif rs.tacit_success_pending_cancel:
+                # Client cancel for tacit "at goal"; bt_navigator may end as ABORTED.
+                rs.tacit_success_pending_cancel = False
+                rs.ignore_cooldown_on_next_cancel = False
+                if was_homing:
+                    rs.homing_active = False
+                    rs.return_home_done = True
+                rs.goals_reached += 1
+                rs.goal_status = 'succeeded'
+                if was_homing:
+                    self.get_logger().info(
+                        f'[{rs.name}] Return home succeeded (tacit cancel as ABORTED; '
+                        f'total: {rs.goals_reached})'
+                    )
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal reached (tacit cancel as ABORTED near pose; '
+                        f'total: {rs.goals_reached})'
+                    )
+                self._last_goal_finished_robot = rs.name
+            elif (
+                not was_homing
+                and rs.retarget_abort_blacklist_suppress_seq is not None
+                and goal_seq == rs.retarget_abort_blacklist_suppress_seq
+            ):
+                # Replacement goal right after retarget: Nav2 often reports ABORTED
+                # ("Aborting handle") while tearing down the cancelled goal. Scoped
+                # to this goal_seq so a later real failure is not misclassified.
+                rs.ignore_cooldown_on_next_cancel = False
+                rs.goal_status = 'canceled'
+                self.get_logger().info(
+                    f'[{rs.name}] NavigateToPose ended as ABORTED after our cancel '
+                    f'(retarget); not blacklisting'
+                )
             else:
                 rs.goals_failed += 1
                 rs.goal_status = 'aborted'
@@ -2888,6 +2928,9 @@ class MultiRobotExplorer(Node):
             )
         except Exception:
             pass
+
+        if rs.retarget_abort_blacklist_suppress_seq == goal_seq:
+            rs.retarget_abort_blacklist_suppress_seq = None
 
         rs.goal_active = False
         rs.goal_pending = False

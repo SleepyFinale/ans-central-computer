@@ -198,23 +198,23 @@ To connect this central computer to the TurtleBot3 robots you need:
 
 The table below lists the SSH targets for each robot on the supported WiFi networks.
 
-| Robot  | Lab (SSID: SNS)       | RaspAP (rpi)        | Azure (SSID: Azure) |
-| ------ | --------------------- | ------------------- | --------------------|
-| Blinky | blinky@192.168.0.158  | blinky@10.3.141.220 | blinky@172.20.10.13 |
-| Pinky  | pinky@192.168.0.194   | pinky@10.3.141.194  | pinky@172.20.10.14  |
-| Inky   | inky@192.168.0.139    | inky@10.3.141.139   | inky@172.20.10.15   |
-| Clyde  | clyde@192.168.0.236   | clyde@10.3.141.236  | clyde@172.20.10.16  |
+| Robot  | SNS (lab)             | ANS_starlink (star)  | RaspAP (rpi)        | Azure (azure)       |
+| ------ | --------------------- | -------------------- | ------------------- | --------------------|
+| Blinky | blinky@192.168.0.158  | blinky@192.168.1.158 | blinky@10.3.141.158 | blinky@172.20.10.13 |
+| Pinky  | pinky@192.168.0.194   | pinky@192.168.1.194  | pinky@10.3.141.194  | pinky@172.20.10.14  |
+| Inky   | inky@192.168.0.139    | inky@192.168.1.139   | inky@10.3.141.139   | inky@172.20.10.15   |
+| Clyde  | clyde@192.168.0.236   | clyde@192.168.1.236  | clyde@10.3.141.236  | clyde@172.20.10.16  |
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
-`scripts/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, RaspAP, or Azure) and picks the correct IP. Pass an optional **second argument** to override the IP (e.g. non-standard subnet).
+`scripts/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, ANS_starlink, RaspAP, or Azure) and picks the correct IP. Pass an optional **second argument** to override the IP (e.g. non-standard subnet); on **Clyde** this bypasses auto-detection entirely.
 
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
 ```bash
 cd ~/ans-central-computer
 
-# Any robot: fixed fleet IPs – script auto-detects SNS vs RaspAP vs Azure
+# Any robot: fixed fleet IPs – script auto-detects SNS vs ANS_starlink vs RaspAP vs Azure
 source scripts/set_robot_env.sh blinky
 # or
 source scripts/set_robot_env.sh pinky
@@ -261,7 +261,7 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 **Prerequisites:**
 
-- Robot is powered on and connected to the network (SNS, RaspAP, or Azure WiFi)
+- Robot is powered on and connected to the network (SNS, ANS_starlink, RaspAP, or Azure WiFi)
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
@@ -742,14 +742,14 @@ You should see `nav2_msgs` in the list. Then try building again:
 - `ssh $ROBOT_SSH` hangs, times out, or "Connection refused"
 - Robot is powered on but unreachable
 
-**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS), RaspAP (rpi), and Azure—if the robot is on one network but your PC is on another, you will connect to the wrong IP.
+**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS), Starlink (`ANS_starlink`), RaspAP (rpi), and Azure—if the robot is on one network but your PC is on another, you will connect to the wrong IP.
 
 **Fix:**
 
 - **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available).
-- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for Lab, RaspAP for rpi, Azure for Azure).
-- **Step 3**: Run `source scripts/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)`, `(network: rpi)`, or `(network: azure)`.
-- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS, RaspAP, or Azure. Connect to the correct network and source the script again.
+- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for lab, ANS_starlink for star, RaspAP for rpi, Azure for azure).
+- **Step 3**: Run `source scripts/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)`, `(network: star)`, `(network: rpi)`, or `(network: azure)`.
+- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS, ANS_starlink, RaspAP, or Azure. Connect to the correct network and source the script again.
 
 ---
 
