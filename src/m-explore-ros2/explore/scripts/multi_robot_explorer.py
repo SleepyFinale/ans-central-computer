@@ -477,12 +477,17 @@ class MultiRobotExplorer(Node):
         # Goal-clearance shaping: discourage assigning goals too close to
         # occupied cells (likely walls/obstacles in the current map).
         self.declare_parameter('goal_clearance_radius_m', 0.45)
+        self.declare_parameter('goal_unknown_neighbor_penalty_m', 0.0)
         self.declare_parameter('goal_clearance_weight', 4.0)
         # Hard safety gate for candidate goal cells:
         # - reject goals in high-cost cells
         # - reject goals that do not have enough local obstacle clearance
         self.declare_parameter('goal_max_cell_cost', 80)
         self.declare_parameter('goal_min_clearance_gate_m', 0.30)
+        # Re-check selected goals against the latest map right before sending
+        # to Nav2. This avoids dispatching goals that became unsafe between
+        # frontier assignment and NavigateToPose dispatch.
+        self.declare_parameter('goal_revalidate_before_send', True)
         # Mid-route retargeting controls.
         self.declare_parameter('retarget_enable', True)
         self.declare_parameter('retarget_cooldown_sec', 12.0)
@@ -604,6 +609,9 @@ class MultiRobotExplorer(Node):
         self.goal_clearance_radius_m = float(
             self.get_parameter('goal_clearance_radius_m').value
         )
+        self.goal_unknown_neighbor_penalty_m = float(
+            self.get_parameter('goal_unknown_neighbor_penalty_m').value
+        )
         self.goal_clearance_weight = float(
             self.get_parameter('goal_clearance_weight').value
         )
@@ -612,6 +620,9 @@ class MultiRobotExplorer(Node):
         )
         self.goal_min_clearance_gate_m = float(
             self.get_parameter('goal_min_clearance_gate_m').value
+        )
+        self.goal_revalidate_before_send = bool(
+            self.get_parameter('goal_revalidate_before_send').value
         )
         self.retarget_enable = bool(
             self.get_parameter('retarget_enable').value
@@ -1422,6 +1433,30 @@ class MultiRobotExplorer(Node):
                         min_clearance = d
         return min_clearance
 
+    def _frontier_unknown_adjacency_counts(
+        self, grid: np.ndarray, ys: np.ndarray, xs: np.ndarray
+    ) -> np.ndarray:
+        """Per frontier cell: count of unknown 4-neighbours (prefers deeper free cells)."""
+        h, w = grid.shape
+        unk = grid < 0
+        yi = ys.astype(np.int32)
+        xi = xs.astype(np.int32)
+        n = len(yi)
+        out = np.zeros(n, dtype=np.float64)
+        for i in range(n):
+            cy, cx = int(yi[i]), int(xi[i])
+            c = 0
+            if cy > 0 and unk[cy - 1, cx]:
+                c += 1
+            if cy < h - 1 and unk[cy + 1, cx]:
+                c += 1
+            if cx > 0 and unk[cy, cx - 1]:
+                c += 1
+            if cx < w - 1 and unk[cy, cx + 1]:
+                c += 1
+            out[i] = float(c)
+        return out
+
     def _clearance_penalty(self, m: Optional[OccupancyGrid], x: float, y: float) -> float:
         clearance = self._goal_clearance_m(m, x, y)
         shortfall = max(0.0, self.goal_clearance_radius_m - clearance)
@@ -1888,6 +1923,18 @@ class MultiRobotExplorer(Node):
         dists = np.hypot(dx, dy)
         grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
         costs = grid[ys.astype(np.int32), xs.astype(np.int32)]
+        unk_adj = self._frontier_unknown_adjacency_counts(grid, ys, xs)
+        penalty = max(0.0, self.goal_unknown_neighbor_penalty_m)
+
+        def _score_pick(mask: np.ndarray) -> int:
+            if penalty > 0.0:
+                scores = dists - penalty * unk_adj
+            else:
+                scores = dists
+            if not np.any(mask):
+                return int(np.argmax(scores))
+            return int(np.argmax(np.where(mask, scores, -np.inf)))
+
         valid_cost = (costs >= 0) & (costs < self.goal_max_cell_cost)
         if np.any(valid_cost):
             clearance_ok = np.zeros_like(valid_cost, dtype=bool)
@@ -1911,13 +1958,13 @@ class MultiRobotExplorer(Node):
         mask_far_enough = dists >= max(0.0, self.min_goal_distance)
         safe_far = valid_mask & mask_far_enough
         if np.any(safe_far):
-            idx = int(np.argmax(dists * safe_far))
+            idx = _score_pick(safe_far)
         elif np.any(valid_mask):
-            idx = int(np.argmax(dists * valid_mask))
+            idx = _score_pick(valid_mask)
         elif np.any(mask_far_enough):
-            idx = int(np.argmax(dists * mask_far_enough))
+            idx = _score_pick(mask_far_enough)
         else:
-            idx = int(np.argmax(dists))
+            idx = _score_pick(np.ones_like(dists, dtype=bool))
 
         gx = float(wx[idx])
         gy = float(wy[idx])
@@ -2382,6 +2429,18 @@ class MultiRobotExplorer(Node):
         goal_x, goal_y = self._select_goal_point(rs, frontier)
         if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
             return
+        if self.goal_revalidate_before_send:
+            if not self._goal_passes_safety_gate(self._current_goal_map, goal_x, goal_y):
+                self._log_goal_safety_rejection(
+                    rs, goal_x, goal_y, context='pre_send_revalidate'
+                )
+                self._blacklist_or_home_fail(rs, (goal_x, goal_y))
+                self._arm_post_failure_cooldown(rs)
+                self.get_logger().info(
+                    f'[{rs.name}] Goal rejected by pre-send safety revalidation; '
+                    'selecting another frontier'
+                )
+                return
 
         try:
             m = self._current_goal_map

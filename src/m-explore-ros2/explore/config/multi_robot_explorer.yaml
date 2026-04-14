@@ -157,14 +157,22 @@ multi_robot_explorer:
     # - goal_clearance_radius_m: desired minimum wall/obstacle clearance.
     # - goal_clearance_weight: penalty weight when a candidate sits inside the
     #   clearance radius from occupied map cells.
+    # Prefer frontier cells deeper in known free space: when > 0, subtract this
+    # many metres from the selection score per unknown 4-neighbour of the cell
+    # (see multi_robot_explorer._pick_frontier_cell_farthest_from_robot). Reduces
+    # goals hugging the unknown band; 0.0 disables (legacy behaviour).
+    goal_unknown_neighbor_penalty_m: 0.10
+
     # Hard safety gate:
     # - goal_max_cell_cost: reject candidate goal cells at/above this map cost.
     # - goal_min_clearance_gate_m: reject candidates with less obstacle
     #   clearance than this threshold.
-    goal_clearance_radius_m: 0.35
-    goal_clearance_weight: 3.0
-    goal_max_cell_cost: 95
-    goal_min_clearance_gate_m: 0.14
+    goal_clearance_radius_m: 0.42
+    goal_clearance_weight: 3.5
+    goal_max_cell_cost: 80
+    goal_min_clearance_gate_m: 0.30
+    # Re-check goal safety immediately before NavigateToPose dispatch.
+    goal_revalidate_before_send: true
 
     # Adaptive mid-route retargeting:
     # - When enabled, active goals can be cancelled and reassigned before

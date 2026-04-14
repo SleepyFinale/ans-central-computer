@@ -83,10 +83,10 @@ flowchart TB
 
 This function already exists in your central workspace. The fleet (Blinky, Pinky, Inky, Clyde) runs **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
 
-- **TF stitching**: `scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
-- **Single-robot world link**: `scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
+- **TF stitching**: `src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
+- **Single-robot world link**: `src/m-explore-ros2/explore/scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
 - **Per-robot SLAM**: `slam_toolbox` on each robot uses TF frame `<robot>/map` and publishes `/<robot>/map`
-- **Map merge**: `multirobot_map_merge/map_merge` using `config/map_merge/multirobot_params_unknown_poses.yaml` (multi-robot only; unknown initial poses on the central computer)
+- **Map merge**: `multirobot_map_merge/map_merge` using `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml` (multi-robot only; unknown initial poses on the central computer)
 
 ```mermaid
 flowchart TB
@@ -95,12 +95,12 @@ flowchart TB
 
     subgraph Programs_GlobalMapping["Programs"]
       direction TB
-      tfRelay["script: scripts/tf_relay_multirobot.py"]
+      tfRelay["script: src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py"]
       slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       slamI["node: slam_toolbox (Inky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
       slamC["node: slam_toolbox (Clyde on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
-      mapMerge["node: multirobot_map_merge/map_merge\nconfig/map_merge/multirobot_params_unknown_poses.yaml"]
+      mapMerge["node: multirobot_map_merge/map_merge\nsrc/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml"]
     end
 
     subgraph Data_GlobalMapping["Data (topics + TF)"]

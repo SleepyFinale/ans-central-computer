@@ -28,7 +28,7 @@ def generate_launch_description() -> LaunchDescription:
     start_explorer = ExecuteProcess(
         cmd=[
             "python3",
-            PathJoinSubstitution([ThisLaunchFileDir(), "multi_robot_explorer.py"]),
+            PathJoinSubstitution([ThisLaunchFileDir(), "..", "scripts", "multi_robot_explorer.py"]),
             "--ros-args",
             "--params-file",
             params_file,

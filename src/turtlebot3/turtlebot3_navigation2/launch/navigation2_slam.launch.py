@@ -66,7 +66,12 @@ def generate_launch_description():
         'tb3_navigation2.rviz')
 
     # Optional: wait for TF tree before launching Nav2 (prevents costmap activation failures)
-    workspace_dir = os.path.expanduser(os.environ.get('TURTLEBOT3_WS', '~/turtlebot3_ws'))
+    # Resolve the workspace robustly so this keeps working after local folder renames.
+    this_file_dir = os.path.dirname(os.path.realpath(__file__))
+    workspace_guess = os.path.abspath(
+        os.path.join(this_file_dir, '..', '..', '..', '..', '..')
+    )
+    workspace_dir = os.path.expanduser(os.environ.get('TURTLEBOT3_WS', workspace_guess))
     wait_tf_script = os.path.join(workspace_dir, 'scripts', 'wait_for_tf.py')
     wait_for_tf = LaunchConfiguration('wait_for_tf', default='true')
 

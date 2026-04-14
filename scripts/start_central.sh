@@ -27,11 +27,44 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG_DIR="${WORKSPACE_DIR}/config"
+EXPLORE_PKG_DIR="${WORKSPACE_DIR}/src/m-explore-ros2/explore"
+EXPLORE_SCRIPT_DIR="${EXPLORE_PKG_DIR}/scripts"
+MAP_MERGE_PKG_DIR="${WORKSPACE_DIR}/src/m-explore-ros2/map_merge"
+MAP_MERGE_CONFIG_FILE="${MAP_MERGE_PKG_DIR}/config/multirobot_params_unknown_poses.yaml"
+EXPLORE_CONFIG_FILE="${EXPLORE_PKG_DIR}/config/multi_robot_explorer.yaml"
+TF_RELAY_SCRIPT="${EXPLORE_SCRIPT_DIR}/tf_relay_multirobot.py"
+EXPLORER_SCRIPT="${EXPLORE_SCRIPT_DIR}/multi_robot_explorer.py"
+SINGLE_ROBOT_WORLD_TF_SCRIPT="${EXPLORE_SCRIPT_DIR}/single_robot_world_tf_bridge.py"
+SINGLE_ROBOT_MAP_RELAY_SCRIPT="${EXPLORE_SCRIPT_DIR}/single_robot_map_relay.py"
 
 cd "$WORKSPACE_DIR"
 source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null
+
+if [[ ! -f "$TF_RELAY_SCRIPT" ]]; then
+    echo "ERROR: TF relay script not found: $TF_RELAY_SCRIPT"
+    exit 1
+fi
+if [[ ! -f "$EXPLORER_SCRIPT" ]]; then
+    echo "ERROR: Explorer script not found: $EXPLORER_SCRIPT"
+    exit 1
+fi
+if [[ ! -f "$EXPLORE_CONFIG_FILE" ]]; then
+    echo "ERROR: Explorer config not found: $EXPLORE_CONFIG_FILE"
+    exit 1
+fi
+if [[ ! -f "$SINGLE_ROBOT_WORLD_TF_SCRIPT" ]]; then
+    echo "ERROR: Single-robot world TF script not found: $SINGLE_ROBOT_WORLD_TF_SCRIPT"
+    exit 1
+fi
+if [[ ! -f "$SINGLE_ROBOT_MAP_RELAY_SCRIPT" ]]; then
+    echo "ERROR: Single-robot map relay script not found: $SINGLE_ROBOT_MAP_RELAY_SCRIPT"
+    exit 1
+fi
+if [[ ! -f "$MAP_MERGE_CONFIG_FILE" ]]; then
+    echo "ERROR: Map merge config not found: $MAP_MERGE_CONFIG_FILE"
+    exit 1
+fi
 
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}
 
@@ -85,10 +118,10 @@ ensure_no_central_stack_running() {
     #  - single_robot_world_tf_bridge.py (single-robot mode)
     #  - single_robot_map_relay.py (single-robot mode)
     #  - multi_robot_explorer.py using the central params file
-    local pattern_tf="python3 .*scripts/tf_relay_multirobot\\.py"
-    local pattern_bridge="python3 .*scripts/single_robot_world_tf_bridge\\.py"
-    local pattern_map_relay="python3 .*scripts/single_robot_map_relay\\.py"
-    local pattern_explorer="python3 .*scripts/multi_robot_explorer\\.py .*--params-file ${CONFIG_DIR}/multi_robot_explorer\\.yaml"
+    local pattern_tf="python3 .*tf_relay_multirobot\\.py"
+    local pattern_bridge="python3 .*single_robot_world_tf_bridge\\.py"
+    local pattern_map_relay="python3 .*single_robot_map_relay\\.py"
+    local pattern_explorer="python3 .*multi_robot_explorer\\.py .*--params-file .*multi_robot_explorer\\.yaml"
 
     # Collect matching PIDs + commands (skip the grep processes themselves).
     local existing
@@ -284,7 +317,7 @@ trap cleanup SIGHUP SIGINT SIGTERM EXIT
 
 # ---- 1. TF relay (same policy for 1 or N robots) ----
 echo "[1/3] Starting TF relay (prefix_frames=true)..."
-python3 "${SCRIPT_DIR}/tf_relay_multirobot.py" --ros-args \
+python3 "${TF_RELAY_SCRIPT}" --ros-args \
     -p "robot_prefixes:=[${ROBOT_LIST_PARAM}]" \
     -p "prefix_frames:=true" &
 PIDS+=($!)
@@ -293,12 +326,12 @@ sleep 1
 if ((${#SELECTED_ROBOTS[@]} == 1)); then
     SINGLE_ROBOT_BRIDGE="${SELECTED_ROBOTS[0]}"
     echo "[1b/3] Single-robot mode — static TF map -> ${SINGLE_ROBOT_BRIDGE}/map (identity)"
-    python3 "${SCRIPT_DIR}/single_robot_world_tf_bridge.py" --ros-args \
+    python3 "${SINGLE_ROBOT_WORLD_TF_SCRIPT}" --ros-args \
         -p "robot_name:=${SINGLE_ROBOT_BRIDGE}" &
     PIDS+=($!)
     sleep 0.5
     echo "[1c/3] Single-robot mode — relay /${SINGLE_ROBOT_BRIDGE}/map -> /map"
-    python3 "${SCRIPT_DIR}/single_robot_map_relay.py" --ros-args \
+    python3 "${SINGLE_ROBOT_MAP_RELAY_SCRIPT}" --ros-args \
         -p "source_map:=/${SINGLE_ROBOT_BRIDGE}/map" &
     PIDS+=($!)
     sleep 0.5
@@ -315,9 +348,9 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
     echo "[2/3] Single-robot setup detected (${SINGLE_ROBOT}) — skipping map merge."
     echo "[3/3] Starting single-robot explorer (Nav2 offloaded to robot)..."
     EXPLORER_ARGS=(
-        "${SCRIPT_DIR}/multi_robot_explorer.py"
+        "${EXPLORER_SCRIPT}"
         --ros-args
-        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml"
+        --params-file "${EXPLORE_CONFIG_FILE}"
         -p "robot_names:=[${SINGLE_ROBOT}]"
         -p "map_topic:=/${SINGLE_ROBOT}/map"
         -p "world_frame:=map"
@@ -333,7 +366,7 @@ else
     # ---- 2. Map merge ----
     echo "[2/3] Starting map merge (unknown poses)..."
     ros2 run multirobot_map_merge map_merge --ros-args \
-        --params-file "${CONFIG_DIR}/map_merge/multirobot_params_unknown_poses.yaml" &
+        --params-file "${MAP_MERGE_CONFIG_FILE}" &
     PIDS+=($!)
     sleep 2
 
@@ -349,9 +382,9 @@ else
     # ---- 3. Explorer ----
     echo "[3/3] Starting multi-robot explorer..."
     EXPLORER_ARGS=(
-        "${SCRIPT_DIR}/multi_robot_explorer.py"
+        "${EXPLORER_SCRIPT}"
         --ros-args
-        --params-file "${CONFIG_DIR}/multi_robot_explorer.yaml"
+        --params-file "${EXPLORE_CONFIG_FILE}"
         -p "robot_names:=[${ROBOT_LIST_PARAM}]"
         -p "use_pose_goal_fallback:=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
     )

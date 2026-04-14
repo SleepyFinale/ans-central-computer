@@ -114,8 +114,8 @@ Clone the repository to your workspace directory:
 
 ```bash
 cd ~
-git clone https://github.com/SleepyFinale/turtlebot3-workspace.git turtlebot3_ws
-cd ~/turtlebot3_ws
+git clone https://github.com/SleepyFinale/turtlebot3-workspace.git ans-central-computer
+cd ~/ans-central-computer
 ```
 
 This repository contains all the necessary packages for TurtleBot3 autonomous exploration:
@@ -145,7 +145,7 @@ Performs a complete clean rebuild of the entire workspace:
 **Usage:**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 ./scripts/clean_rebuild.sh
 ```
 
@@ -168,7 +168,7 @@ Performs a minimal rebuild of only the central-PC essentials:
 **Usage:**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 ./scripts/minimal_rebuild.sh
 ```
 
@@ -180,7 +180,7 @@ cd ~/turtlebot3_ws
 **Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/set_robot_env.sh <robot> [ip]`. If you need to manually source the workspace:
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 source scripts/ros_robot_env.bash
 ```
 
@@ -212,7 +212,7 @@ The table below lists the SSH targets for each robot on the supported WiFi netwo
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 
 # Any robot: fixed fleet IPs – script auto-detects SNS vs RaspAP vs Azure
 source scripts/set_robot_env.sh blinky
@@ -273,7 +273,7 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 1. Central: `start_rviz_central.sh`, then `./scripts/start_central.sh` (TF relay + map_merge + explorer).
 2. Each robot: bringup, then `navigation2_slam.launch.py` with **`fleet_mode:=true`** if the central stack is already running (Nav2 starts sooner; still requires global `/tf` and `/map` from the PC).
-3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` transforms while pose estimates are pending (`publish_provisional_tf` in [`config/map_merge/multirobot_params_unknown_poses.yaml`](config/map_merge/multirobot_params_unknown_poses.yaml)) so the `map` frame exists for Nav2 sooner.
+3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` transforms while pose estimates are pending (`publish_provisional_tf` in [`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)) so the `map` frame exists for Nav2 sooner.
 
 **Faster robot Nav2 startup (optional):**
 
@@ -371,7 +371,7 @@ urdf_file_name : turtlebot3_burger.urdf
 **Verification (from the central PC):**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 ros2 topic list | grep "/<robot>/" 
 ros2 topic echo /<robot>/scan --once  # Should show laser scan data
 ```
@@ -453,7 +453,7 @@ With default **`fleet_mode:=auto`**, the launch inserts another **`wait_for_tf`*
 **Verification (from the central PC):**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 ros2 topic list | grep "/<robot>/"
 ros2 topic echo /<robot>/map --once           # Should show map data after SLAM initializes
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
@@ -470,7 +470,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 - **Central Terminal 1 – RViz visualization**
 
   ```bash
-  cd ~/turtlebot3_ws
+  cd ~/ans-central-computer
   source /opt/ros/humble/setup.bash
   source install/setup.bash
 
@@ -491,7 +491,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 - **Central Terminal 2 – coordinator stack**
 
   ```bash
-  cd ~/turtlebot3_ws
+  cd ~/ans-central-computer
   ./scripts/start_central.sh
   ```
 
@@ -565,7 +565,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 
 ## Logging and Debugging
 
-- `scripts/central_explorer_event_logger.py`:
+- `src/m-explore-ros2/explore/scripts/central_explorer_event_logger.py`:
   - Structured JSONL logger utility (`ExplorerEventLogger`) for `multi_robot_explorer.py`
   - Session-aware (`DEBUG_SESSION_ID` support) for robot/central correlation
   - Built-in methods: `log_frontiers_detected`, `log_goal_selected`, `log_goal_sent`, `log_goal_result`, `log_goal_cancelled`, `log_retarget_decision`, `log_blacklist_event`, `log_state_transition`
@@ -668,8 +668,8 @@ You should see `nav2_msgs` in the list. Then try building again:
 **What the script is checking now:**
 
 - It looks only for **central-side** processes launched by `start_central.sh`:
-  - `python3 ... scripts/tf_relay_multirobot.py`
-  - `python3 ... scripts/multi_robot_explorer.py --ros-args --params-file config/multi_robot_explorer.yaml ...`
+  - `python3 ... src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py`
+  - `python3 ... src/m-explore-ros2/explore/scripts/multi_robot_explorer.py --ros-args --params-file src/m-explore-ros2/explore/config/multi_robot_explorer.yaml ...`
 - Robot-side SLAM/Nav2 on the SBC is **not** matched by this check.
 
 **Interactive cleanup (recommended):**
@@ -727,7 +727,7 @@ You should see `nav2_msgs` in the list. Then try building again:
 - **Step 3**: Set the same value everywhere. Easiest: use the setup script for your robot (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)).
 
   ```bash
-  cd ~/turtlebot3_ws
+  cd ~/ans-central-computer
   source scripts/set_robot_env.sh <robot>
   ```
 
@@ -842,7 +842,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 **Fix (multi-robot / map_merge):**
 
-- The workspace configures **map_merge** with `origin_margin: 0.05` (in `config/map_merge/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
+- The workspace configures **map_merge** with `origin_margin: 0.05` (in `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
   - `./scripts/minimal_rebuild.sh` (or `clean_rebuild.sh`), then
   - `./scripts/start_multirobot_slam.sh`, then
   - `./scripts/start_multirobot_nav2_explore.sh`
@@ -946,14 +946,13 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 - `spin failed` / `Collision Ahead - Exiting Spin` / `backup failed`
 - Robot gets close to a corner or doorframe and then stays there, not moving.
 
-**Fix:** The Nav2 params in `turtlebot3_navigation2/param/humble/burger.yaml` are already tuned to reduce this: global costmap uses smaller inflation (0.32 m radius, cost_scaling_factor 5.0) and local costmap inflation is 0.45 m. If it still happens:
+**Fix:** `burger.yaml` trades off corridor clearance vs tight corners: **wider** inflation keeps the robot off walls but can trigger lethal-start near doorframes. If this happens often, **reduce** `inflation_radius` on the global/local costmap slightly (e.g. by ~0.05 m) and restart Nav2.
 
 - New default behavior tree (`navigate_to_pose_w_replanning_and_recovery_with_lethal_escape.xml`) now retries planning/control after explicit costmap clears and keeps backup/spin/wait recoveries active.
 - During central exploration, `multi_robot_explorer.py` listens to `/<robot>/nav2_lethal_inflation` and temporarily holds the current goal while Nav2 reports lethal space, so aborted goals are not blacklisted just for this transient state.
 - Check lethal-state signal: `ros2 topic echo /<robot>/nav2_lethal_inflation`
 - Wait for recovery (wait → backup → spin) to move the robot into free space; often the next plan then succeeds.
 - Drive the robot slightly away from the wall/corner so its center is in clearly free space.
-- Optionally reduce `inflation_radius` further in the global/local costmap in the same param file, then rebuild and restart Nav2.
 
 ---
 
@@ -994,8 +993,8 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 When running the RViz helper (`./scripts/start_rviz_central.sh`) and the central stack (`./scripts/start_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
 
-- `config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, progress watchdogs, optional return-to-origin, and status/control topics).
-- `config/map_merge/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
+- `src/m-explore-ros2/explore/config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, progress watchdogs, optional return-to-origin, and status/control topics).
+- `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
 
 All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `ans-turtlebot3` workspace; this central repository keeps only the configuration needed for coordination and visualization.
 
@@ -1060,18 +1059,17 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 
 **Stability tuning profile (Mar 2026):**
 
-- Central `config/multi_robot_explorer.yaml` tuned values:
+- Central `src/m-explore-ros2/explore/config/multi_robot_explorer.yaml` tuned values:
   - `post_failure_cooldown_sec: 5.0`
   - `retarget_stagnation_sec: 15.0`
   - `retarget_opportunity_enable: false`
   - `min_goal_replan_interval_s: 8.0`
   - `max_stuck_time_s: 12.0`
 - Robot `ans-turtlebot3` Nav2 profile is tuned in `turtlebot3_navigation2/param/humble/burger.yaml`:
-  - progress checker relaxed (`required_movement_radius: 0.10`, `movement_time_allowance: 45.0`)
-  - costmap TF timeouts increased to `0.5`
-  - local costmap size increased to `4 x 4`
-  - DWB `min_speed_theta: 0.10`
-  - local inflation radius reduced to `0.25`
+  - progress checker relaxed (`required_movement_radius: 0.10`, `movement_time_allowance: 28.0`)
+  - costmap `transform_timeout: 0.2` (raise in YAML if you see transform timeouts)
+  - local costmap rolling window `3 x 3` m
+  - DWB `min_speed_theta: 0.10`, higher `BaseObstacle.scale`, wider global/local inflation to **avoid wall-hugging** (see robot README stability profile)
 
 **A/B/C validation sequence (recommended):**
 
@@ -1104,7 +1102,7 @@ For each run, compare:
 - On the central PC you start:
 
   ```bash
-  cd ~/turtlebot3_ws
+  cd ~/ans-central-computer
   ./scripts/start_central.sh
   ```
 
@@ -1121,7 +1119,7 @@ For each run, compare:
 
 **What this repo does now:**
 
-- `scripts/multi_robot_explorer.py` subscribes to the configured `map_topic` using **two QoS profiles in parallel**:
+- `src/m-explore-ros2/explore/scripts/multi_robot_explorer.py` subscribes to the configured `map_topic` using **two QoS profiles in parallel**:
   - `TRANSIENT_LOCAL + RELIABLE` — ideal when the publisher supports transient-local maps (map servers / SLAM map latching).
   - `VOLATILE + BEST_EFFORT` — compatibility fallback for publishers that do not match the transient-local/reliable profile.
 - Both subscriptions share the same callback; whichever QoS matches the publisher first will deliver the map and unblock the explorer.
@@ -1171,7 +1169,7 @@ Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the ro
 **Usage (on Remote PC):**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde [optional IP override]
@@ -1213,7 +1211,7 @@ Use `scripts/plot_live_xy_fade.py` on the central PC to visualize position updat
 **Usage (on central PC):**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 source scripts/ros_robot_env.bash
 
 python3 scripts/plot_live_xy_fade.py
@@ -1255,7 +1253,7 @@ Stop with Ctrl+C to close the node and plot cleanly.
 **Verify (same `ROS_DOMAIN_ID` on central and robot):**
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export ROS_DOMAIN_ID=50   # if that is your fleet domain
@@ -1267,8 +1265,50 @@ ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 
 **Fixes:**
 
-- Ensure `./scripts/start_central.sh` is running and `map_merge` has **`publish_tf: true`** (default). With **unknown poses**, keep **`publish_provisional_tf: true`** so identity `map` → `<robot>/map` is broadcast until pose estimates are valid ([`config/map_merge/multirobot_params_unknown_poses.yaml`](config/map_merge/multirobot_params_unknown_poses.yaml)).
+- Ensure `./scripts/start_central.sh` is running and `map_merge` has **`publish_tf: true`** (default). With **unknown poses**, keep **`publish_provisional_tf: true`** so identity `map` → `<robot>/map` is broadcast until pose estimates are valid ([`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)).
 - If you start robots before the central stack, use **`fleet_mode:=auto`** and wait, or start central first and use **`fleet_mode:=true`** on robots (see [Multi-Robot SLAM](#multi-robot-slam) startup bullets).
+
+---
+
+#### 20. Robot path crosses “global costmap territory” in RViz
+
+**Symptoms:**
+
+- While navigating to an exploration goal (or any `NavigateToPose` goal), the **global plan** or the robot’s motion appears to cross **non–free** cells on the Nav2 **global costmap** display.
+
+**Classify what you are seeing (RViz):**
+
+| Visual | Meaning | Typical cause |
+|--------|---------|----------------|
+| Path crosses **gray / dark** cells | **Unknown** space (`track_unknown_space`) | Normal for exploration: frontiers sit on the free/unknown border and Nav2 is configured with **`allow_unknown: true`** in robot [`burger.yaml`](src/turtlebot3/turtlebot3_navigation2/param/humble/burger.yaml) (`GridBased`). Paths may legitimately traverse unknown until the map grows. |
+| Path hugs **yellow gradient** next to walls | **Inflation** (high cost, not lethal) | Global/local **inflation** was too small or DWB **path-hugging** critics dominated **BaseObstacle**. Widen `inflation_radius` on both costmaps, raise `cost_travel_multiplier`, and favour obstacle avoidance in DWB (see robot `burger.yaml` and **Stability tuning profile** in the `ans-turtlebot3` README). |
+| Path crosses **black / deep red** | **Occupied / lethal** | Abnormal: check **fleet TF** (`map` → `<robot>/map`), `fleet_mode:=true` with `start_central.sh`, and SLAM **map→odom** jumps (see **§13**, **§16**, **§19**). |
+
+**Reduce unknown-skimming without breaking exploration (central PC):**
+
+- The explorer prefers frontier cells with **fewer unknown 4-neighbours** when [`goal_unknown_neighbor_penalty_m`](src/m-explore-ros2/explore/config/multi_robot_explorer.yaml) is **> 0** (metres subtracted per unknown neighbour in goal scoring). Increase slightly (e.g. `0.12`–`0.18`) if goals still sit on the unknown edge; set to **`0.0`** to restore previous behaviour.
+
+**Reduce unknown routing in Nav2 (robot, trade-off):**
+
+- In [`burger.yaml`](src/turtlebot3/turtlebot3_navigation2/param/humble/burger.yaml), set `GridBased.allow_unknown: false` only if you accept more **“no valid path”** failures near map edges.
+
+**Other notes:**
+
+- After planner/controller failures, the behavior tree may **clear the entire global costmap** and replan; odd motion **immediately after** recovery can correlate with that (see `navigate_to_pose_w_replanning_and_recovery_with_lethal_escape.xml` in `turtlebot3_navigation2`).
+- `ros2 topic echo /<robot>/nav2_lethal_inflation` — see **§11**.
+- Structured robot-side logs: **Nav2 motion debug capture** in the `ans-turtlebot3` README.
+
+**Verify fleet TF (central PC, same `ROS_DOMAIN_ID` as robots):**
+
+```bash
+cd ~/ans-central-computer
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export ROS_DOMAIN_ID=50
+python3 scripts/diagnose_multirobot_tf.py
+```
+
+Confirm each active robot shows **`[OK]`** for `map -> <robot>/map` and `map -> <robot>/base_footprint`. If anything is **`[MISSING]`**, fix **§19** before tuning costmaps.
 
 ---
 
@@ -1364,7 +1404,7 @@ echo $ROS_DOMAIN_ID
 ### Run multi-robot TF diagnostics
 
 ```bash
-cd ~/turtlebot3_ws
+cd ~/ans-central-computer
 ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 ```
 

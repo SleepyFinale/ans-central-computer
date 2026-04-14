@@ -1,11 +1,11 @@
 #!/bin/bash
-# Clean rebuild script for turtlebot3_ws
+# Clean rebuild script for the central workspace
 # This will remove build artifacts and rebuild everything from scratch
 
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Clean Rebuild Script for turtlebot3_ws"
+echo "Clean Rebuild Script for central workspace"
 echo "=========================================="
 echo ""
 
@@ -16,7 +16,7 @@ cd "$WS_DIR"
 
 # Check if we're in the right directory
 if [ ! -d "src" ]; then
-    echo "Error: Must run from workspace root (turtlebot3_ws/)"
+    echo "Error: Must run from workspace root (e.g. ans-central-computer/)"
     exit 1
 fi
 

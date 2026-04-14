@@ -16,7 +16,7 @@ else
 fi
 
 # Workspace overlay
-# If WS_DIR is not provided, infer it from this script's location (…/turtlebot3_ws/scripts).
+# If WS_DIR is not provided, infer it from this script's location.
 if [ -z "${WS_DIR:-}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   WS_DIR="$(dirname "$SCRIPT_DIR")"

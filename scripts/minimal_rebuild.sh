@@ -1,5 +1,5 @@
 #!/bin/bash
-# Minimal rebuild script for turtlebot3_ws (central PC)
+# Minimal rebuild script for the central workspace
 # Only builds packages needed for:
 #  - ./scripts/start_central.sh        (TF relay, map merge, multi_robot_explorer)
 #  - ./scripts/start_rviz_central.sh   (RViz configs)
@@ -7,7 +7,7 @@
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Minimal Rebuild Script for turtlebot3_ws"
+echo "Minimal Rebuild Script for central workspace"
 echo "=========================================="
 echo ""
 
@@ -18,7 +18,7 @@ cd "$WS_DIR"
 
 # Check if we're in the right directory
 if [ ! -d "src" ]; then
-    echo "Error: Must run from workspace root (turtlebot3_ws/)"
+    echo "Error: Must run from workspace root (e.g. ans-central-computer/)"
     exit 1
 fi
 

@@ -12,13 +12,13 @@
 #   ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
+WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
 cd "$WORKSPACE_DIR"
 source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null
 
-CONFIG_FILE="${WORKSPACE_DIR}/config/multi_robot_explorer.yaml"
+CONFIG_FILE="${WORKSPACE_DIR}/src/m-explore-ros2/explore/config/multi_robot_explorer.yaml"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: Config file not found: $CONFIG_FILE"
