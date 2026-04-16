@@ -43,6 +43,11 @@ multi_robot_explorer:
     # navigation) before each NavigateToPose. Failed or empty plans skip the
     # goal so the explorer picks another frontier.
     nav2_path_precheck_enable: true
+    # If true, never dispatch NavigateToPose when precheck server is unavailable.
+    # Explorer defers assignment and retries instead of bypassing planner precheck.
+    nav2_path_precheck_required: true
+    # Wait duration (s) for compute_path_to_pose server readiness before defer.
+    nav2_path_precheck_server_wait_sec: 0.5
     nav2_path_precheck_timeout_sec: 3.0
     nav2_path_min_poses: 2
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
@@ -119,6 +124,21 @@ multi_robot_explorer:
     motion_progress_min_delta_m: 0.03
     # How recent motion must be (s) to suppress stall cancellation.
     motion_progress_window_sec: 2.0
+    # If no fresh TF pose update for longer than this, robot pose is treated as
+    # unavailable for assignment/stall logic to avoid stale-pose decisions.
+    tf_stale_timeout_sec: 1.5
+    # Degraded-data hold: when TF or Nav2 precheck are clearly unhealthy, pause
+    # new assignments and avoid treating failures as map/frontier issues.
+    degraded_hold_enabled: true
+    # Enter degraded hold if TF has been stale for at least this long (s).
+    degraded_tf_hold_sec: 2.0
+    # Enter degraded hold after this many precheck failures/unavailable events
+    # within degraded_precheck_window_sec.
+    degraded_precheck_fail_threshold: 3
+    # Rolling window (s) for counting precheck failures/unavailable events.
+    degraded_precheck_window_sec: 10.0
+    # Require this many seconds of healthy signals before clearing degraded hold.
+    degraded_recovery_stable_sec: 4.0
 
     # Distance (m) at which a frontier near another robot's active goal
     # gets a penalty (discourages sending robots to the same area).

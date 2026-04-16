@@ -111,6 +111,10 @@ class RobotState:
     action_server_ready_time: float = 0.0
     # Last sampled world-frame pose used to detect physical motion.
     last_motion_sample_pose: Optional[Tuple[float, float]] = None
+    # Last time (unix sec) TF pose was updated successfully.
+    last_tf_update_time: float = 0.0
+    # Throttle repeated TF stale warnings.
+    tf_stale_warned: bool = False
     # Time of last_motion_sample_pose.
     last_motion_sample_time: float = 0.0
     # Last time meaningful physical movement (>= motion_progress_min_delta_m)
@@ -140,6 +144,16 @@ class RobotState:
     return_home_done: bool = False
     # Count of failed homing attempts (precheck abort, Nav2 failure, stall cancel).
     return_home_failures: int = 0
+    # Degraded-data hold mode: true when explorer should pause new assignments
+    # and avoid treating recent failures as map/frontier issues.
+    degraded_active: bool = False
+    degraded_since: float = 0.0
+    degraded_reason: str = ''
+    # Rolling counters for transient degradation signals.
+    tf_degraded_events: int = 0
+    precheck_fail_events: int = 0
+    precheck_timeout_events: int = 0
+    precheck_server_unavailable_events: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -533,10 +547,20 @@ class MultiRobotExplorer(Node):
         # Call /<robot>/compute_path_to_pose before NavigateToPose so goals
         # Nav2 cannot plan through the global costmap are skipped here.
         self.declare_parameter('nav2_path_precheck_enable', True)
+        self.declare_parameter('nav2_path_precheck_required', True)
+        self.declare_parameter('nav2_path_precheck_server_wait_sec', 0.5)
         self.declare_parameter('nav2_path_precheck_timeout_sec', 3.0)
         self.declare_parameter('nav2_path_min_poses', 2)
         # Must match planner_server.planner_plugins id (e.g. GridBased in burger.yaml).
         self.declare_parameter('nav2_path_precheck_planner_id', 'GridBased')
+        # Degraded-data hold: suppress blacklist / stall cancel when data quality
+        # is clearly bad (stale TF or repeated precheck issues) rather than true
+        # map/frontier failure.
+        self.declare_parameter('degraded_hold_enabled', True)
+        self.declare_parameter('degraded_tf_hold_sec', 2.0)
+        self.declare_parameter('degraded_precheck_fail_threshold', 3)
+        self.declare_parameter('degraded_precheck_window_sec', 10.0)
+        self.declare_parameter('degraded_recovery_stable_sec', 4.0)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -701,8 +725,32 @@ class MultiRobotExplorer(Node):
         self.nav2_path_precheck_enable: bool = bool(
             self.get_parameter('nav2_path_precheck_enable').value
         )
+        self.nav2_path_precheck_required: bool = bool(
+            self.get_parameter('nav2_path_precheck_required').value
+        )
+        self.nav2_path_precheck_server_wait_sec: float = float(
+            self.get_parameter('nav2_path_precheck_server_wait_sec').value
+        )
         self.nav2_path_precheck_timeout_sec: float = float(
             self.get_parameter('nav2_path_precheck_timeout_sec').value
+        )
+        self.tf_stale_timeout_sec: float = float(
+            self.declare_parameter('tf_stale_timeout_sec', 1.5).value
+        )
+        self.degraded_hold_enabled: bool = bool(
+            self.get_parameter('degraded_hold_enabled').value
+        )
+        self.degraded_tf_hold_sec: float = float(
+            self.get_parameter('degraded_tf_hold_sec').value
+        )
+        self.degraded_precheck_fail_threshold: int = max(
+            1, int(self.get_parameter('degraded_precheck_fail_threshold').value)
+        )
+        self.degraded_precheck_window_sec: float = float(
+            self.get_parameter('degraded_precheck_window_sec').value
+        )
+        self.degraded_recovery_stable_sec: float = float(
+            self.get_parameter('degraded_recovery_stable_sec').value
         )
         self.nav2_path_min_poses: int = max(
             1, int(self.get_parameter('nav2_path_min_poses').value)
@@ -1008,9 +1056,13 @@ class MultiRobotExplorer(Node):
                     rs.near_goal_since = None
 
         # Stall watchdog: cancel only when movement is expected but TF pose has
-        # remained effectively stagnant for progress_timeout seconds.
+        # remained effectively stagnant for progress_timeout seconds. Skip while
+        # degraded hold is active so transient data problems don't cause
+        # blacklisting or unnecessary cancels.
         for rs in self.robots.values():
             if not rs.goal_active or rs.last_goal_time <= 0:
+                continue
+            if self.degraded_hold_enabled and rs.degraded_active:
                 continue
             if self.lethal_hold_enabled and rs.nav2_lethal_active:
                 hold_age = now - rs.nav2_lethal_since if rs.nav2_lethal_since > 0.0 else 0.0
@@ -1086,6 +1138,49 @@ class MultiRobotExplorer(Node):
                 blacklist_xy=xy,
                 cooldown=True,
             )
+
+        # Degraded recovery: if robot has been healthy again for a while,
+        # clear degraded flag so normal behaviour resumes.
+        if self.degraded_hold_enabled:
+            now_recover = self.get_clock().now().nanoseconds / 1e9
+            for rs in self.robots.values():
+                if not rs.degraded_active:
+                    # decay counters slowly over time
+                    if (
+                        rs.precheck_fail_events > 0
+                        and (now_recover - rs.degraded_since)
+                        > self.degraded_precheck_window_sec
+                    ):
+                        rs.precheck_fail_events = 0
+                    if (
+                        rs.precheck_server_unavailable_events > 0
+                        and (now_recover - rs.degraded_since)
+                        > self.degraded_precheck_window_sec
+                    ):
+                        rs.precheck_server_unavailable_events = 0
+                    continue
+                # require some time since degraded_enter and fresh TF again
+                tf_fresh = (
+                    rs.last_tf_update_time > 0.0
+                    and (now_recover - rs.last_tf_update_time)
+                    <= self.tf_stale_timeout_sec
+                )
+                if (
+                    tf_fresh
+                    and (now_recover - rs.degraded_since)
+                    >= self.degraded_recovery_stable_sec
+                ):
+                    self.get_logger().info(
+                        f'[{rs.name}] Clearing degraded hold '
+                        f'(reason={rs.degraded_reason}, '
+                        f'stable_for={now_recover - rs.degraded_since:.1f}s)'
+                    )
+                    rs.degraded_active = False
+                    rs.degraded_since = 0.0
+                    rs.degraded_reason = ''
+                    rs.precheck_fail_events = 0
+                    rs.precheck_timeout_events = 0
+                    rs.precheck_server_unavailable_events = 0
 
         if use_global:
             self._global_frontier_step()
@@ -1371,6 +1466,7 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
 
     def _update_robot_positions(self):
+        now = self.get_clock().now().nanoseconds / 1e9
         for rs in self.robots.values():
             # In all modes, treat the robot base frame as "<robot>/base_footprint".
             # TF chain on global /tf:
@@ -1386,6 +1482,8 @@ class MultiRobotExplorer(Node):
                     t.transform.translation.x,
                     t.transform.translation.y,
                 )
+                rs.last_tf_update_time = now
+                rs.tf_stale_warned = False
                 if self._explorer_planning_ready and rs.start_pose_xy is None:
                     rs.start_pose_xy = (
                         t.transform.translation.x,
@@ -1394,8 +1492,32 @@ class MultiRobotExplorer(Node):
             except (tf2_ros.LookupException,
                     tf2_ros.ConnectivityException,
                     tf2_ros.ExtrapolationException):
-                # keep last known position
-                pass
+                # Keep last known position only briefly; stale TF should not
+                # continue driving assignment/blacklist decisions.
+                if (
+                    rs.last_tf_update_time > 0.0
+                    and (now - rs.last_tf_update_time) > self.tf_stale_timeout_sec
+                ):
+                    rs.position = None
+                    if not rs.tf_stale_warned:
+                        tf_age = now - rs.last_tf_update_time
+                        self.get_logger().warn(
+                            f'[{rs.name}] TF stale -> robot temporarily unassignable '
+                            f'(tf_age={tf_age:.2f}s, threshold={self.tf_stale_timeout_sec:.2f}s)'
+                        )
+                        rs.tf_stale_warned = True
+                    if (
+                        self.degraded_hold_enabled
+                        and not rs.degraded_active
+                        and (now - rs.last_tf_update_time) >= self.degraded_tf_hold_sec
+                    ):
+                        rs.degraded_active = True
+                        rs.degraded_since = now
+                        rs.degraded_reason = 'tf_stale'
+                        self.get_logger().warn(
+                            f'[{rs.name}] Entering degraded hold due to stale TF '
+                            f'(age={now - rs.last_tf_update_time:.2f}s)'
+                        )
 
     # -----------------------------------------------------------------------
     # Nav2 goal management
@@ -2214,10 +2336,23 @@ class MultiRobotExplorer(Node):
             retry_s = 0.5
         rs.next_assign_allowed_time = max(
             rs.next_assign_allowed_time, now + retry_s)
+        rs.precheck_fail_events += 1
         self.get_logger().info(
             f'[{rs.name}] Path precheck {detail}; '
             f'retry in {retry_s:.1f}s (planner may still be activating)'
         )
+        if (
+            self.degraded_hold_enabled
+            and not rs.degraded_active
+            and rs.precheck_fail_events >= self.degraded_precheck_fail_threshold
+        ):
+            rs.degraded_active = True
+            rs.degraded_since = now
+            rs.degraded_reason = 'precheck_failures'
+            self.get_logger().warn(
+                f'[{rs.name}] Entering degraded hold due to repeated path precheck '
+                f'failures (count={rs.precheck_fail_events})'
+            )
 
     def _begin_nav2_path_precheck(
         self,
@@ -2308,8 +2443,9 @@ class MultiRobotExplorer(Node):
             self.get_logger().info(
                 f'[{rs.name}] Path precheck failed ({st}); skipping NavigateToPose'
             )
-            self._blacklist_or_home_fail(rs, goal_xy)
-            self._arm_post_failure_cooldown(rs)
+            if not rs.degraded_active:
+                self._blacklist_or_home_fail(rs, goal_xy)
+                self._arm_post_failure_cooldown(rs)
             return
 
         result = wrapped.result
@@ -2320,8 +2456,9 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] Path precheck: plan too short '
                 f'({nposes} < {self.nav2_path_min_poses}); skipping goal'
             )
-            self._blacklist_or_home_fail(rs, goal_xy)
-            self._arm_post_failure_cooldown(rs)
+            if not rs.degraded_active:
+                self._blacklist_or_home_fail(rs, goal_xy)
+                self._arm_post_failure_cooldown(rs)
             return
 
         if frontier is None or goal_xy is None:
@@ -2510,12 +2647,38 @@ class MultiRobotExplorer(Node):
         ):
             if rs.path_precheck_in_progress:
                 return
-            if rs.path_precheck_client.wait_for_server(timeout_sec=0.2):
+            if rs.path_precheck_client.wait_for_server(
+                timeout_sec=self.nav2_path_precheck_server_wait_sec
+            ):
                 now_ts = self.get_clock().now().nanoseconds / 1e9
                 if rs.path_precheck_server_seen_time <= 0.0:
                     rs.path_precheck_server_seen_time = now_ts
                 self._begin_nav2_path_precheck(
                     rs, frontier, goal_x, goal_y, from_retarget)
+                return
+            if self.nav2_path_precheck_required:
+                self.get_logger().warn(
+                    f'[{rs.name}] compute_path_to_pose unavailable; '
+                    'deferring NavigateToPose because precheck is required '
+                    f'(server_wait_sec={self.nav2_path_precheck_server_wait_sec:.2f}, '
+                    f'precheck_required={self.nav2_path_precheck_required})')
+                rs.goal_active = False
+                rs.goal_pending = False
+                rs.precheck_server_unavailable_events += 1
+                if (
+                    self.degraded_hold_enabled
+                    and not rs.degraded_active
+                    and rs.precheck_server_unavailable_events
+                    >= self.degraded_precheck_fail_threshold
+                ):
+                    now_ts = self.get_clock().now().nanoseconds / 1e9
+                    rs.degraded_active = True
+                    rs.degraded_since = now_ts
+                    rs.degraded_reason = 'precheck_unavailable'
+                    self.get_logger().warn(
+                        f'[{rs.name}] Entering degraded hold due to compute_path_to_pose '
+                        f'server unavailability (count={rs.precheck_server_unavailable_events})'
+                    )
                 return
             self.get_logger().debug(
                 f'[{rs.name}] compute_path_to_pose unavailable; '
@@ -2721,7 +2884,8 @@ class MultiRobotExplorer(Node):
             if was_homing:
                 self._return_home_note_failure(rs)
             elif rs.goal_position and not self._should_skip_blacklist_due_to_lethal(rs):
-                rs.blacklist.append(rs.goal_position)
+                if not (self.degraded_hold_enabled and rs.degraded_active):
+                    rs.blacklist.append(rs.goal_position)
             elif rs.goal_position:
                 rs.held_goal_position = rs.goal_position
             rs.goal_active = False
@@ -2773,7 +2937,9 @@ class MultiRobotExplorer(Node):
                         f'{rs.last_distance_remaining:.2f}m > '
                         f'{self.suspicious_success_distance:.2f}m — treating as '
                         f'failure and blacklisting')
-                    if rs.goal_position:
+                    if rs.goal_position and not (
+                        self.degraded_hold_enabled and rs.degraded_active
+                    ):
                         rs.blacklist.append(rs.goal_position)
                     self._arm_post_failure_cooldown(rs)
                 else:
@@ -2866,7 +3032,9 @@ class MultiRobotExplorer(Node):
                         f'tacit: pose≤{self.tacit_goal_success_radius_m:.2f}m or '
                         f'remain≤{self.tacit_abort_max_distance_remaining_m:.2f}m)'
                     )
-                    if rs.goal_position:
+                    if rs.goal_position and not (
+                        self.degraded_hold_enabled and rs.degraded_active
+                    ):
                         self._blacklist_or_home_fail(rs, rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
         elif status == GoalStatus.STATUS_CANCELED:
