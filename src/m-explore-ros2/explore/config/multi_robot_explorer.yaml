@@ -117,8 +117,9 @@ multi_robot_explorer:
     # Stall watchdog: cancellation is based on physical TF pose stagnation.
     # If a robot has an active goal and is not near goal, it is canceled only
     # after progress_timeout seconds without meaningful physical movement.
-    # This avoids false stalls while taking non-linear detours around obstacles.
-    progress_timeout: 5.0
+    # Keep this above Nav2 controller movement_time_allowance (5s in burger.yaml)
+    # so the explorer does not preempt DWB while Nav2 still considers the goal active.
+    progress_timeout: 10.0
     progress_min_delta: 0.05
     # Minimum TF pose displacement (m) to count as robot movement.
     motion_progress_min_delta_m: 0.03
