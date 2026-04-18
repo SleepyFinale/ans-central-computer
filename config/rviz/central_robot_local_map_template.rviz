@@ -1,12 +1,8 @@
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
-  - Class: rviz_common/Selection
-    Name: Selection
   - Class: rviz_common/Tool Properties
     Name: Tool Properties
-  - Class: rviz_common/Views
-    Name: Views
 Visualization Manager:
   Class: ""
   Displays:
@@ -153,6 +149,18 @@ Visualization Manager:
       Line Style: Lines
       Line Width: 0.03
       Buffer Length: 1
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Frontiers
+      Enabled: false
+      Topic:
+        Value: /explore/frontiers
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Namespaces:
+        frontiers: true
+      Queue Size: 10
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -175,6 +183,13 @@ Visualization Manager:
       Covariance x: 0.25
       Covariance y: 0.25
       Covariance yaw: 0.07
+    - Class: nav2_rviz_plugins/GoalTool
+      Topic:
+        Value: /__ROBOT__/goal_pose
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
     - Class: rviz_default_plugins/PublishPoint
       Topic:
         Value: /__ROBOT__/clicked_point

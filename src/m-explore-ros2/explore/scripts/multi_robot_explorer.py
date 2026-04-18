@@ -30,7 +30,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from rclpy.duration import Duration
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
@@ -3221,8 +3221,12 @@ class MultiRobotExplorer(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = MultiRobotExplorer()
+    # MultiThreadedExecutor avoids a single subscription or TF work starving
+    # other map callbacks when DDS delivers concurrently with the planner timer.
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         # Treat Ctrl+C and external shutdown events as normal exit paths.
         pass

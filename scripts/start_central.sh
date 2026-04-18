@@ -330,9 +330,10 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
         -p "robot_name:=${SINGLE_ROBOT_BRIDGE}" &
     PIDS+=($!)
     sleep 0.5
-    echo "[1c/3] Single-robot mode — relay /${SINGLE_ROBOT_BRIDGE}/map -> /map"
+    echo "[1c/3] Single-robot mode — relay /${SINGLE_ROBOT_BRIDGE}/map_wire_z -> /map (zlib wire)"
     python3 "${SINGLE_ROBOT_MAP_RELAY_SCRIPT}" --ros-args \
-        -p "source_map:=/${SINGLE_ROBOT_BRIDGE}/map" &
+        -p "source_map:=/${SINGLE_ROBOT_BRIDGE}/map" \
+        -p "source_map_wire_z:=/${SINGLE_ROBOT_BRIDGE}/map_wire_z" &
     PIDS+=($!)
     sleep 0.5
 fi
