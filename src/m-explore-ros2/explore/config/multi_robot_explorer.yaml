@@ -182,9 +182,22 @@ multi_robot_explorer:
     # of a blacklisted point will be skipped for that robot.
     blacklist_radius: 0.5
 
-    # When a robot successfully reaches a goal, blacklist entries within
-    # this radius are cleared so that region can be reconsidered later.
+    # When a robot successfully reaches a goal, blacklist points within this
+    # distance (m) of the success pose are removed. Revives spurious
+    # failure-payload blacklists; runs before post_success_frontier_avoidance.
     blacklist_clear_radius: 0.5
+
+    # If true, after a successful *exploration* (non-return-home) leg, the
+    # just-assigned frontier centroid is blacklisted so a new map tick does
+    # not immediately re-send the same target while the grid is unchanged.
+    post_success_frontier_avoidance: true
+
+    # Safety net: if the planner selects a goal within this many metres of the
+    # previous one this many times in a row, blacklist and pick elsewhere.
+    # Set repeat_goal_count_limit: 0 to disable this backstop, or
+    # repeat_goal_dist_threshold: 0.0 to disable the distance test only.
+    repeat_goal_dist_threshold: 0.3
+    repeat_goal_count_limit: 5
 
     # Publish frontier markers on /explore/frontiers for RViz
     visualize: true

@@ -86,6 +86,10 @@ class RobotState:
     # Straight-line distance robot→goal; used to detect motion toward goal when
     # Nav2 feedback is sparse so the stall watchdog does not cancel healthy drives.
     last_dist_to_goal: Optional[float] = None
+    # Target frontier (centroid in map frame) for the most recent send attempt.
+    # Used after Nav2 success to avoid immediately re-choosing the same frontier
+    # while the map has not yet changed.
+    last_target_frontier_centroid: Optional[Tuple[float, float]] = None
     # Track behaviour around repeated / stagnant goals. last_goal_world stores
     # the most recent goal position in world coordinates (x, y).
     last_goal_world: Optional[Tuple[float, float]] = None
@@ -306,8 +310,11 @@ def assign_frontiers(
 
     If every candidate is closer than ``min_goal_separation`` (e.g. robot
     just reached a goal on that frontier), the matrix would be empty. A
-    second pass uses separation 0 so exploration can continue; repeat-goal
-    blacklisting still avoids infinite instant-success loops.
+    second pass uses separation 0 so exploration can continue; the node also
+    blacklists a just-visited frontier on Nav2 success (and clears stale
+    blacklists near the success pose) so the same point is not re-selected
+    on the next map tick. Repeat-goal blacklisting is an additional backstop
+    (see parameters ``repeat_goal_dist_threshold`` / ``repeat_goal_count_limit``).
 
     When ``assignment_robot_order_fn`` is set, each robot (in that order)
     picks the best still-unassigned frontier. This avoids starvation when
@@ -456,6 +463,15 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('blacklist_radius', 0.5)
         self.declare_parameter('blacklist_clear_radius', 0.5)
+        # On exploration success, drop blacklist points near the goal (revives
+        # stale failure flags), then (if true) add the just-visited frontier
+        # centroid to reduce instant re-send while the map is unchanged.
+        self.declare_parameter('post_success_frontier_avoidance', True)
+        # Re-send safety net: N consecutive selected goals within dist (m) of
+        # the previous one trigger blacklist+skip. Set count_limit to 0 to disable
+        # this backstop.
+        self.declare_parameter('repeat_goal_dist_threshold', 0.3)
+        self.declare_parameter('repeat_goal_count_limit', 5)
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
         self.declare_parameter('single_robot_offloaded_nav2', False)
@@ -625,8 +641,15 @@ class MultiRobotExplorer(Node):
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
-        self.blacklist_clear_radius = (
+        self.blacklist_clear_radius = float(
             self.get_parameter('blacklist_clear_radius').value)
+        self.post_success_frontier_avoidance: bool = bool(
+            self.get_parameter('post_success_frontier_avoidance').value)
+        self.repeat_goal_dist_threshold: float = max(
+            0.0, float(self.get_parameter('repeat_goal_dist_threshold').value))
+        self.repeat_goal_count_limit: int = int(
+            self.get_parameter('repeat_goal_count_limit').value
+        )
         self.visualize = self.get_parameter('visualize').value
         self.use_pose_goal_fallback = (
             self.get_parameter('use_pose_goal_fallback').value)
@@ -1840,6 +1863,64 @@ class MultiRobotExplorer(Node):
         else:
             rs.held_goal_position = xy
 
+    def _clear_blacklist_points_within_radius(
+        self,
+        rs: RobotState,
+        center: Tuple[float, float],
+        radius: float,
+    ) -> int:
+        """Remove blacklist points within ``radius`` of ``center`` (e.g. success
+        goal pose). Returns the number of entries removed.
+        """
+        r = max(0.0, float(radius))
+        if r <= 0.0 or not rs.blacklist:
+            return 0
+        n_before = len(rs.blacklist)
+        cx, cy = float(center[0]), float(center[1])
+        rs.blacklist = [
+            bl for bl in rs.blacklist
+            if math.hypot(bl[0] - cx, bl[1] - cy) >= r
+        ]
+        return n_before - len(rs.blacklist)
+
+    def _append_blacklist_if_distant(
+        self,
+        rs: RobotState,
+        xy: Tuple[float, float],
+    ) -> None:
+        """Append a blacklist point if nothing already blocks this region
+        (within ``blacklist_radius`` of ``xy``).
+        """
+        if any(_dist((xy[0], xy[1]), bl) < self.blacklist_radius for bl in rs.blacklist):
+            return
+        if not self._should_skip_blacklist_due_to_lethal(rs):
+            rs.blacklist.append((float(xy[0]), float(xy[1])))
+
+    def _apply_post_success_blacklist_policy(self, rs: RobotState) -> None:
+        """After a successful exploration leg, relax stale blacklists near the
+        success pose, then (optionally) blacklist the visited frontier so the
+        same assignment is not re-emitted on the next tick.
+        """
+        if rs.homing_active:
+            return
+        if rs.goal_position is None:
+            return
+        gpx, gpy = rs.goal_position
+        if self.blacklist_clear_radius > 0.0:
+            removed = self._clear_blacklist_points_within_radius(
+                rs, (gpx, gpy), self.blacklist_clear_radius
+            )
+            if removed > 0:
+                self.get_logger().debug(
+                    f'[{rs.name}] Cleared {removed} stale blacklist entrie(s) within '
+                    f'{self.blacklist_clear_radius:.2f}m of success pose'
+                )
+        if self.post_success_frontier_avoidance:
+            c = rs.last_target_frontier_centroid
+            if c is not None:
+                self._append_blacklist_if_distant(rs, c)
+        rs.last_target_frontier_centroid = None
+
     def _arm_post_failure_cooldown(self, rs: RobotState) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
         rs.next_assign_allowed_time = now + max(0.0, self.post_failure_cooldown_sec)
@@ -2447,18 +2528,21 @@ class MultiRobotExplorer(Node):
         frontier: Frontier,
     ) -> bool:
         """If True, skip sending: blacklist exhausted goal and try elsewhere."""
-        REPEAT_DIST_THRESH = 0.3
-        REPEAT_LIMIT = 5
+        if self.repeat_goal_count_limit <= 0:
+            return False
+        dthresh = self.repeat_goal_dist_threshold
+        if dthresh <= 0.0:
+            return False
         if rs.last_goal_world is not None:
             lx, ly = rs.last_goal_world
-            if math.hypot(goal_x - lx, goal_y - ly) < REPEAT_DIST_THRESH:
+            if math.hypot(goal_x - lx, goal_y - ly) < dthresh:
                 rs.repeat_goal_count += 1
             else:
                 rs.repeat_goal_count = 0
         else:
             rs.repeat_goal_count = 0
 
-        if rs.repeat_goal_count < REPEAT_LIMIT:
+        if rs.repeat_goal_count < self.repeat_goal_count_limit:
             return False
 
         if rs.homing_active:
@@ -3057,6 +3141,8 @@ class MultiRobotExplorer(Node):
             )
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
+        if not rs.homing_active:
+            rs.last_target_frontier_centroid = frontier.centroid_world
         if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
             return
         if self.goal_revalidate_before_send:
@@ -3431,6 +3517,7 @@ class MultiRobotExplorer(Node):
                             f'[{rs.name}] Goal reached '
                             f'(total: {rs.goals_reached})')
                     self._last_goal_finished_robot = rs.name
+                    self._apply_post_success_blacklist_policy(rs)
         elif status == GoalStatus.STATUS_ABORTED:
             tacit_ok, tacit_why = self._nav2_abort_tacit_success(rs)
             if tacit_ok:
@@ -3450,6 +3537,8 @@ class MultiRobotExplorer(Node):
                         f'{tacit_why}; total: {rs.goals_reached})'
                     )
                 self._last_goal_finished_robot = rs.name
+                if not was_homing:
+                    self._apply_post_success_blacklist_policy(rs)
             elif rs.tacit_success_pending_cancel:
                 # Client cancel for tacit "at goal"; bt_navigator may end as ABORTED.
                 rs.tacit_success_pending_cancel = False
@@ -3470,6 +3559,8 @@ class MultiRobotExplorer(Node):
                         f'total: {rs.goals_reached})'
                     )
                 self._last_goal_finished_robot = rs.name
+                if not was_homing:
+                    self._apply_post_success_blacklist_policy(rs)
             elif (
                 not was_homing
                 and rs.retarget_abort_blacklist_suppress_seq is not None
@@ -3531,6 +3622,8 @@ class MultiRobotExplorer(Node):
                         f'total: {rs.goals_reached})'
                     )
                 self._last_goal_finished_robot = rs.name
+                if not was_homing:
+                    self._apply_post_success_blacklist_policy(rs)
             else:
                 rs.goal_status = 'canceled'
                 self.get_logger().info(f'[{rs.name}] Goal cancelled')

@@ -143,6 +143,21 @@ rviz2 -d <your/ros2_ws>/src/m-explore-ros2/map_merge/launch/map_merge.rviz
 
 **Note**: If you want to use slam_toolbox, launch `multirobot_map_merge` with the following flag instead: `slam_toolbox:=True`. Remember to use the experimental branch mentioned above.
 
+### multi_robot_explorer: repeated goals
+
+The central `multi_robot_explorer` node can briefly pick the *same* frontier
+twice: after Nav2 reports success, the map may still show the same
+unknown/known boundary, so the planner ranks that frontier as best again, and
+assignment may use a *relaxed* `min_goal_separation` so exploration does not
+stall when the robot is already on the frontier. To avoid a tight loop, the
+node: (1) on each successful exploration leg, **clears** blacklist points near
+the success pose (parameter `blacklist_clear_radius`) and, if
+`post_success_frontier_avoidance` is true, **adds the visited frontier centroid**
+to the per-robot blacklist; (2) still uses a **repeat-goal** backstop
+(`repeat_goal_dist_threshold`, `repeat_goal_count_limit`) if the same
+coordinates are selected too many times in a row. Tune those parameters in
+`explore/config/multi_robot_explorer.yaml`.
+
 WIKI
 ----
 No wiki yet.
