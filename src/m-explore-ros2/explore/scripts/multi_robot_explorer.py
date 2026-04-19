@@ -1002,10 +1002,15 @@ class MultiRobotExplorer(Node):
                 rs.last_motion_sample_pose = rs.position
                 rs.last_motion_sample_time = now
 
-        # Pose-based progress: advance last_progress_time when the robot moves
-        # toward the goal in the map frame, even if Nav2 feedback is quiet.
+        # Pose-based progress: advance last_progress_time when the robot moves toward
+        # the goal in the map frame, only when Nav2 path-distance feedback is absent.
+        # Straight-line distance often *increases* during a necessary detour (corners,
+        # doorways); in that case distance_remaining (see _goal_feedback_callback)
+        # is the correct progress signal.
         for rs in self.robots.values():
             if not rs.goal_active or rs.goal_position is None or rs.position is None:
+                continue
+            if rs.last_distance_remaining is not None:
                 continue
             d = _dist(rs.position, rs.goal_position)
             if rs.last_dist_to_goal is None:
