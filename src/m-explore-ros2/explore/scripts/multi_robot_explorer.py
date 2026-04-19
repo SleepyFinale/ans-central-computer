@@ -35,7 +35,7 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
 from geometry_msgs.msg import PoseStamped
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Path
 from std_msgs.msg import String as StringMsg
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from visualization_msgs.msg import Marker, MarkerArray
@@ -68,6 +68,8 @@ class RobotState:
     goal_pending: bool = False
     goal_status: str = 'none'
     position: Optional[Tuple[float, float]] = None  # current (x,y) in world
+    # Yaw (rad) from map -> base_footprint TF; used for arrival path probes.
+    yaw: Optional[float] = None
     goals_reached: int = 0
     goals_failed: int = 0
     blacklist: list = field(default_factory=list)
@@ -126,6 +128,8 @@ class RobotState:
     nav2_lethal_since: float = 0.0
     # Goal to preserve while robot is in lethal space; resent after recovery.
     held_goal_position: Optional[Tuple[float, float]] = None
+    # Robot-side topic: RegulatedPurePursuitController "collision ahead" (debounced).
+    nav2_collision_ahead: bool = False
     # Async Nav2 path preflight (compute_path_to_pose before navigate_to_pose).
     path_precheck_client: Optional[object] = None
     path_precheck_goal_handle: Optional[object] = None
@@ -154,6 +158,17 @@ class RobotState:
     precheck_fail_events: int = 0
     precheck_timeout_events: int = 0
     precheck_server_unavailable_events: int = 0
+    # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
+    arrival_probe_in_progress: bool = False
+    arrival_probe_goal_handle: Optional[object] = None
+    arrival_probe_started_time: float = 0.0
+    arrival_probe_tacit_followup: bool = False
+    # Set after first tacit-time attempt to run arrival probe (success or skip).
+    arrival_tacit_probe_attempted: bool = False
+    # active_goal_seq for which we already ran the stagnation-band probe once.
+    arrival_stagnation_probe_fired_seq: int = -1
+    arrival_probe_for_goal_seq: int = 0
+    arrival_probe_map_ref: Optional[OccupancyGrid] = None
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +556,13 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('skip_blacklist_on_nav2_lethal', True)
         self.declare_parameter('lethal_hold_max_sec', 30.0)
         self.declare_parameter('lethal_retry_delay_sec', 0.5)
+        # Debounced Bool from turtlebot3_navigation2/nav2_controller_collision_watch.py
+        self.declare_parameter(
+            'nav2_collision_ahead_topic_pattern', '/{robot}/nav2_collision_ahead')
+        # When true, shorten tacit/stagnation waits for arrival probe if collision is reported.
+        self.declare_parameter('goal_arrival_probe_use_collision_ahead', True)
+        self.declare_parameter('goal_arrival_collision_tacit_hold_sec', 0.15)
+        self.declare_parameter('goal_arrival_probe_stagnation_sec_collision', 0.5)
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
@@ -553,6 +575,17 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('nav2_path_min_poses', 2)
         # Must match planner_server.planner_plugins id (e.g. GridBased in burger.yaml).
         self.declare_parameter('nav2_path_precheck_planner_id', 'GridBased')
+        # Near-goal arrival probe: replan from current TF pose, score path on merged map.
+        self.declare_parameter('goal_arrival_probe_enable', True)
+        self.declare_parameter('goal_arrival_probe_max_pose_dist_m', 1.0)
+        self.declare_parameter('goal_arrival_probe_max_distance_remaining_m', 0.35)
+        self.declare_parameter('goal_arrival_probe_stagnation_sec', 3.0)
+        self.declare_parameter('goal_arrival_probe_timeout_sec', 3.0)
+        self.declare_parameter('goal_arrival_probe_before_tacit_success', True)
+        self.declare_parameter('goal_arrival_path_max_length_ratio', 2.5)
+        self.declare_parameter('goal_arrival_max_cell_cost', 80)
+        self.declare_parameter('goal_arrival_max_bad_fraction', 0.35)
+        self.declare_parameter('goal_arrival_sample_step_scale', 0.5)
         # Degraded-data hold: suppress blacklist / stall cancel when data quality
         # is clearly bad (stale TF or repeated precheck issues) rather than true
         # map/frontier failure.
@@ -719,6 +752,18 @@ class MultiRobotExplorer(Node):
         self.lethal_retry_delay_sec = float(
             self.get_parameter('lethal_retry_delay_sec').value
         )
+        self.nav2_collision_ahead_topic_pattern: str = str(
+            self.get_parameter('nav2_collision_ahead_topic_pattern').value
+        )
+        self.goal_arrival_probe_use_collision_ahead: bool = bool(
+            self.get_parameter('goal_arrival_probe_use_collision_ahead').value
+        )
+        self.goal_arrival_collision_tacit_hold_sec: float = float(
+            self.get_parameter('goal_arrival_collision_tacit_hold_sec').value
+        )
+        self.goal_arrival_probe_stagnation_sec_collision: float = float(
+            self.get_parameter('goal_arrival_probe_stagnation_sec_collision').value
+        )
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
         )
@@ -759,6 +804,36 @@ class MultiRobotExplorer(Node):
         self.nav2_path_precheck_planner_id: str = (
             str(_pid).strip() if _pid is not None else ''
         )
+        self.goal_arrival_probe_enable: bool = bool(
+            self.get_parameter('goal_arrival_probe_enable').value
+        )
+        self.goal_arrival_probe_max_pose_dist_m: float = float(
+            self.get_parameter('goal_arrival_probe_max_pose_dist_m').value
+        )
+        self.goal_arrival_probe_max_distance_remaining_m: float = float(
+            self.get_parameter('goal_arrival_probe_max_distance_remaining_m').value
+        )
+        self.goal_arrival_probe_stagnation_sec: float = float(
+            self.get_parameter('goal_arrival_probe_stagnation_sec').value
+        )
+        self.goal_arrival_probe_timeout_sec: float = float(
+            self.get_parameter('goal_arrival_probe_timeout_sec').value
+        )
+        self.goal_arrival_probe_before_tacit_success: bool = bool(
+            self.get_parameter('goal_arrival_probe_before_tacit_success').value
+        )
+        self.goal_arrival_path_max_length_ratio: float = float(
+            self.get_parameter('goal_arrival_path_max_length_ratio').value
+        )
+        self.goal_arrival_max_cell_cost: int = int(
+            self.get_parameter('goal_arrival_max_cell_cost').value
+        )
+        self.goal_arrival_max_bad_fraction: float = float(
+            self.get_parameter('goal_arrival_max_bad_fraction').value
+        )
+        self.goal_arrival_sample_step_scale: float = float(
+            self.get_parameter('goal_arrival_sample_step_scale').value
+        )
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -786,6 +861,7 @@ class MultiRobotExplorer(Node):
         self._return_home_no_pose_logged: set = set()
         self.goal_pubs: Dict[str, object] = {}
         self.lethal_subs: Dict[str, object] = {}
+        self.collision_ahead_subs: Dict[str, object] = {}
         self.paused: bool = False
         self.in_global_phase: bool = False
         self._merge_state_last: str = 'NO_OVERLAP'
@@ -877,6 +953,16 @@ class MultiRobotExplorer(Node):
                     lambda msg, rname=name: self._nav2_lethal_callback(msg, rname),
                     10,
                 )
+            if self.goal_arrival_probe_use_collision_ahead:
+                ctopic = self.nav2_collision_ahead_topic_pattern.format(
+                    robot=name)
+                self.collision_ahead_subs[name] = self.create_subscription(
+                    Bool,
+                    ctopic,
+                    lambda msg, rname=name: self._nav2_collision_ahead_callback(
+                        msg, rname),
+                    10,
+                )
             if self.use_pose_goal_fallback:
                 self.goal_pubs[name] = self.create_publisher(
                     PoseStamped, f'/{name}/goal_pose', 10)
@@ -895,7 +981,9 @@ class MultiRobotExplorer(Node):
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
             f'mode={mode}, retarget_enable={self.retarget_enable}, '
             f'retarget_opportunity={self.retarget_opportunity_enable}, '
-            f'nav2_path_precheck={self.nav2_path_precheck_enable}')
+            f'nav2_path_precheck={self.nav2_path_precheck_enable}, '
+            f'goal_arrival_probe={self.goal_arrival_probe_enable}, '
+            f'collision_ahead_for_probe={self.goal_arrival_probe_use_collision_ahead}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -1038,12 +1126,33 @@ class MultiRobotExplorer(Node):
                 d = _dist(rs.position, rs.goal_position)
                 if self._at_nav_goal_for_tacit_hold(rs, d):
                     rs.last_progress_time = now
+                    hold_needed = float(self.tacit_goal_success_hold_sec)
+                    if (
+                        self.goal_arrival_probe_use_collision_ahead
+                        and rs.nav2_collision_ahead
+                        and self.goal_arrival_probe_enable
+                        and self.goal_arrival_probe_before_tacit_success
+                        and not rs.homing_active
+                    ):
+                        hold_needed = min(
+                            hold_needed,
+                            float(self.goal_arrival_collision_tacit_hold_sec),
+                        )
                     if rs.near_goal_since is None:
                         rs.near_goal_since = now
-                    elif (
-                        now - rs.near_goal_since
-                        >= self.tacit_goal_success_hold_sec
-                    ):
+                    elif now - rs.near_goal_since >= hold_needed:
+                        probe_gate = (
+                            self.goal_arrival_probe_enable
+                            and not rs.homing_active
+                            and self.goal_arrival_probe_before_tacit_success
+                        )
+                        if probe_gate:
+                            if rs.arrival_probe_in_progress:
+                                continue
+                            if not rs.arrival_tacit_probe_attempted:
+                                rs.arrival_tacit_probe_attempted = True
+                                if self._begin_arrival_probe(rs, tacit_followup=True):
+                                    continue
                         dr = rs.last_distance_remaining
                         self.get_logger().info(
                             f'[{rs.name}] At goal for {self.tacit_goal_success_hold_sec:.1f}s '
@@ -1059,6 +1168,45 @@ class MultiRobotExplorer(Node):
                         rs.near_goal_since = None
                 else:
                     rs.near_goal_since = None
+
+        # Near-goal stagnation: outside tacit radius, low remaining distance signal,
+        # but no planner progress — run arrival probe once per NavigateToPose leg.
+        if self.goal_arrival_probe_enable:
+            for rs in self.robots.values():
+                if not rs.goal_active or rs.goal_pending or rs.homing_active:
+                    continue
+                if rs.goal_position is None or rs.position is None:
+                    continue
+                if rs.arrival_probe_in_progress or rs.path_precheck_in_progress:
+                    continue
+                d = _dist(rs.position, rs.goal_position)
+                if d <= self.tacit_goal_success_radius_m:
+                    continue
+                if d > self.goal_arrival_probe_max_pose_dist_m:
+                    continue
+                dr = rs.last_distance_remaining
+                if (
+                    dr is not None
+                    and math.isfinite(dr)
+                    and dr > self.goal_arrival_probe_max_distance_remaining_m
+                ):
+                    continue
+                eff_stag = float(self.goal_arrival_probe_stagnation_sec)
+                if (
+                    self.goal_arrival_probe_use_collision_ahead
+                    and rs.nav2_collision_ahead
+                ):
+                    eff_stag = min(
+                        eff_stag,
+                        float(self.goal_arrival_probe_stagnation_sec_collision),
+                    )
+                stagnation_age = now - rs.last_progress_time
+                if stagnation_age < eff_stag:
+                    continue
+                if rs.arrival_stagnation_probe_fired_seq == rs.active_goal_seq:
+                    continue
+                if self._begin_arrival_probe(rs, tacit_followup=False):
+                    rs.arrival_stagnation_probe_fired_seq = rs.active_goal_seq
 
         # Stall watchdog: cancel only when movement is expected but TF pose has
         # remained effectively stagnant for progress_timeout seconds. Skip while
@@ -1084,6 +1232,8 @@ class MultiRobotExplorer(Node):
                     continue
 
             if rs.goal_pending or rs.goal_position is None or rs.position is None:
+                continue
+            if rs.arrival_probe_in_progress:
                 continue
 
             dist_to_goal = _dist(rs.position, rs.goal_position)
@@ -1143,6 +1293,22 @@ class MultiRobotExplorer(Node):
                 blacklist_xy=xy,
                 cooldown=True,
             )
+
+        for rs in self.robots.values():
+            if not rs.arrival_probe_in_progress:
+                continue
+            if rs.arrival_probe_started_time <= 0.0:
+                continue
+            if (
+                now - rs.arrival_probe_started_time
+                < self.goal_arrival_probe_timeout_sec
+            ):
+                continue
+            self.get_logger().warn(
+                f'[{rs.name}] Arrival path probe timed out after '
+                f'{self.goal_arrival_probe_timeout_sec:.1f}s'
+            )
+            self._arrival_probe_fail(rs, False)
 
         # Degraded recovery: if robot has been healthy again for a while,
         # clear degraded flag so normal behaviour resumes.
@@ -1220,7 +1386,12 @@ class MultiRobotExplorer(Node):
                     )
                 rs.return_home_done = True
                 continue
-            if rs.goal_active or rs.goal_pending or rs.path_precheck_in_progress:
+            if (
+                rs.goal_active
+                or rs.goal_pending
+                or rs.path_precheck_in_progress
+                or rs.arrival_probe_in_progress
+            ):
                 continue
             if not self._robot_may_assign_now(rs, now):
                 continue
@@ -1265,6 +1436,7 @@ class MultiRobotExplorer(Node):
                 not rs.goal_active
                 and not rs.goal_pending
                 and not rs.path_precheck_in_progress
+                and not rs.arrival_probe_in_progress
             ):
                 rs.homing_active = False
 
@@ -1487,6 +1659,10 @@ class MultiRobotExplorer(Node):
                     t.transform.translation.x,
                     t.transform.translation.y,
                 )
+                q = t.transform.rotation
+                siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+                cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+                rs.yaw = math.atan2(siny_cosp, cosy_cosp)
                 rs.last_tf_update_time = now
                 rs.tf_stale_warned = False
                 if self._explorer_planning_ready and rs.start_pose_xy is None:
@@ -1504,6 +1680,7 @@ class MultiRobotExplorer(Node):
                     and (now - rs.last_tf_update_time) > self.tf_stale_timeout_sec
                 ):
                     rs.position = None
+                    rs.yaw = None
                     if not rs.tf_stale_warned:
                         tf_age = now - rs.last_tf_update_time
                         self.get_logger().warn(
@@ -1721,6 +1898,12 @@ class MultiRobotExplorer(Node):
             self.get_logger().info(
                 f'[{rs.name}] Nav2 lethal-space state cleared'
             )
+
+    def _nav2_collision_ahead_callback(self, msg: Bool, robot_name: str):
+        rs = self.robots.get(robot_name)
+        if rs is None:
+            return
+        rs.nav2_collision_ahead = bool(msg.data)
 
     def _robot_may_assign_now(self, rs: RobotState, now: float) -> bool:
         return now >= rs.next_assign_allowed_time
@@ -1940,6 +2123,8 @@ class MultiRobotExplorer(Node):
         if not self.retarget_enable:
             return
         if rs.homing_active:
+            return
+        if rs.arrival_probe_in_progress:
             return
         if not rs.goal_active or rs.goal_pending or rs.position is None or rs.goal_position is None:
             return
@@ -2472,6 +2657,288 @@ class MultiRobotExplorer(Node):
         self._dispatch_navigate_to_pose(
             rs, frontier, goal_x, goal_y, from_retarget)
 
+    def _abort_arrival_probe(
+        self,
+        rs: RobotState,
+        *,
+        cancel_action: bool,
+    ) -> None:
+        if cancel_action and rs.arrival_probe_goal_handle is not None:
+            try:
+                rs.arrival_probe_goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+        rs.arrival_probe_goal_handle = None
+        rs.arrival_probe_in_progress = False
+        rs.arrival_probe_started_time = 0.0
+        rs.arrival_probe_tacit_followup = False
+        rs.arrival_probe_for_goal_seq = 0
+        rs.arrival_probe_map_ref = None
+
+    def _sample_nav_path_points(self, path: Path, step_m: float) -> List[Tuple[float, float]]:
+        """Sample (x, y) along path poses at approximately ``step_m`` spacing."""
+        poses = path.poses
+        if not poses:
+            return []
+        pts: List[Tuple[float, float]] = [
+            (float(p.pose.position.x), float(p.pose.position.y))
+            for p in poses
+        ]
+        if len(pts) == 1:
+            return pts
+        out: List[Tuple[float, float]] = [pts[0]]
+        cum = 0.0
+        target = step_m
+        for i in range(1, len(pts)):
+            ax, ay = pts[i - 1]
+            bx, by = pts[i]
+            dx, dy = bx - ax, by - ay
+            seg = math.hypot(dx, dy)
+            if seg < 1e-9:
+                continue
+            ux, uy = dx / seg, dy / seg
+            seg_start = cum
+            cum += seg
+            while target <= cum + 1e-9:
+                back = target - seg_start
+                out.append((ax + ux * back, ay + uy * back))
+                target += step_m
+        lx, ly = pts[-1]
+        if math.hypot(out[-1][0] - lx, out[-1][1] - ly) > step_m * 0.25:
+            out.append((lx, ly))
+        return out
+
+    def _score_arrival_path_on_map(
+        self,
+        m: Optional[OccupancyGrid],
+        path: Optional[Path],
+        start_xy: Tuple[float, float],
+        goal_xy: Tuple[float, float],
+    ) -> Tuple[bool, str]:
+        """Return (ok, reason) for merged-map feasibility of a Nav2 global path."""
+        if m is None:
+            return True, 'no_map_skip'
+        if path is None or not path.poses:
+            return False, 'empty_path'
+        nposes = len(path.poses)
+        if nposes < self.nav2_path_min_poses:
+            return False, f'too_few_poses({nposes})'
+        plen = 0.0
+        for i in range(1, nposes):
+            ax = path.poses[i - 1].pose.position.x
+            ay = path.poses[i - 1].pose.position.y
+            bx = path.poses[i].pose.position.x
+            by = path.poses[i].pose.position.y
+            plen += math.hypot(bx - ax, by - ay)
+        eu = math.hypot(goal_xy[0] - start_xy[0], goal_xy[1] - start_xy[1])
+        if eu > 0.05 and plen / eu > self.goal_arrival_path_max_length_ratio:
+            return False, (
+                f'length_ratio={plen / eu:.2f}>'
+                f'{self.goal_arrival_path_max_length_ratio:.2f}'
+            )
+        res = m.info.resolution
+        step = max(res * self.goal_arrival_sample_step_scale, 0.05)
+        samples = self._sample_nav_path_points(path, step)
+        if not samples:
+            samples = [start_xy, goal_xy]
+        bad = 0
+        max_c = 0
+        for x, y in samples:
+            c = self._goal_cell_cost(m, x, y)
+            max_c = max(max_c, c)
+            if c >= self.goal_arrival_max_cell_cost:
+                bad += 1
+        frac = bad / max(len(samples), 1)
+        if frac > self.goal_arrival_max_bad_fraction:
+            return False, (
+                f'bad_frac={frac:.2f}>{self.goal_arrival_max_bad_fraction:.2f} '
+                f'max_cell={max_c}'
+            )
+        return (
+            True,
+            f'ok len_ratio={plen / eu if eu > 1e-6 else 0.0:.2f} '
+            f'samples={len(samples)} max_cell={max_c}',
+        )
+
+    def _begin_arrival_probe(
+        self,
+        rs: RobotState,
+        *,
+        tacit_followup: bool,
+    ) -> bool:
+        """Start ComputePathToPose(use_start=True) for near-goal feasibility.
+
+        Returns True if an async probe was started.
+        """
+        if not self.goal_arrival_probe_enable:
+            return False
+        if rs.homing_active:
+            return False
+        if rs.path_precheck_in_progress or rs.arrival_probe_in_progress:
+            return False
+        if rs.goal_position is None or rs.position is None:
+            return False
+        if rs.yaw is None:
+            return False
+        if rs.path_precheck_client is None:
+            return False
+        if not rs.path_precheck_client.wait_for_server(
+            timeout_sec=self.nav2_path_precheck_server_wait_sec
+        ):
+            return False
+
+        gx, gy = rs.goal_position
+        rs.arrival_probe_in_progress = True
+        rs.arrival_probe_tacit_followup = tacit_followup
+        rs.arrival_probe_started_time = (
+            self.get_clock().now().nanoseconds / 1e9
+        )
+        rs.arrival_probe_for_goal_seq = rs.active_goal_seq
+        rs.arrival_probe_map_ref = self._current_goal_map
+
+        cp_goal = ComputePathToPose.Goal()
+        cp_goal.use_start = True
+        cp_goal.planner_id = self.nav2_path_precheck_planner_id
+        cp_goal.start.header.frame_id = self.world_frame
+        cp_goal.start.header.stamp = self.get_clock().now().to_msg()
+        cp_goal.start.pose.position.x = rs.position[0]
+        cp_goal.start.pose.position.y = rs.position[1]
+        cp_goal.start.pose.position.z = 0.0
+        yaw = rs.yaw
+        cp_goal.start.pose.orientation.x = 0.0
+        cp_goal.start.pose.orientation.y = 0.0
+        cp_goal.start.pose.orientation.z = math.sin(yaw * 0.5)
+        cp_goal.start.pose.orientation.w = math.cos(yaw * 0.5)
+        cp_goal.goal.header.frame_id = self.world_frame
+        cp_goal.goal.header.stamp = self.get_clock().now().to_msg()
+        cp_goal.goal.pose.position.x = gx
+        cp_goal.goal.pose.position.y = gy
+        cp_goal.goal.pose.position.z = 0.0
+        cp_goal.goal.pose.orientation.x = 0.0
+        cp_goal.goal.pose.orientation.y = 0.0
+        cp_goal.goal.pose.orientation.z = 0.0
+        cp_goal.goal.pose.orientation.w = 1.0
+
+        send_future = rs.path_precheck_client.send_goal_async(cp_goal)
+        send_future.add_done_callback(
+            lambda f, r=rs: self._arrival_probe_goal_response_callback(f, r))
+        self.get_logger().info(
+            f'[{rs.name}] Arrival path probe (tacit_followup={tacit_followup}) '
+            f'→ ({gx:.2f}, {gy:.2f})'
+        )
+        return True
+
+    def _arrival_probe_goal_response_callback(self, future, rs: RobotState):
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Arrival probe send failed: {exc}')
+            self._abort_arrival_probe(rs, cancel_action=False)
+            return
+
+        if not goal_handle.accepted:
+            self.get_logger().info(
+                f'[{rs.name}] Arrival probe goal rejected; treating as inconclusive'
+            )
+            self._abort_arrival_probe(rs, cancel_action=False)
+            return
+
+        rs.arrival_probe_goal_handle = goal_handle
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda f, r=rs: self._arrival_probe_result_callback(f, r))
+
+    def _arrival_probe_result_callback(self, future, rs: RobotState):
+        saved_seq = rs.arrival_probe_for_goal_seq
+        tacit_follow = rs.arrival_probe_tacit_followup
+        map_snapshot = rs.arrival_probe_map_ref
+        rs.arrival_probe_goal_handle = None
+        rs.arrival_probe_in_progress = False
+        rs.arrival_probe_tacit_followup = False
+        rs.arrival_probe_started_time = 0.0
+        rs.arrival_probe_for_goal_seq = 0
+        rs.arrival_probe_map_ref = None
+
+        if saved_seq != rs.active_goal_seq:
+            self.get_logger().debug(
+                f'[{rs.name}] Ignoring stale arrival probe result '
+                f'(seq={saved_seq} active={rs.active_goal_seq})'
+            )
+            return
+
+        now = self.get_clock().now().nanoseconds / 1e9
+        try:
+            wrapped = future.result()
+        except Exception as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] Arrival probe result error: {exc}')
+            self._arrival_probe_fail(rs, tacit_follow)
+            return
+
+        status = wrapped.status
+        if status != GoalStatus.STATUS_SUCCEEDED:
+            labels = {
+                GoalStatus.STATUS_ABORTED: 'ABORTED',
+                GoalStatus.STATUS_CANCELED: 'CANCELED',
+                GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
+            }
+            st = labels.get(int(status), f'status_{int(status)}')
+            self.get_logger().info(
+                f'[{rs.name}] Arrival probe planner failed ({st})'
+            )
+            self._arrival_probe_fail(rs, tacit_follow)
+            return
+
+        result = wrapped.result
+        nav_path = result.path if result is not None else None
+        gp = rs.goal_position
+        sp = rs.position
+        if gp is None or sp is None:
+            return
+        ok, why = self._score_arrival_path_on_map(
+            map_snapshot, nav_path, sp, gp)
+        if ok:
+            self.get_logger().info(
+                f'[{rs.name}] Arrival probe passed ({why})'
+            )
+            if tacit_follow and rs.goal_handle is not None:
+                rs.tacit_success_pending_cancel = True
+                rs.ignore_cooldown_on_next_cancel = True
+                try:
+                    rs.goal_handle.cancel_goal_async()
+                except Exception:
+                    pass
+                rs.near_goal_since = None
+            else:
+                rs.last_progress_time = now
+                rs.last_goal_time = now
+        else:
+            self.get_logger().warn(
+                f'[{rs.name}] Arrival probe failed map check: {why}'
+            )
+            self._arrival_probe_fail(rs, tacit_follow)
+
+    def _arrival_probe_fail(
+        self,
+        rs: RobotState,
+        tacit_follow: bool,
+    ) -> None:
+        """Blacklist and cancel after a failed arrival probe (exploration only)."""
+        _ = tacit_follow
+        gp = rs.goal_position
+        if rs.homing_active:
+            return
+        self.get_logger().warn(
+            f'[{rs.name}] Arrival probe failed — blacklisting goal and cancelling'
+        )
+        self._cancel_goal(rs)
+        if gp is not None and not (
+            self.degraded_hold_enabled and rs.degraded_active
+        ):
+            self._blacklist_or_home_fail(rs, gp)
+        self._arm_post_failure_cooldown(rs)
+
     def _dispatch_navigate_to_pose(
         self,
         rs: RobotState,
@@ -2520,6 +2987,8 @@ class MultiRobotExplorer(Node):
             rs.last_dist_to_goal = None
         rs.near_goal_since = None
         rs.tacit_success_pending_cancel = False
+        rs.arrival_tacit_probe_attempted = False
+        rs.arrival_stagnation_probe_fired_seq = -1
         if not from_retarget:
             rs.retarget_anchor = (goal_x, goal_y)
 
@@ -2650,7 +3119,7 @@ class MultiRobotExplorer(Node):
             self.nav2_path_precheck_enable
             and rs.path_precheck_client is not None
         ):
-            if rs.path_precheck_in_progress:
+            if rs.path_precheck_in_progress or rs.arrival_probe_in_progress:
                 return
             if rs.path_precheck_client.wait_for_server(
                 timeout_sec=self.nav2_path_precheck_server_wait_sec
@@ -3120,6 +3589,8 @@ class MultiRobotExplorer(Node):
 
     def _cancel_goal(self, rs: RobotState):
         now = self.get_clock().now().nanoseconds / 1e9
+        if rs.arrival_probe_in_progress:
+            self._abort_arrival_probe(rs, cancel_action=True)
         if rs.path_precheck_in_progress:
             self._abort_path_precheck(
                 rs,

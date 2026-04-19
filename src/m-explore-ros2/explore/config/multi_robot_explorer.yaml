@@ -53,6 +53,39 @@ multi_robot_explorer:
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
 
+    # Near-goal arrival probe: after the robot is close to the goal (or stuck
+    # short of it with low distance_remaining), call compute_path_to_pose with
+    # use_start=true from the current TF pose, then score that path on the
+    # merged/local OccupancyGrid (length vs straight line + high-cost cell
+    # fraction). If the probe fails, cancel NavigateToPose, blacklist the goal,
+    # and pick a new frontier. Skipped for return-home goals (homing_active).
+    goal_arrival_probe_enable: true
+    # Map-frame distance to goal: above tacit_goal_success_radius_m, up to this.
+    goal_arrival_probe_max_pose_dist_m: 1.0
+    # With Nav2 distance_remaining above this, stagnation probe is not triggered.
+    goal_arrival_probe_max_distance_remaining_m: 0.35
+    # No distance progress (last_progress_time) for this long triggers stagnation probe.
+    goal_arrival_probe_stagnation_sec: 3.0
+    goal_arrival_probe_timeout_sec: 3.0
+    # Run probe before tacit "at goal" cancel/success when gate conditions hold.
+    goal_arrival_probe_before_tacit_success: true
+    # Reject if planned path length / Euclidean(straight line) exceeds this.
+    goal_arrival_path_max_length_ratio: 2.5
+    # OccupancyGrid cell value: samples at or above this count as "bad" for fraction.
+    goal_arrival_max_cell_cost: 80
+    # Reject if this fraction of samples along the path are >= goal_arrival_max_cell_cost.
+    goal_arrival_max_bad_fraction: 0.35
+    # Sample step = map_resolution * this (metres), with a small floor.
+    goal_arrival_sample_step_scale: 0.5
+    # Debounced Bool from robot nav2_controller_collision_watch (controller_server
+    # "collision ahead" via /rosout). When true, arrival probe runs sooner.
+    nav2_collision_ahead_topic_pattern: "/{robot}/nav2_collision_ahead"
+    goal_arrival_probe_use_collision_ahead: true
+    # Minimum time in tacit zone before pre-tacit arrival probe when collision ahead.
+    goal_arrival_collision_tacit_hold_sec: 0.15
+    # Stagnation time before arrival probe when collision ahead (vs goal_arrival_probe_stagnation_sec).
+    goal_arrival_probe_stagnation_sec_collision: 0.5
+
     # After abort, reject, watchdog cancel, or other failure paths, wait this
     # many seconds before assigning a new frontier (per robot).
     post_failure_cooldown_sec: 5.0
