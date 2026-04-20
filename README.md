@@ -244,13 +244,12 @@ When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]
 This stack now supports two comms modes.
 
 1) `shared_domain` (legacy compatibility)
-- All robots and central share one domain (lab default `50`).
-- Start central normally: `./scripts/start_central.sh`.
-
+   - All robots and central share one domain (lab default `50`).
+   - Start central normally: `./scripts/start_central.sh`.
 2) `bridged_domains` (recommended)
-- Central uses `fleet_domain_map.central_domain_id` (default `90`).
-- Each robot uses a deterministic per-robot domain from `config/fleet_domain_map.yaml`.
-- Central starts per-robot domain bridges and keeps explorer/action behavior unchanged.
+   - Central uses `fleet_domain_map.central_domain_id` (default `90`).
+   - Each robot uses a deterministic per-robot domain from `config/fleet_domain_map.yaml`.
+   - Central starts per-robot domain bridges and keeps explorer/action behavior unchanged.
 
 Central setup for bridged mode:
 
@@ -267,6 +266,7 @@ Optional robot subset still works:
 ```
 
 Bridge/domain sources used by startup:
+
 - `config/fleet_domain_map.yaml`
 - `config/fleet_bridge_contract.yaml`
 - generated bridge configs in `config/generated_domain_bridge/`
