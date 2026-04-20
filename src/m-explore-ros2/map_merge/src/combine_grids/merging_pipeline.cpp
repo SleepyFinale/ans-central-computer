@@ -48,9 +48,10 @@
 
 namespace combine_grids
 {
-bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
-                                         FeatureType feature_type,
-                                         double confidence)
+bool MergingPipeline::estimateTransforms(
+  rclcpp::Logger logger,
+  FeatureType feature_type,
+  double confidence)
 {
   std::vector<cv::detail::ImageFeatures> image_features;
   std::vector<cv::detail::MatchesInfo> pairwise_matches;
@@ -59,11 +60,11 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   // TODO investigate value translation effect on features
   auto finder = internal::chooseFeatureFinder(feature_type);
   cv::Ptr<cv::detail::FeaturesMatcher> matcher =
-      cv::makePtr<cv::detail::AffineBestOf2NearestMatcher>();
+    cv::makePtr<cv::detail::AffineBestOf2NearestMatcher>();
   cv::Ptr<cv::detail::Estimator> estimator =
-      cv::makePtr<cv::detail::AffineBasedEstimator>();
+    cv::makePtr<cv::detail::AffineBasedEstimator>();
   cv::Ptr<cv::detail::BundleAdjusterBase> adjuster =
-      cv::makePtr<cv::detail::BundleAdjusterAffinePartial>();
+    cv::makePtr<cv::detail::BundleAdjusterAffinePartial>();
 
   if (images_.empty()) {
     return true;
@@ -72,7 +73,7 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   /* find features in images */
   RCLCPP_DEBUG(logger, "[estimateTransforms] computing features");
   image_features.reserve(images_.size());
-  for (const cv::Mat& image : images_) {
+  for (const cv::Mat & image : images_) {
     image_features.emplace_back();
     if (!image.empty()) {
 #if CV_VERSION_MAJOR >= 4
@@ -98,7 +99,7 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   int best_inliers = 0;
   int best_matches = 0;
   double best_confidence = 0.0;
-  for (const auto& mi : pairwise_matches) {
+  for (const auto & mi : pairwise_matches) {
     if (mi.matches.empty()) {
       continue;
     }
@@ -109,20 +110,22 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
     }
   }
 
-  double best_ratio = (best_matches > 0)
-                          ? (static_cast<double>(best_inliers) /
-                             static_cast<double>(best_matches))
-                          : 0.0;
+  double best_ratio = (best_matches > 0) ?
+    (static_cast<double>(best_inliers) /
+    static_cast<double>(best_matches)) :
+    0.0;
 
   const int kMinInliers = 8;
   const double kMinInlierRatio = 0.5;
   if (best_inliers > 0 &&
-      (best_inliers < kMinInliers || best_ratio < kMinInlierRatio)) {
-    RCLCPP_INFO(logger,
-                "[estimateTransforms] Best feature match too weak "
-                "(inliers=%d, matches=%d, ratio=%.3f, confidence=%.3f); "
-                "placing maps independently",
-                best_inliers, best_matches, best_ratio, best_confidence);
+    (best_inliers < kMinInliers || best_ratio < kMinInlierRatio))
+  {
+    RCLCPP_INFO(
+      logger,
+      "[estimateTransforms] Best feature match too weak "
+      "(inliers=%d, matches=%d, ratio=%.3f, confidence=%.3f); "
+      "placing maps independently",
+      best_inliers, best_matches, best_ratio, best_confidence);
 
     transforms_.clear();
     transforms_.resize(images_.size());
@@ -139,16 +142,17 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
     // place remaining grids at non-overlapping positions
     assignFallbackTransforms();
 
-    RCLCPP_DEBUG(logger,
-                 "[estimateTransforms] All maps placed independently due to "
-                 "weak feature matches");
+    RCLCPP_DEBUG(
+      logger,
+      "[estimateTransforms] All maps placed independently due to "
+      "weak feature matches");
     return true;
   }
 
   /* use only matches that has enough confidence. leave out matches that are not
    * connected (small components) */
   good_indices = cv::detail::leaveBiggestComponent(
-      image_features, pairwise_matches, static_cast<float>(confidence));
+    image_features, pairwise_matches, static_cast<float>(confidence));
 
   // no match found between any pair of maps.
   if (good_indices.size() <= 1) {
@@ -167,10 +171,11 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
     // place remaining grids at non-overlapping positions
     assignFallbackTransforms();
 
-    RCLCPP_DEBUG(logger,
-                 "[estimateTransforms] No overlap detected between %zu maps; "
-                 "all maps placed independently",
-                 images_.size());
+    RCLCPP_DEBUG(
+      logger,
+      "[estimateTransforms] No overlap detected between %zu maps; "
+      "all maps placed independently",
+      images_.size());
     return true;
   }
 
@@ -200,13 +205,15 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
 
   /* levmarq optimization */
   // openCV just accepts float transforms
-  for (auto& transform : transforms) {
+  for (auto & transform : transforms) {
     transform.R.convertTo(transform.R, CV_32F);
   }
   RCLCPP_DEBUG(logger, "[estimateTransforms] optimizing global transforms");
   adjuster->setConfThresh(confidence);
   if (!(*adjuster)(image_features, pairwise_matches, transforms)) {
-    RCLCPP_WARN(logger, "[estimateTransforms] Bundle adjusting failed. Could not estimate transforms.");
+    RCLCPP_WARN(
+      logger,
+      "[estimateTransforms] Bundle adjusting failed. Could not estimate transforms.");
     return false;
   }
 
@@ -215,7 +222,7 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
   matched_.assign(images_.size(), false);
 
   size_t i = 0;
-  for (auto& j : good_indices) {
+  for (auto & j : good_indices) {
     // we want to work with transforms as doubles
     transforms[i].R.convertTo(transforms_[static_cast<size_t>(j)], CV_64F);
     matched_[static_cast<size_t>(j)] = true;
@@ -227,17 +234,18 @@ bool MergingPipeline::estimateTransforms(rclcpp::Logger logger,
 
   size_t n_matched = matchedCount();
   if (n_matched < images_.size()) {
-    RCLCPP_INFO(logger,
-                "[estimateTransforms] %zu of %zu maps matched by features; "
-                "%zu placed independently",
-                n_matched, images_.size(), images_.size() - n_matched);
+    RCLCPP_INFO(
+      logger,
+      "[estimateTransforms] %zu of %zu maps matched by features; "
+      "%zu placed independently",
+      n_matched, images_.size(), images_.size() - n_matched);
   }
 
   return true;
 }
 
 // checks whether given matrix is an identity, i.e. exactly appropriate Mat::eye
-static inline bool isIdentity(const cv::Mat& matrix)
+static inline bool isIdentity(const cv::Mat & matrix)
 {
   if (matrix.empty()) {
     return false;
@@ -267,7 +275,7 @@ nav_msgs::msg::OccupancyGrid::SharedPtr MergingPipeline::composeGrids(rclcpp::Lo
     if (!transforms_[i].empty() && !images_[i].empty()) {
       imgs_warped.emplace_back();
       rois.emplace_back(
-          warper.warp(images_[i], transforms_[i], imgs_warped.back()));
+        warper.warp(images_[i], transforms_[i], imgs_warped.back()));
     }
   }
 
@@ -300,9 +308,9 @@ nav_msgs::msg::OccupancyGrid::SharedPtr MergingPipeline::composeGrids(rclcpp::Lo
 
   // set grid origin to its centre
   result->info.origin.position.x =
-      -(result->info.width / 2.0) * double(result->info.resolution);
+    -(result->info.width / 2.0) * double(result->info.resolution);
   result->info.origin.position.y =
-      -(result->info.height / 2.0) * double(result->info.resolution);
+    -(result->info.height / 2.0) * double(result->info.resolution);
   result->info.origin.orientation.w = 1.0;
 
   return result;
@@ -312,7 +320,7 @@ size_t MergingPipeline::matchedCount() const
 {
   size_t count = 0;
   for (bool m : matched_) {
-    if (m) ++count;
+    if (m) {++count;}
   }
   return count;
 }
@@ -351,7 +359,7 @@ std::vector<geometry_msgs::msg::Transform> MergingPipeline::getTransforms() cons
   std::vector<geometry_msgs::msg::Transform> result;
   result.reserve(transforms_.size());
 
-  for (auto& transform : transforms_) {
+  for (auto & transform : transforms_) {
     if (transform.empty()) {
       result.emplace_back();
       continue;

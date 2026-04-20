@@ -28,7 +28,9 @@ def generate_launch_description():
     declare_known_init_poses_argument = DeclareLaunchArgument(
         "known_init_poses",
         default_value="True",
-        description="Known initial poses of the robots. If so don't forget to declare them in the params.yaml file",
+        description=(
+            "Known initial poses of the robots; if true, set them in params.yaml"
+        ),
     )
 
     # Map fully qualified names to relative ones so the node's namespace can be prepended.

@@ -256,7 +256,9 @@ for r in "${DETECTED_ROBOTS[@]}"; do
         uniq_detected+=("$r")
     fi
 done
-DETECTED_ROBOTS=("${uniq_detected[@]}")
+# Alphabetical order so tf_relay / map_merge / explorer see a stable robot list
+# (topic discovery order from ros2 topic list is otherwise undefined).
+readarray -t DETECTED_ROBOTS < <(printf '%s\n' "${uniq_detected[@]}" | sort)
 
 # Apply selection filter (map letters to robot name first char).
 SELECTED_ROBOTS=()

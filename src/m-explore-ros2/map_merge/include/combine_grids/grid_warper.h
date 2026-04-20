@@ -42,19 +42,20 @@
 
 namespace combine_grids
 {
-namespace internal
-{
-class GridWarper
-{
+  namespace internal
+  {
+    class GridWarper
+    {
 public:
-  cv::Rect warp(const cv::Mat& grid, const cv::Mat& transform,
-                cv::Mat& warped_grid);
+      cv::Rect warp(
+        const cv::Mat & grid, const cv::Mat & transform,
+        cv::Mat & warped_grid);
 
 private:
-  cv::Rect warpRoi(const cv::Mat& grid, const cv::Mat& transform);
-};
+      cv::Rect warpRoi(const cv::Mat & grid, const cv::Mat & transform);
+    };
 
-}  // namespace internal
+  } // namespace internal
 
 }  // namespace combine_grids
 

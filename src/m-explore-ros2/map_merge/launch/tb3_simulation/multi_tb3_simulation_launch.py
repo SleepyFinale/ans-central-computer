@@ -23,7 +23,7 @@ The robots co-exist on a shared environment and are controlled by independent na
 import os
 
 from ament_index_python.packages import get_package_share_directory
-from launch import LaunchDescription, condition
+from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
@@ -74,7 +74,9 @@ def generate_launch_description():
     declare_known_init_poses_cmd = DeclareLaunchArgument(
         "known_init_poses",
         default_value="True",
-        description="Known initial poses of the robots. If so don't forget to declare them in the params.yaml file",
+        description=(
+            "Known initial poses of the robots; if true, set them in params.yaml"
+        ),
     )
 
     # Declare the launch arguments

@@ -3,7 +3,8 @@
 # you can run this with test maps provided in m-explore-extra repo
 # https://github.com/hrnr/m-explore-extra
 
-# roslaunch multirobot_map_merge from_map_server.launch map1:=PATH_TO_m-explore-extra/map_merge/gmapping_maps/2011-08-09-12-22-52.yaml map2:=PATH_TO_m-explore-extra/map_merge/gmapping_maps/2012-01-28-11-12-01.yaml rviz:=True
+# Example: from_map_server.launch with map1/map2 paths under m-explore-extra
+# gmapping_maps (see upstream repo); add rviz:=True as needed.
 
 import os
 
@@ -44,7 +45,9 @@ def generate_launch_description():
     declare_known_init_poses_argument = DeclareLaunchArgument(
         "known_init_poses",
         default_value="False",
-        description="Known initial poses of the robots. If so don't forget to declare them in the params.yaml file",
+        description=(
+            "Known initial poses of the robots; if true, set them in params.yaml"
+        ),
     )
     declare_rviz_argument = DeclareLaunchArgument(
         "rviz",

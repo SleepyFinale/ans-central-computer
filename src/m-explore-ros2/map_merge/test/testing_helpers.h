@@ -14,20 +14,22 @@
 
 const float resolution = 0.05f;
 
-nav_msgs::msg::OccupancyGrid::ConstSharedPtr loadMap(const std::string& filename);
-void saveMap(const std::string& filename,
-             const nav_msgs::msg::OccupancyGrid::ConstSharedPtr& map);
-std::tuple<double, double, double> randomAngleTxTy();
+nav_msgs::msg::OccupancyGrid::ConstSharedPtr loadMap(const std::string & filename);
+void saveMap(
+  const std::string & filename,
+  const nav_msgs::msg::OccupancyGrid::ConstSharedPtr & map);
+std::tuple < double, double, double > randomAngleTxTy();
 geometry_msgs::msg::Transform randomTransform();
 cv::Mat randomTransformMatrix();
 
 /* map_server is really bad. until there is no replacement I will implement it
  * by myself */
-template <typename InputIt>
-std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> loadMaps(InputIt filenames_begin,
-                                                      InputIt filenames_end)
+template < typename InputIt >
+std::vector < nav_msgs::msg::OccupancyGrid::ConstSharedPtr > loadMaps(
+  InputIt filenames_begin,
+  InputIt filenames_end)
 {
-  std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> result;
+  std::vector < nav_msgs::msg::OccupancyGrid::ConstSharedPtr > result;
 
   for (InputIt it = filenames_begin; it != filenames_end; ++it) {
     result.emplace_back(loadMap(*it));
@@ -35,10 +37,10 @@ std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> loadMaps(InputIt filen
   return result;
 }
 
-nav_msgs::msg::OccupancyGrid::ConstSharedPtr loadMap(const std::string& filename)
+nav_msgs::msg::OccupancyGrid::ConstSharedPtr loadMap(const std::string & filename)
 {
   cv::Mat lookUpTable(1, 256, CV_8S);
-  signed char* p = lookUpTable.ptr<signed char>();
+  signed char * p = lookUpTable.ptr < signed char > ();
   p[254] = 0;
   p[205] = -1;
   p[0] = 100;
@@ -47,46 +49,50 @@ nav_msgs::msg::OccupancyGrid::ConstSharedPtr loadMap(const std::string& filename
   if (img.empty()) {
     throw std::runtime_error("could not load map");
   }
-  nav_msgs::msg::OccupancyGrid::SharedPtr grid{new nav_msgs::msg::OccupancyGrid()};
-  grid->info.width = static_cast<uint>(img.size().width);
-  grid->info.height = static_cast<uint>(img.size().height);
+  nav_msgs::msg::OccupancyGrid::SharedPtr grid {new nav_msgs::msg::OccupancyGrid()};
+  grid->info.width = static_cast < uint > (img.size().width);
+  grid->info.height = static_cast < uint > (img.size().height);
   grid->info.resolution = resolution;
-  grid->data.resize(static_cast<size_t>(img.size().area()));
-  cv::Mat grid_view(img.size(), CV_8S,
-                    const_cast<signed char*>(grid->data.data()));
+  grid->data.resize(static_cast < size_t > (img.size().area()));
+  cv::Mat grid_view(
+    img.size(), CV_8S,
+    const_cast < signed char * > (grid->data.data()));
   cv::LUT(img, lookUpTable, grid_view);
 
   return grid;
 }
 
-void saveMap(const std::string& filename,
-             const nav_msgs::msg::OccupancyGrid::ConstSharedPtr& map)
+void saveMap(
+  const std::string & filename,
+  const nav_msgs::msg::OccupancyGrid::ConstSharedPtr & map)
 {
   cv::Mat lookUpTable(1, 256, CV_8U);
-  uchar* p = lookUpTable.ptr();
+  uchar * p = lookUpTable.ptr();
   for (int i = 0; i < 255; ++i) {
-    if (i >= 0 && i < 10)
+    if (i >= 0 && i < 10) {
       p[i] = 254;
-    else
+    } else {
       p[i] = 0;
+    }
   }
   p[255] = 205;
 
-  cv::Mat img(map->info.height, map->info.width, CV_8S,
-              const_cast<signed char*>(map->data.data()));
+  cv::Mat img(
+    map->info.height, map->info.width, CV_8S,
+    const_cast < signed char * > (map->data.data()));
   cv::Mat out_img;
   cv::LUT(img, lookUpTable, out_img);
   cv::imwrite(filename, out_img);
 }
 
-std::tuple<double, double, double> randomAngleTxTy()
+std::tuple < double, double, double > randomAngleTxTy()
 {
   static std::mt19937_64 g(156468754 /*magic*/);
-  std::uniform_real_distribution<double> rotation_dis(0., 2 * std::acos(-1));
-  std::uniform_real_distribution<double> translation_dis(-1000, 1000);
+  std::uniform_real_distribution < double > rotation_dis(0., 2 * std::acos(-1));
+  std::uniform_real_distribution < double > translation_dis(-1000, 1000);
 
-  return std::tuple<double, double, double>(rotation_dis(g), translation_dis(g),
-                                            translation_dis(g));
+  return std::tuple < double, double, double > (rotation_dis(g), translation_dis(g),
+         translation_dis(g));
 }
 
 geometry_msgs::msg::Transform randomTransform()
@@ -118,20 +124,20 @@ cv::Mat randomTransformMatrix()
   double angle, tx, ty;
   std::tie(angle, tx, ty) = randomAngleTxTy();
   cv::Mat transform =
-      (cv::Mat_<double>(3, 3) << std::cos(angle), -std::sin(angle), tx,
-       std::sin(angle), std::cos(angle), ty, 0., 0., 1.);
+    (cv::Mat_ < double > (3, 3) << std::cos(angle), -std::sin(angle), tx,
+    std::sin(angle), std::cos(angle), ty, 0., 0., 1.);
 
   return transform;
 }
 
-static inline bool isIdentity(const geometry_msgs::msg::Transform& transform)
+static inline bool isIdentity(const geometry_msgs::msg::Transform & transform)
 {
   tf2::Transform t;
   tf2::fromMsg(transform, t);
   return tf2::Transform::getIdentity() == t;
 }
 
-static inline bool isIdentity(const geometry_msgs::msg::Quaternion& rotation)
+static inline bool isIdentity(const geometry_msgs::msg::Quaternion & rotation)
 {
   tf2::Quaternion q;
   tf2::fromMsg(rotation, q);
@@ -139,7 +145,7 @@ static inline bool isIdentity(const geometry_msgs::msg::Quaternion& rotation)
 }
 
 // data size is consistent with height and width
-static inline bool consistentData(const nav_msgs::msg::OccupancyGrid& grid)
+static inline bool consistentData(const nav_msgs::msg::OccupancyGrid & grid)
 {
   return grid.info.width * grid.info.height == grid.data.size();
 }
@@ -161,15 +167,16 @@ static inline bool consistentData(const nav_msgs::msg::OccupancyGrid& grid)
 // }
 
 // ignores header, map_load_time and origin
-static inline bool maps_equal(const nav_msgs::msg::OccupancyGrid& grid1,
-                              const nav_msgs::msg::OccupancyGrid& grid2)
+static inline bool maps_equal(
+  const nav_msgs::msg::OccupancyGrid & grid1,
+  const nav_msgs::msg::OccupancyGrid & grid2)
 {
   // std::cout << "asdasdadsdth: " << std::endl;
   bool equal = true;
   equal &= grid1.info.width == grid2.info.width;
   equal &= grid1.info.height == grid2.info.height;
   equal &= std::abs(grid1.info.resolution - grid2.info.resolution) <
-           std::numeric_limits<float>::epsilon();
+    std::numeric_limits < float > ::epsilon();
   equal &= grid1.data.size() == grid2.data.size();
   for (size_t i = 0; i < grid1.data.size(); ++i) {
     equal &= grid1.data[i] == grid2.data[i];

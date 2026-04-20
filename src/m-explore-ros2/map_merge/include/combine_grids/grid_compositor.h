@@ -44,16 +44,17 @@
 
 namespace combine_grids
 {
-namespace internal
-{
-class GridCompositor
-{
+  namespace internal
+  {
+    class GridCompositor
+    {
 public:
-  nav_msgs::msg::OccupancyGrid::SharedPtr compose(const std::vector<cv::Mat>& grids,
-                                       const std::vector<cv::Rect>& rois);
-};
+      nav_msgs::msg::OccupancyGrid::SharedPtr compose(
+        const std::vector < cv::Mat > & grids,
+        const std::vector < cv::Rect > & rois);
+    };
 
-}  // namespace internal
+  } // namespace internal
 
 }  // namespace combine_grids
 

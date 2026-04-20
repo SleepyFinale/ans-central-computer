@@ -13,6 +13,11 @@
 # TF: map_merge publishes world_frame -> <robot>/map for every robot.
 # Full chain (example): map -> blinky/map -> blinky/odom -> blinky/base_footprint
 # No tf_map_odom_fallback needed.
+#
+# With unknown_init_poses, a merged OccupancyGrid may not exist until the pipeline
+# has enough data to compose; publish_provisional_tf still publishes *identity*
+# world_frame -> <robot>/map as soon as each robot has delivered a local /map,
+# so the parent frame ``map`` appears on /tf before the first successful merge.
 
 map_merge:
   ros__parameters:
@@ -27,7 +32,8 @@ map_merge:
     world_frame: map
     known_init_poses: false
     origin_margin: 0.10  # or 0.15 if your environment is larger
-    # Publish TF: world_frame -> <robot>/map (converts estimated pixel transforms to metric TF)
+    # Publish TF: world_frame -> <robot>/map (metric transforms from the merge pipeline once available)
     publish_tf: true
-    # Until pose estimates exist, publish identity map-><robot>/map so tf2 registers ``map`` (Nav2 global_costmap).
+    # Identity world_frame -> <robot>/map whenever a robot has a local map but the merged grid
+    # is not composed yet, and as fallback when pose estimates are still invalid (Nav2 global_costmap).
     publish_provisional_tf: true

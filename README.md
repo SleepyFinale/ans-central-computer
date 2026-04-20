@@ -192,7 +192,7 @@ To connect this central computer to the TurtleBot3 robots you need:
 
 - The **correct SSH target (IP/hostname)** for each robot
 - The **same WiFi network** between robot and central PC
-- A shared **ROS domain** (`ROS_DOMAIN_ID=50`) on all machines
+- A shared **ROS domain** (lab default `ROS_DOMAIN_ID=50`; use **one** value consistently on all machines)
 
 ### Robot SSH targets
 
@@ -239,7 +239,7 @@ When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]
 
 ### ROS domain (ROS_DOMAIN_ID)
 
-All robots and the central PC share a **single ROS 2 domain**, `ROS_DOMAIN_ID=50`. Every machine that needs to talk to the robots should use this same value:
+All robots and the central PC share a **single ROS 2 domain** (the lab default is `ROS_DOMAIN_ID=50`). Every machine that needs to talk to the robots should use the **same** value:
 
 ```bash
 echo $ROS_DOMAIN_ID
@@ -248,7 +248,7 @@ echo $ROS_DOMAIN_ID
 If you see a different value on any terminal (robot or central PC), set:
 
 ```bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
 ```
 
 ---
@@ -271,9 +271,9 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 **Recommended order (multi-robot, fewer surprises):**
 
-1. Central: `start_rviz_central.sh`, then `./scripts/start_central.sh` (TF relay + map_merge + explorer).
+1. Central: `start_rviz_central.sh`, then `./scripts/start_central.sh` (TF relay + map_merge + explorer). Starting the central stack **before** robot Nav2 is correct and recommended; any brief **`Invalid frame ID "map"`** on a robot after that usually means **that robot’s SLAM has not published a local `/<robot>/map` yet** (map_merge needs it to register world TF), not that you started central “too late.”
 2. Each robot: bringup, then `navigation2_slam.launch.py` with **`fleet_mode:=true`** if the central stack is already running (Nav2 starts sooner; still requires global `/tf` and `/map` from the PC).
-3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` transforms while pose estimates are pending (`publish_provisional_tf` in [`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)) so the `map` frame exists for Nav2 sooner.
+3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` for each robot as soon as that robot’s SLAM has produced a local map (`publish_provisional_tf` in [`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)), even before the first merged `/map` grid is composed; metric transforms replace these when the merge pipeline has estimates.
 
 **Faster robot Nav2 startup (optional):**
 
@@ -391,7 +391,17 @@ export TURTLEBOT3_MODEL=burger
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
 ```
 
-When you use **`./scripts/start_central.sh`** on the central PC, set **`fleet_mode:=true`** on every robot so Nav2 uses global `/tf` and `/map` and explorer goals stay in world frame `map`. The launch file’s default is **`fleet_mode:=auto`**, which is usually equivalent for a full bring-up: it starts SLAM and the laser normalizer immediately, then runs a **global** TF wait (`map` → `<robot>/odom` on `/tf`) **before** starting Nav2. Until the central stack publishes the world ↔ robot map bridge and merged TF (TF relay plus single-robot static `map` → `<robot>/map` or multi-robot map merge), that wait has nothing to join, so the robot terminal may look like it “stops” after SLAM—the process is blocking on TF, not crashed. After you run **`start_central.sh`**, the chain becomes valid, the wait exits, Nav2 comes up, and the launch continues. On the central side, `multi_robot_explorer` may log that it is **waiting for the map** and will not send `NavigateToPose` goals until map data and Nav2’s action server are available, so the two sides unblock each other as the graph fills in. **`fleet_mode:=true`** skips that automatic global wait and starts Nav2 right after the usual odom→base wait (still use the central stack so global `/tf` and `/map` match the fleet layout). Use **`fleet_mode:=false`** only for bench tests **without** the central stack. Robot launch files default to `HOSTNAME` as the namespace (for example host `pinky` → `pinky`), so `robot_name:=...` is optional unless you override it. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
+**Namespace vs physical robot:** On each Pi, the default ROS namespace is the **machine hostname** when it is a meaningful name (not a stock image default such as **`ubuntu`** or **`raspberrypi`**); otherwise it falls back to **`USER`/`LOGNAME`** (see `navigation2_slam.launch.py` in [`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)). **Definitive check:** from the **central PC**, publish a small twist to **one** namespace at a time and see which **physical** robot moves:
+
+```bash
+ros2 topic pub -1 /pinky/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"
+# stop the robot, then:
+ros2 topic pub -1 /clyde/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.05}, angular: {z: 0.0}}"
+```
+
+Run [`scripts/verify_fleet_namespace.sh`](scripts/verify_fleet_namespace.sh) on a robot or the central PC (`--ros` after sourcing ROS) for a quick identity summary. Prefer **explicit** `robot_name:=pinky` / `robot_name:=clyde` on bringup and SLAM+Nav2 if multiple operators or SD card images are in play.
+
+When you use **`./scripts/start_central.sh`** on the central PC, set **`fleet_mode:=true`** on every robot so Nav2 uses global `/tf` and `/map` and explorer goals stay in world frame `map`. The launch file’s default is **`fleet_mode:=auto`**, which is usually equivalent for a full bring-up: it starts SLAM and the laser normalizer immediately, then runs a **global** TF wait (`map` → `<robot>/odom` on `/tf`) **before** starting Nav2. Until the central stack publishes the world ↔ robot map bridge and merged TF (TF relay plus single-robot static `map` → `<robot>/map` or multi-robot map merge), that wait has nothing to join, so the robot terminal may look like it “stops” after SLAM—the process is blocking on TF, not crashed. **Start [`./scripts/start_rviz_central.sh`](scripts/start_rviz_central.sh) and [`./scripts/start_central.sh`](scripts/start_central.sh) on the central PC before or together with fleet Nav2** so `map_merge` publishes `map` → `<robot>/map` early and you avoid long bursts of Nav2 **`Invalid frame ID "map"`** while global costmaps activate. After you run **`start_central.sh`**, the chain becomes valid, the wait exits, Nav2 comes up, and the launch continues. On the central side, `multi_robot_explorer` may log that it is **waiting for the map** and will not send `NavigateToPose` goals until map data and Nav2’s action server are available, so the two sides unblock each other as the graph fills in. **`fleet_mode:=true`** skips that automatic global wait and starts Nav2 right after the usual odom→base wait (still use the central stack so global `/tf` and `/map` match the fleet layout). Use **`fleet_mode:=false`** only for bench tests **without** the central stack. Robot launch files default to `HOSTNAME` as the namespace (for example host `pinky` → `pinky`), so `robot_name:=...` is optional unless you override it. Implemented in the robot-side package ([`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)); `use_central_tf_map:=True` remains a deprecated alias for `fleet_mode`.
 
 This launch file (from the robot workspace, e.g. `ans-turtlebot3`) runs:
 
@@ -1046,16 +1056,29 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 1. **TF wait timeout:** Ensure your robots are running bringup + SLAM + Nav2 and that `./scripts/start_central.sh` is active on the central PC. Run diagnostics:
 
    ```bash
-   ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+   ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py   # e.g. 50
    ```
 
    If Nav2 reports **`map` missing from TF**, confirm `map_merge` has `publish_tf` and `publish_provisional_tf` enabled (see **Troubleshooting** item **19**).
 
-2. **No map received:** In multi-robot mode, map merge publishes `/map` only after each robot’s SLAM has built an initial map. Wait 20–30 seconds after starting the robots and `start_central.sh` before expecting a global `/map`. Remember that **`/map` alone does not create the `map` TF frame**; `map_merge` must also publish `map` → `<robot>/map` on `/tf`.
+2. **No map received:** In multi-robot mode, the merged **`/map`** topic appears only after `map_merge` can compose a grid (often after each robot’s SLAM has an initial map). Provisional **`map` → `<robot>/map`** TF may still publish earlier per robot as local maps arrive. Remember that **`/map` alone does not create the `map` TF frame**; `map_merge` must also publish `map` → `<robot>/map` on `/tf`.
 3. **frame 'base_scan':** Fixed by using `scan_normalized` with correct `frame_id` (e.g. `blinky/base_scan`, `pinky/base_scan`) from the robot-side workspace. Ensure the robot-side SLAM + Nav2 launch is up to date and running.
 
 4. **Robot ignores the global plan / heads straight through obstacles** with the central explorer: Robots must launch SLAM + Nav2 with **`fleet_mode:=true`** (or `use_central_tf_map:=true`; see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)) so Nav2 listens on global `/tf` and uses merged `/map`. Otherwise namespaced Nav2 only sees `/<robot>/tf`, which omits `map` → `<robot>/map` from `map_merge` (or the single-robot static bridge), and goals in frame `map` no longer match the local costmap.
    - Confirm each robot hostname matches its intended namespace (`hostname`, e.g. `pinky`) or override with `robot_name:=<robot>` if needed.
+
+5. **Wrong robot on merged map / Nav2 reports lethal in open space (multi-robot):** In RViz (fixed frame `map`), one robot appears on top of the other robot’s SLAM tiles, or Nav2 marks free space as occupied. Often the world TF chain is wrong: SLAM publishes `<robot>/map` → `<robot>/odom`, while `map_merge` must publish `map` → `<robot>/map` using the **same** frame id string as SLAM (e.g. `pinky/map`, not `//pinky/map`). After rebuilding `multirobot_map_merge`, confirm:
+
+   ```bash
+   ros2 run tf2_ros tf2_echo map pinky/map
+   ros2 run tf2_ros tf2_echo map clyde/map
+   ```
+
+   and run `ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py`. If lookups fail or `/tf` shows double-slash frame ids, rebuild the central workspace so `map_merge` matches the fleet. If TF is correct but placement is still wrong, verify each Pi’s `hostname` (or explicit `robot_name:=...`) matches the physical robot.
+
+6. **Explorer: `NavigateToPose` unavailable, path precheck ABORTED, or TF “stale”:** Often a **startup order** issue: Nav2’s action server is not ready when the first goal arrives, or global costmaps log **`Invalid frame ID "map"`** until `map_merge` publishes `map` → `<robot>/map`. Run **`start_rviz_central.sh`** and **`start_central.sh`** on the central PC **before or together with** fleet Nav2 (see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)); wait until SLAM has produced an initial map and `ros2 action list` shows **`/<robot>/navigate_to_pose`**. Path precheck failures in open-looking space usually mean **wrong or missing fleet TF**—re-check item **5** and run `diagnose_multirobot_tf.py`. If logs mention **extrapolation** or timestamps **in the future**, see item **7**.
+
+7. **Clock sync (NTP / chrony):** Unstable scan–TF matching or odd `/tf` behavior across machines can come from **skewed clocks**. Install **`chrony`** (or enable **`systemd-timesyncd`**) on each Pi and the central PC; verify with `timedatectl` and `chronyc sources -v` (or `systemctl status systemd-timesyncd`).
 
 **Stability tuning profile (Mar 2026):**
 
@@ -1143,7 +1166,7 @@ For each run, compare:
   ```
 
   If this hangs, the robot-side SLAM node is not publishing a map yet; troubleshoot on the robot first.
-- Ensure **ROS_DOMAIN_ID=50** on both the robot and the central PC.
+- Ensure the **same** `ROS_DOMAIN_ID` on both the robot and the central PC (e.g. `50`).
 - Make sure you are not also running multi-robot `map_merge` manually in single-robot mode; `./scripts/start_central.sh` will skip `map_merge` automatically when only one robot is detected.
 - With **fleet mode** and a single robot, the central script republishes `/<robot>/map` to **`/map`** (`single_robot_map_relay.py`). Verify on the PC: `ros2 topic info /map` should list a publisher after SLAM starts.
 
@@ -1256,16 +1279,16 @@ Stop with Ctrl+C to close the node and plot cleanly.
 cd ~/ans-central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-export ROS_DOMAIN_ID=50   # if that is your fleet domain
+export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
 
 ros2 run tf2_ros tf2_echo map pinky/map          # replace pinky
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
-ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py
 ```
 
 **Fixes:**
 
-- Ensure `./scripts/start_central.sh` is running and `map_merge` has **`publish_tf: true`** (default). With **unknown poses**, keep **`publish_provisional_tf: true`** so identity `map` → `<robot>/map` is broadcast until pose estimates are valid ([`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)).
+- Ensure `./scripts/start_central.sh` is running and `map_merge` has **`publish_tf: true`** (default). With **unknown poses**, keep **`publish_provisional_tf: true`** so identity `map` → `<robot>/map` is broadcast for each robot that has a local map, including before the first merged grid is composed ([`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)).
 - If you start robots before the central stack, use **`fleet_mode:=auto`** and wait, or start central first and use **`fleet_mode:=true`** on robots (see [Multi-Robot SLAM](#multi-robot-slam) startup bullets).
 
 ---
@@ -1304,7 +1327,7 @@ ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
 cd ~/ans-central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-export ROS_DOMAIN_ID=50
+export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
 python3 scripts/diagnose_multirobot_tf.py
 ```
 
@@ -1334,7 +1357,7 @@ ros2 topic hz /map
 
 ### Check TF Tree
 
-**Multi-robot or single-robot + central (on the central PC, `ROS_DOMAIN_ID=50`):** SLAM on each robot publishes `<robot>/map` → `<robot>/odom`. The global tree adds `map` → `<robot>/map` (from `map_merge` or `single_robot_world_tf_bridge`). In **single-robot + central** mode, `start_central.sh` also relays `/<robot>/map` → `/map` for fleet Nav2 and global RViz. Example checks (replace `pinky`):
+**Multi-robot or single-robot + central (on the central PC, same `ROS_DOMAIN_ID` as the fleet, e.g. `50`):** SLAM on each robot publishes `<robot>/map` → `<robot>/odom`. The global tree adds `map` → `<robot>/map` (from `map_merge` or `single_robot_world_tf_bridge`). In **single-robot + central** mode, `start_central.sh` also relays `/<robot>/map` → `/map` for fleet Nav2 and global RViz. Example checks (replace `pinky`):
 
 ```bash
 ros2 topic info /map
@@ -1342,7 +1365,7 @@ ros2 run tf2_ros tf2_echo map pinky/map
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
 ```
 
-For a scripted pass/fail report over all fleet names, run `ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py` (see **Troubleshooting** item **19** if `map` is missing from TF).
+For a scripted pass/fail report over all fleet names, run `ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py` (see **Troubleshooting** item **19** if `map` is missing from TF).
 
 **Standalone robot (no central stack, no `fleet_mode`):** Use the robot’s map frame and base frame, for example:
 
@@ -1405,7 +1428,7 @@ echo $ROS_DOMAIN_ID
 
 ```bash
 cd ~/ans-central-computer
-ROS_DOMAIN_ID=50 python3 scripts/diagnose_multirobot_tf.py
+ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py   # e.g. 50
 ```
 
 Reports topic publishers, TF chain connectivity, and identifies missing transforms. Run when TF wait times out or Nav2 fails to receive the map.
