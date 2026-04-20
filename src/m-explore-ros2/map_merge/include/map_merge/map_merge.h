@@ -111,6 +111,9 @@ private:
     // merge-state tracking (for logging transitions)
     size_t last_matched_count_ = 0;
     size_t last_total_grids_ = 0;
+    // Preserve the last valid metric world->robot/map transform per robot so
+    // brief estimator glitches do not force an identity-TF jump.
+    std::unordered_map<std::string, geometry_msgs::msg::Transform> last_valid_world_tf_by_robot_;
 
     // timers
     rclcpp::TimerBase::SharedPtr map_merging_timer_;

@@ -210,55 +210,117 @@ if [[ -n "$NODES_RAW" ]]; then
 fi
 
 # Detect robot names from available topics (e.g., /blinky/tf, /pinky/tf).
+# Important: transient discovery lag can momentarily hide one robot and
+# accidentally push the stack into single-robot mode. Wait briefly for the
+# expected count before deciding mode.
 echo "Detecting robots from ROS topics..."
-TOPICS_RAW="$(ros2 topic list 2>/dev/null || true)"
-DETECTED_ROBOTS=()
-if [[ -n "$TOPICS_RAW" ]]; then
-    while IFS= read -r line; do
-        name="${line#/}"
-        name="${name%%/*}"
-        if [[ -n "$name" ]]; then
-            DETECTED_ROBOTS+=("$name")
-        fi
-    done < <(echo "$TOPICS_RAW" | grep '^/[^/]\+/tf$' || true)
+
+CENTRAL_DISCOVERY_TIMEOUT_SEC="${CENTRAL_DISCOVERY_TIMEOUT_SEC:-20}"
+CENTRAL_DISCOVERY_POLL_SEC="${CENTRAL_DISCOVERY_POLL_SEC:-1}"
+CENTRAL_MIN_ROBOTS_DEFAULT="${CENTRAL_MIN_ROBOTS_DEFAULT:-2}"
+if ! [[ "$CENTRAL_DISCOVERY_TIMEOUT_SEC" =~ ^[0-9]+$ ]]; then
+    CENTRAL_DISCOVERY_TIMEOUT_SEC=20
+fi
+if ! [[ "$CENTRAL_DISCOVERY_POLL_SEC" =~ ^[0-9]+$ ]]; then
+    CENTRAL_DISCOVERY_POLL_SEC=1
+fi
+if (( CENTRAL_DISCOVERY_POLL_SEC < 1 )); then
+    CENTRAL_DISCOVERY_POLL_SEC=1
 fi
 
-if ((${#DETECTED_ROBOTS[@]} == 0)); then
-    echo "WARNING: No /<robot>/tf topics detected. Falling back to /<robot>/map detection..."
-    if [[ -n "$TOPICS_RAW" ]]; then
+detect_robots_once() {
+    local topics_raw="$1"
+    local detected=()
+    if [[ -n "$topics_raw" ]]; then
         while IFS= read -r line; do
             name="${line#/}"
             name="${name%%/*}"
             if [[ -n "$name" ]]; then
-                DETECTED_ROBOTS+=("$name")
+                detected+=("$name")
             fi
-        done < <(echo "$TOPICS_RAW" | grep '^/[^/]\+/map$' || true)
+        done < <(echo "$topics_raw" | grep '^/[^/]\+/tf$' || true)
     fi
+
+    if ((${#detected[@]} == 0)); then
+        if [[ -n "$topics_raw" ]]; then
+            while IFS= read -r line; do
+                name="${line#/}"
+                name="${name%%/*}"
+                if [[ -n "$name" ]]; then
+                    detected+=("$name")
+                fi
+            done < <(echo "$topics_raw" | grep '^/[^/]\+/map$' || true)
+        fi
+    fi
+
+    # De-duplicate + sort for stable ordering.
+    local uniq=()
+    for r in "${detected[@]}"; do
+        local skip=false
+        for u in "${uniq[@]}"; do
+            if [[ "$u" == "$r" ]]; then
+                skip=true
+                break
+            fi
+        done
+        if [[ "$skip" == false ]]; then
+            uniq+=("$r")
+        fi
+    done
+    if ((${#uniq[@]} > 0)); then
+        printf '%s\n' "${uniq[@]}" | sort
+    fi
+}
+
+# Determine how many robots should be visible before finalizing mode.
+if [[ -n "$SELECTION" ]]; then
+    # Count unique selection letters (b/p/i/c).
+    declare -A _sel_letters=()
+    for ((i=0; i<${#SELECTION}; i++)); do
+        ch="${SELECTION:$i:1}"
+        _sel_letters["$ch"]=1
+    done
+    MIN_EXPECTED_ROBOTS="${#_sel_letters[@]}"
+else
+    MIN_EXPECTED_ROBOTS="${CENTRAL_MIN_ROBOTS_DEFAULT}"
 fi
+if ! [[ "$MIN_EXPECTED_ROBOTS" =~ ^[0-9]+$ ]]; then
+    MIN_EXPECTED_ROBOTS=1
+fi
+if (( MIN_EXPECTED_ROBOTS < 1 )); then
+    MIN_EXPECTED_ROBOTS=1
+fi
+
+DETECTED_ROBOTS=()
+elapsed=0
+while :; do
+    TOPICS_RAW="$(ros2 topic list 2>/dev/null || true)"
+    readarray -t DETECTED_ROBOTS < <(detect_robots_once "$TOPICS_RAW")
+
+    if ((${#DETECTED_ROBOTS[@]} >= MIN_EXPECTED_ROBOTS)); then
+        break
+    fi
+
+    if (( elapsed >= CENTRAL_DISCOVERY_TIMEOUT_SEC )); then
+        break
+    fi
+
+    if (( elapsed == 0 )); then
+        if [[ -n "$SELECTION" ]]; then
+            echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for selected robots (-${SELECTION}) to appear..."
+        else
+            echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for >=${MIN_EXPECTED_ROBOTS} robots to appear..."
+        fi
+    fi
+    sleep "$CENTRAL_DISCOVERY_POLL_SEC"
+    elapsed=$((elapsed + CENTRAL_DISCOVERY_POLL_SEC))
+done
 
 if ((${#DETECTED_ROBOTS[@]} == 0)); then
     echo "ERROR: Could not detect any robot namespaces from topics."
     echo "Make sure at least one robot is running its namespaced bringup + Nav2/SLAM."
     exit 1
 fi
-
-# De-duplicate.
-uniq_detected=()
-for r in "${DETECTED_ROBOTS[@]}"; do
-    skip=false
-    for u in "${uniq_detected[@]}"; do
-        if [[ "$u" == "$r" ]]; then
-            skip=true
-            break
-        fi
-    done
-    if [[ "$skip" == false ]]; then
-        uniq_detected+=("$r")
-    fi
-done
-# Alphabetical order so tf_relay / map_merge / explorer see a stable robot list
-# (topic discovery order from ros2 topic list is otherwise undefined).
-readarray -t DETECTED_ROBOTS < <(printf '%s\n' "${uniq_detected[@]}" | sort)
 
 # Apply selection filter (map letters to robot name first char).
 SELECTED_ROBOTS=()
@@ -372,6 +434,11 @@ else
         --params-file "${MAP_MERGE_CONFIG_FILE}" &
     PIDS+=($!)
     sleep 2
+    echo ""
+    echo "  map_merge recovery: if logs show 'Grid pose estimation disabled permanently'"
+    echo "  after an OpenCV/FLANN (miniflann) exception, restart this script or the"
+    echo "  map_merge process; relative pose refinement stays off until then."
+    echo ""
 
     # ---- 2b. Map merge state monitor ----
     # This helper publishes a coarse merge state string (NO_OVERLAP, PARTIAL,

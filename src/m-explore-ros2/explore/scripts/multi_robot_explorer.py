@@ -610,6 +610,12 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('degraded_precheck_fail_threshold', 3)
         self.declare_parameter('degraded_precheck_window_sec', 10.0)
         self.declare_parameter('degraded_recovery_stable_sec', 4.0)
+        # Merge-state hysteresis (auto mode only): require MERGED to remain
+        # stable for a short hold before switching to global, and fall back to
+        # local if merge degrades for long enough. This avoids thrashing when
+        # map_merge briefly reports MERGED on weak feature matches.
+        self.declare_parameter('merge_stable_hold_sec', 8.0)
+        self.declare_parameter('merge_degrade_grace_sec', 2.0)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -857,6 +863,12 @@ class MultiRobotExplorer(Node):
         self.goal_arrival_sample_step_scale: float = float(
             self.get_parameter('goal_arrival_sample_step_scale').value
         )
+        self.merge_stable_hold_sec: float = max(
+            0.0, float(self.get_parameter('merge_stable_hold_sec').value)
+        )
+        self.merge_degrade_grace_sec: float = max(
+            0.0, float(self.get_parameter('merge_degrade_grace_sec').value)
+        )
 
         # -- state --
         self.robots: Dict[str, RobotState] = {}
@@ -888,6 +900,8 @@ class MultiRobotExplorer(Node):
         self.paused: bool = False
         self.in_global_phase: bool = False
         self._merge_state_last: str = 'NO_OVERLAP'
+        self._merge_merged_since: float = 0.0
+        self._merge_nonmerged_since: float = 0.0
         self.event_logger = ExplorerEventLogger()
 
         # -- status publishing & control --
@@ -1309,12 +1323,10 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] Nav2 path precheck timed out after '
                 f'{self.nav2_path_precheck_timeout_sec:.1f}s; skipping goal'
             )
-            xy = rs.path_precheck_goal_xy
-            self._abort_path_precheck(
+            rs.precheck_timeout_events += 1
+            self._path_precheck_transient_fail(
                 rs,
-                cancel_action=True,
-                blacklist_xy=xy,
-                cooldown=True,
+                f'timed out after {self.nav2_path_precheck_timeout_sec:.1f}s'
             )
 
         for rs in self.robots.values():
@@ -1655,11 +1667,46 @@ class MultiRobotExplorer(Node):
     def _merge_state_callback(self, msg: StringMsg):
         state = (msg.data or '').strip().upper()
         self._merge_state_last = state or 'NO_OVERLAP'
-        if state == 'MERGED':
-            if not self.in_global_phase:
+        # Hysteresis only applies in auto mode; explicit local/global modes
+        # should honor user intent directly.
+        if self.mode != 'auto':
+            if state == 'MERGED' and not self.in_global_phase:
                 self.get_logger().info(
                     'Merge state reported MERGED — switching to global exploration on merged map')
-            self.in_global_phase = True
+                self.in_global_phase = True
+            return
+
+        now = self.get_clock().now().nanoseconds / 1e9
+        if state == 'MERGED':
+            self._merge_nonmerged_since = 0.0
+            if self._merge_merged_since <= 0.0:
+                self._merge_merged_since = now
+                if not self.in_global_phase and self.merge_stable_hold_sec > 0.0:
+                    self.get_logger().info(
+                        f'Merge state reported MERGED; waiting '
+                        f'{self.merge_stable_hold_sec:.1f}s before global switch '
+                        '(stability hold)')
+            if (
+                not self.in_global_phase
+                and (now - self._merge_merged_since) >= self.merge_stable_hold_sec
+            ):
+                self.get_logger().info(
+                    'Merge state remained MERGED — switching to global exploration on merged map')
+                self.in_global_phase = True
+            return
+
+        # Non-merged states (PARTIAL / NO_OVERLAP / unknown).
+        self._merge_merged_since = 0.0
+        if self._merge_nonmerged_since <= 0.0:
+            self._merge_nonmerged_since = now
+        if (
+            self.in_global_phase
+            and (now - self._merge_nonmerged_since) >= self.merge_degrade_grace_sec
+        ):
+            self.in_global_phase = False
+            self.get_logger().warning(
+                f'Merge state degraded to {self._merge_state_last}; '
+                'falling back to local exploration until MERGED is stable again')
 
     # -----------------------------------------------------------------------
     # TF helpers
@@ -1919,6 +1966,9 @@ class MultiRobotExplorer(Node):
             c = rs.last_target_frontier_centroid
             if c is not None:
                 self._append_blacklist_if_distant(rs, c)
+            # Also avoid immediately re-selecting the exact goal pose, which can
+            # differ from centroid due to fallback goal-point strategies.
+            self._append_blacklist_if_distant(rs, (gpx, gpy))
         rs.last_target_frontier_centroid = None
 
     def _arm_post_failure_cooldown(self, rs: RobotState) -> None:
@@ -2203,6 +2253,14 @@ class MultiRobotExplorer(Node):
     def _maybe_retarget_active_robot(self, rs: RobotState, frontiers: List[Frontier], now: float):
         if not self.retarget_enable:
             return
+        # In auto mode, avoid aggressive in-motion retarget churn while merge
+        # state is degraded after we already entered global phase.
+        if (
+            self.mode == 'auto'
+            and self.in_global_phase
+            and self._merge_state_last != 'MERGED'
+        ):
+            return
         if rs.homing_active:
             return
         if rs.arrival_probe_in_progress:
@@ -2471,6 +2529,23 @@ class MultiRobotExplorer(Node):
         dr = rs.last_distance_remaining
         return True, f'distance_remaining={dr:.2f}m'
 
+    def _goal_leg_progress_m(self, rs: RobotState) -> float:
+        """Estimated geometric progress made during the current goal leg."""
+        if (
+            rs.goal_position is None
+            or rs.last_pose_when_goal_sent is None
+            or rs.position is None
+        ):
+            return 0.0
+        start_dist = _dist(rs.last_pose_when_goal_sent, rs.goal_position)
+        now_dist = _dist(rs.position, rs.goal_position)
+        return max(0.0, start_dist - now_dist)
+
+    def _has_goal_leg_progress(self, rs: RobotState) -> bool:
+        """True when the robot moved enough to count this leg as meaningful."""
+        min_progress = max(self.motion_progress_min_delta_m, 0.05)
+        return self._goal_leg_progress_m(rs) >= min_progress
+
     def _log_why_no_assignment(
         self,
         frontiers: List[Frontier],
@@ -2541,6 +2616,15 @@ class MultiRobotExplorer(Node):
                 rs.repeat_goal_count = 0
         else:
             rs.repeat_goal_count = 0
+        # Prevent A<->B ping-pong by checking against a short recent-goal window,
+        # not just the immediately previous goal.
+        recent_goal_pairs = [(gx, gy) for gx, gy, _ in list(rs.recent_goals)[-6:]]
+        near_recent_hits = sum(
+            1 for gx, gy in recent_goal_pairs
+            if math.hypot(goal_x - gx, goal_y - gy) < dthresh
+        )
+        if near_recent_hits > 0:
+            rs.repeat_goal_count = max(rs.repeat_goal_count, near_recent_hits)
 
         if rs.repeat_goal_count < self.repeat_goal_count_limit:
             return False
@@ -3484,19 +3568,27 @@ class MultiRobotExplorer(Node):
                     self._map_size_x < self.strict_success_min_map_size
                     and self._map_size_y < self.strict_success_min_map_size
                 )
+                suspicious_thresh = self.suspicious_success_distance
+                if self.mode == 'auto' and self._merge_state_last != 'MERGED':
+                    # Be slightly looser before MERGED, but do not fully disable.
+                    suspicious_thresh = max(
+                        suspicious_thresh, self.suspicious_success_distance * 2.0
+                    )
                 suspicious = (
                     rs.last_distance_remaining is not None
-                    and rs.last_distance_remaining > self.suspicious_success_distance
+                    and rs.last_distance_remaining > suspicious_thresh
                 )
-
-                if suspicious and not small_map:
+                made_progress = self._has_goal_leg_progress(rs)
+                if (suspicious and not small_map) or (not made_progress and not small_map):
                     rs.goals_failed += 1
                     rs.goal_status = 'failed'
                     self.get_logger().warn(
-                        f'[{rs.name}] Goal reported success but distance_remaining='
-                        f'{rs.last_distance_remaining:.2f}m > '
-                        f'{self.suspicious_success_distance:.2f}m — treating as '
-                        f'failure and blacklisting')
+                        f'[{rs.name}] Goal reported success but failed validation '
+                        f'(distance_remaining={rs.last_distance_remaining}, '
+                        f'suspicious_thresh={suspicious_thresh:.2f}m, '
+                        f'progress_m={self._goal_leg_progress_m(rs):.2f}); '
+                        'treating as failure and blacklisting'
+                    )
                     if rs.goal_position and not (
                         self.degraded_hold_enabled and rs.degraded_active
                     ):
@@ -3520,7 +3612,8 @@ class MultiRobotExplorer(Node):
                     self._apply_post_success_blacklist_policy(rs)
         elif status == GoalStatus.STATUS_ABORTED:
             tacit_ok, tacit_why = self._nav2_abort_tacit_success(rs)
-            if tacit_ok:
+            tacit_progress_ok = self._has_goal_leg_progress(rs)
+            if tacit_ok and (was_homing or tacit_progress_ok):
                 if was_homing:
                     rs.homing_active = False
                     rs.return_home_done = True
@@ -3539,6 +3632,19 @@ class MultiRobotExplorer(Node):
                 self._last_goal_finished_robot = rs.name
                 if not was_homing:
                     self._apply_post_success_blacklist_policy(rs)
+            elif tacit_ok and not was_homing:
+                rs.goals_failed += 1
+                rs.goal_status = 'aborted'
+                self.get_logger().warn(
+                    f'[{rs.name}] Nav2 ABORTED met tacit criteria ({tacit_why}) but '
+                    f'robot progress was too small ({self._goal_leg_progress_m(rs):.2f}m); '
+                    'treating as failure'
+                )
+                if rs.goal_position and not (
+                    self.degraded_hold_enabled and rs.degraded_active
+                ):
+                    self._blacklist_or_home_fail(rs, rs.goal_position)
+                self._arm_post_failure_cooldown(rs)
             elif rs.tacit_success_pending_cancel:
                 # Client cancel for tacit "at goal"; bt_navigator may end as ABORTED.
                 rs.tacit_success_pending_cancel = False
@@ -3603,7 +3709,8 @@ class MultiRobotExplorer(Node):
                         self._blacklist_or_home_fail(rs, rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
         elif status == GoalStatus.STATUS_CANCELED:
-            if rs.tacit_success_pending_cancel:
+            tacit_progress_ok = self._has_goal_leg_progress(rs)
+            if rs.tacit_success_pending_cancel and (was_homing or tacit_progress_ok):
                 rs.tacit_success_pending_cancel = False
                 rs.ignore_cooldown_on_next_cancel = False
                 if was_homing:
@@ -3624,6 +3731,16 @@ class MultiRobotExplorer(Node):
                 self._last_goal_finished_robot = rs.name
                 if not was_homing:
                     self._apply_post_success_blacklist_policy(rs)
+            elif rs.tacit_success_pending_cancel and not was_homing:
+                rs.tacit_success_pending_cancel = False
+                rs.ignore_cooldown_on_next_cancel = False
+                rs.goals_failed += 1
+                rs.goal_status = 'canceled'
+                self.get_logger().warn(
+                    f'[{rs.name}] Tacit cancel near-goal ignored due to low progress '
+                    f'({self._goal_leg_progress_m(rs):.2f}m); treating as canceled/failure'
+                )
+                self._arm_post_failure_cooldown(rs)
             else:
                 rs.goal_status = 'canceled'
                 self.get_logger().info(f'[{rs.name}] Goal cancelled')

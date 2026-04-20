@@ -29,6 +29,13 @@ multi_robot_explorer:
     # (NO_OVERLAP, PARTIAL, MERGED). In auto mode this controls when the
     # explorer switches from local to global exploration.
     merge_state_topic: map_merge/merge_state
+    # Merge-state hysteresis (auto mode):
+    # - switch to global only after MERGED is stable for this long
+    # - fall back to local after non-MERGED persists for this long
+    # This avoids global-planning thrash when map_merge briefly reports MERGED
+    # during weak/unstable feature matches.
+    merge_stable_hold_sec: 20.0
+    merge_degrade_grace_sec: 2.0
 
     # Pattern for per-robot local map topics, filled with each robot name.
     # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
@@ -47,8 +54,9 @@ multi_robot_explorer:
     # Explorer defers assignment and retries instead of bypassing planner precheck.
     nav2_path_precheck_required: true
     # Wait duration (s) for compute_path_to_pose server readiness before defer.
-    nav2_path_precheck_server_wait_sec: 0.5
-    nav2_path_precheck_timeout_sec: 3.0
+    # Longer waits reduce false skips while Nav2 lifecycle / planner warms up (fleet Pi load).
+    nav2_path_precheck_server_wait_sec: 2.0
+    nav2_path_precheck_timeout_sec: 6.0
     nav2_path_min_poses: 2
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
@@ -91,7 +99,7 @@ multi_robot_explorer:
     post_failure_cooldown_sec: 5.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
-    goal_reject_warmup_sec: 12.0
+    goal_reject_warmup_sec: 20.0
     # Robot-side helper topic (from turtlebot3_navigation2/nav2_lethal_watch.py):
     # when true, the robot is currently in a lethal Nav2 costmap cell.
     nav2_lethal_topic_pattern: "/{robot}/nav2_lethal_inflation"
@@ -152,7 +160,7 @@ multi_robot_explorer:
     # after progress_timeout seconds without meaningful physical movement.
     # Keep this above Nav2 controller movement_time_allowance (5s in burger.yaml)
     # so the explorer does not preempt DWB while Nav2 still considers the goal active.
-    progress_timeout: 10.0
+    progress_timeout: 14.0
     progress_min_delta: 0.05
     # Minimum TF pose displacement (m) to count as robot movement.
     motion_progress_min_delta_m: 0.03
@@ -180,7 +188,8 @@ multi_robot_explorer:
 
     # Blacklist radius (m): goals whose centroids fall within this distance
     # of a blacklisted point will be skipped for that robot.
-    blacklist_radius: 0.5
+    # Slightly smaller radius reduces cross-robot centroid blacklist overlap / livelock.
+    blacklist_radius: 0.35
 
     # When a robot successfully reaches a goal, blacklist points within this
     # distance (m) of the success pose are removed. Revives spurious
@@ -255,7 +264,7 @@ multi_robot_explorer:
     # While the robot is advancing on the current goal, preempt for a new goal
     # only if frontier utility improves by at least this much (explore more
     # unknown area). Does not blacklist the old goal.
-    retarget_opportunity_enable: true
+    retarget_opportunity_enable: false
     # Raised above node default (1.2) to reduce opportunistic Nav2 preemption.
     retarget_opportunity_min_utility_gain: 1.8
     # Retargets may only pick goal poses within this distance (m) of the first

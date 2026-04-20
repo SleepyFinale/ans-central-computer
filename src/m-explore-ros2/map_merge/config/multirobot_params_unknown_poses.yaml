@@ -21,9 +21,11 @@
 
 map_merge:
   ros__parameters:
-    merging_rate: 4.0
-    discovery_rate: 0.05
-    estimation_rate: 0.5
+    # Slightly faster merge/estimate cycles help recover alignment after weak matches;
+    # if FLANN/OpenCV disables pose estimation, restart map_merge (see start_central.sh).
+    merging_rate: 5.0
+    discovery_rate: 0.08
+    estimation_rate: 0.75
     estimation_confidence: 0.7
     robot_map_topic: map
     robot_map_updates_topic: map_updates

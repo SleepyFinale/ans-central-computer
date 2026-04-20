@@ -436,6 +436,7 @@ void MapMerge::publishTransforms(
         tf_msg.transform.rotation = t.rotation;
         if (isValidTransform2D(tf_msg)) {
           tf_msgs.push_back(tf_msg);
+          last_valid_world_tf_by_robot_[robot_names[i]] = tf_msg.transform;
           have_metric_tf = true;
           RCLCPP_DEBUG(
             logger_,
@@ -465,18 +466,31 @@ void MapMerge::publishTransforms(
       }
 
       if (!have_metric_tf && publish_provisional_tf_) {
-        geometry_msgs::msg::TransformStamped prov;
-        prov.header.stamp = now;
-        prov.header.frame_id = world_frame_;
-        prov.child_frame_id = robot_names[i] + "/map";
-        prov.transform.translation.x = 0.0;
-        prov.transform.translation.y = 0.0;
-        prov.transform.translation.z = 0.0;
-        prov.transform.rotation.w = 1.0;
-        prov.transform.rotation.x = 0.0;
-        prov.transform.rotation.y = 0.0;
-        prov.transform.rotation.z = 0.0;
-        tf_msgs.push_back(prov);
+        geometry_msgs::msg::TransformStamped fallback;
+        fallback.header.stamp = now;
+        fallback.header.frame_id = world_frame_;
+        fallback.child_frame_id = robot_names[i] + "/map";
+
+        auto last_tf_it = last_valid_world_tf_by_robot_.find(robot_names[i]);
+        if (last_tf_it != last_valid_world_tf_by_robot_.end()) {
+          // Keep the frame stable during estimator dropouts.
+          fallback.transform = last_tf_it->second;
+          tf_msgs.push_back(fallback);
+          RCLCPP_WARN_THROTTLE(
+            logger_, *this->get_clock(), 5000,
+            "Reusing last valid TF for %s/map while current estimate is invalid",
+            robot_names[i].c_str());
+        } else {
+          // No valid metric transform has ever been produced for this robot yet.
+          fallback.transform.translation.x = 0.0;
+          fallback.transform.translation.y = 0.0;
+          fallback.transform.translation.z = 0.0;
+          fallback.transform.rotation.w = 1.0;
+          fallback.transform.rotation.x = 0.0;
+          fallback.transform.rotation.y = 0.0;
+          fallback.transform.rotation.z = 0.0;
+          tf_msgs.push_back(fallback);
+        }
       }
     }
   }

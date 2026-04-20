@@ -19,15 +19,18 @@ publish ``map -> <robot>/map`` on ``/tf``.
 Usage: python3 scripts/diagnose_multirobot_tf.py
 """
 
+import math
 import os
 import sys
 import time
+from typing import Optional, Tuple
 
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
 from rclpy.time import Time
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+from nav_msgs.msg import OccupancyGrid
 from tf2_ros import Buffer, TransformListener
 
 # Default fleet names (used only if no /<robot>/tf topics are found yet).
@@ -98,6 +101,7 @@ class TFDiagnostics(Node):
         TransformListener(self.buffer, self)
         self.robots: list[str] = []
         self.results = []
+        self._merged_map: Optional[OccupancyGrid] = None
 
     def _lookup_try_many(
         self,
@@ -150,6 +154,78 @@ class TFDiagnostics(Node):
         else:
             self.log(f'{desc}: {last_err}', ok=False)
 
+    @staticmethod
+    def _world_to_map_cell(
+        grid: OccupancyGrid, x: float, y: float,
+    ) -> Optional[Tuple[int, int]]:
+        """Map-frame position (x,y) to occupancy cell indices; None if outside grid."""
+        info = grid.info
+        ox = info.origin.position.x
+        oy = info.origin.position.y
+        q = info.origin.orientation
+        siny_cosp = 2.0 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+        res = info.resolution
+        dx = x - ox
+        dy = y - oy
+        ix = (math.cos(yaw) * dx + math.sin(yaw) * dy) / res
+        iy = (-math.sin(yaw) * dx + math.cos(yaw) * dy) / res
+        mx = int(math.floor(ix))
+        my = int(math.floor(iy))
+        if mx < 0 or my < 0 or mx >= info.width or my >= info.height:
+            return None
+        return mx, my
+
+    def check_merged_map_footprint(self, robot: str) -> None:
+        """Sample merged /map at robot base pose in frame map (Nav2 lethal alignment check)."""
+        if self._merged_map is None:
+            return
+        ok_tf, _ = self._lookup_try_many('map', f'{robot}/base_footprint')
+        if not ok_tf:
+            self.log(
+                f'Merged /map vs TF: {robot} (skip cell sample; map->{robot}/base_footprint unresolved)',
+                ok=None,
+            )
+            return
+        clock_type = self.get_clock().clock_type
+        query_time = Time(nanoseconds=0, clock_type=clock_type)
+        try:
+            t = self.buffer.lookup_transform(
+                'map',
+                f'{robot}/base_footprint',
+                query_time,
+                timeout=Duration(seconds=2.0),
+            )
+        except Exception as e:
+            self.log(f'Merged /map vs TF: {robot} lookup failed: {e}', ok=None)
+            return
+        x = t.transform.translation.x
+        y = t.transform.translation.y
+        cell = self._world_to_map_cell(self._merged_map, x, y)
+        if cell is None:
+            self.log(
+                f'Merged /map vs TF: {robot} base ({x:.2f},{y:.2f}) outside grid '
+                f'({self._merged_map.info.width}x{self._merged_map.info.height}) — '
+                'possible resize lag or TF/map mismatch',
+                ok=False,
+            )
+            return
+        mx, my = cell
+        idx = my * self._merged_map.info.width + mx
+        val = self._merged_map.data[idx]
+        desc = f'Merged /map vs TF: {robot} cell ({mx},{my}) occupancy={val}'
+        if val < 0:
+            self.log(f'{desc} (unknown)', ok=None)
+        elif val >= 90:
+            self.log(
+                f'{desc} (occupied) — if robot is physically in free space, check '
+                'map_merge map->robot/map and Nav2 static layer (/map_relay)',
+                ok=False,
+            )
+        else:
+            self.log(f'{desc} (free)', ok=True)
+
     def lookup_explorer_chain(self, robot: str) -> None:
         """map -> base_footprint; accept composed hops if one multi-hop lookup fails on stamp skew."""
         desc = f'Explorer chain: map->{robot}/base_footprint'
@@ -188,6 +264,11 @@ class TFDiagnostics(Node):
             f'ROS_DOMAIN_ID = {domain} (must match central PC and every robot)',
             ok=None,
         )
+
+        def on_map(msg: OccupancyGrid) -> None:
+            self._merged_map = msg
+
+        self.create_subscription(OccupancyGrid, '/map', on_map, qos_transient())
 
         # 1. Check topics (what should exist given the domain bridges)
         time.sleep(0.5)
@@ -288,6 +369,20 @@ class TFDiagnostics(Node):
                 optional=True,
             )
             self.lookup_explorer_chain(r)
+
+        if self._merged_map is not None:
+            self.log(
+                f'Merged /map snapshot: {self._merged_map.info.width}x'
+                f'{self._merged_map.info.height} @ {self._merged_map.info.resolution:.3f} m/cell',
+                ok=None,
+            )
+            for r in self.robots:
+                self.check_merged_map_footprint(r)
+        else:
+            self.log(
+                'Merged /map: no OccupancyGrid received yet (optional pose-vs-map check skipped)',
+                ok=None,
+            )
 
         # 4. Sample /tf and /tf_static content
         from tf2_msgs.msg import TFMessage
