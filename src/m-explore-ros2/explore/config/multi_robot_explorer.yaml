@@ -60,6 +60,18 @@ multi_robot_explorer:
     nav2_path_precheck_server_wait_sec: 3.0
     nav2_path_precheck_timeout_sec: 8.0
     nav2_path_min_poses: 2
+    # If ABORTED precheck returns no explicit error detail, escalate to
+    # blacklist after this many repeats for the same goal.
+    nav2_path_precheck_transient_abort_repeat_limit: 3
+    # Parse planner-server rosout "failed to generate a valid path to (x, y)"
+    # and treat matching precheck ABORTED goals as hard failures.
+    nav2_path_precheck_use_rosout_no_path_hint: true
+    nav2_path_precheck_rosout_no_path_window_sec: 6.0
+    nav2_path_precheck_rosout_goal_match_tol_m: 0.30
+    nav2_path_precheck_rosout_immediate_blacklist: true
+    nav2_path_precheck_use_planner_lifecycle_hint: true
+    nav2_path_precheck_planner_state_stale_sec: 8.0
+    nav2_path_precheck_abort_active_planner_is_hard_fail: true
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
 
@@ -98,13 +110,16 @@ multi_robot_explorer:
 
     # After abort, reject, watchdog cancel, or other failure paths, wait this
     # many seconds before assigning a new frontier (per robot).
-    post_failure_cooldown_sec: 5.0
+    post_failure_cooldown_sec: 8.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
     goal_reject_warmup_sec: 30.0
     # Robot-side helper topic (from turtlebot3_navigation2/nav2_lethal_watch.py):
     # when true, the robot is currently in a lethal Nav2 costmap cell.
     nav2_lethal_topic_pattern: "/{robot}/nav2_lethal_inflation"
+    # Robot-side retrace helper topic; true while robot is executing a reverse
+    # memory retreat to escape lethal/stall.
+    nav2_retrace_topic_pattern: "/{robot}/nav2_retrace_active"
     # While lethal is active, hold the current goal, skip watchdog cancel-driven
     # blacklisting, and resend the held goal once lethal clears.
     lethal_hold_enabled: true
@@ -113,6 +128,9 @@ multi_robot_explorer:
     lethal_hold_max_sec: 30.0
     # Delay before resending held goal after lethal clears.
     lethal_retry_delay_sec: 0.5
+    # Hold/resume behavior while robot-side retrace is active.
+    retrace_hold_enabled: true
+    retrace_hold_max_sec: 30.0
 
     # Minimum frontier size (metres) to consider. Filters tiny frontiers
     # that aren't worth navigating to.
@@ -122,7 +140,7 @@ multi_robot_explorer:
     # frontier cells. Tiny slivers (often along walls) produce goals that
     # Nav2 plans to but the local controller cannot follow ("Failed to make
     # progress"). Set to 0 to disable. 18-cell slivers are typical failures.
-    min_frontier_cells_for_goal: 8
+    min_frontier_cells_for_goal: 16
 
     # When Nav2 reports success but the last feedback still shows a non-trivial
     # distance_remaining, the explorer can optionally treat this as a
@@ -151,6 +169,11 @@ multi_robot_explorer:
     # this long, cancel Nav2 and count success (main fix when SUCCEEDED never
     # arrives). Set 0 to disable.
     tacit_goal_success_hold_sec: 1.0
+    # If NavigateToPose ends as CANCELED for a non-admin reason and the robot
+    # is still far from goal, blacklist the goal so exploration does not
+    # repeatedly retry doomed targets.
+    blacklist_on_canceled_when_far: true
+    canceled_blacklist_min_goal_dist_m: 0.30
 
     # Cost function weights (same semantics as explore_lite):
     #   cost = potential_scale * distance - gain_scale * frontier_size
@@ -261,12 +284,12 @@ multi_robot_explorer:
     # - When enabled, active goals can be cancelled and reassigned before
     #   completion if the current target becomes risky (near obstacles) or
     #   stale (limited progress).
-    retarget_enable: true
+    retarget_enable: false
     # Align with multi_robot_explorer.py defaults (12.0): fewer mid-route cancel cycles.
     retarget_cooldown_sec: 12.0
     retarget_min_goal_shift_m: 0.25
     retarget_min_utility_gain: 0.2
-    retarget_stagnation_sec: 15.0
+    retarget_stagnation_sec: 24.0
     retarget_clearance_threshold_m: 0.40
     # While the robot is advancing on the current goal, preempt for a new goal
     # only if frontier utility improves by at least this much (explore more
@@ -279,10 +302,10 @@ multi_robot_explorer:
     # Set to 0 to allow retargets anywhere on the map.
     retarget_max_offset_from_anchor_m: 0.5
     # Goal replacement gate to avoid frequent Nav2 preemption (node default: 4.0).
-    min_goal_replan_interval_s: 8.0
+    min_goal_replan_interval_s: 12.0
     min_goal_change_dist_m: 0.30
     min_progress_before_replan_m: 0.08
-    max_stuck_time_s: 12.0
+    max_stuck_time_s: 18.0
     allow_replan_when_no_progress: true
 
     # Minimum separation between the robot and a candidate goal (metres).

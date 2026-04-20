@@ -19,6 +19,8 @@ until map overlap is detected.
 """
 
 import math
+import re
+import traceback
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -34,6 +36,8 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 
 from action_msgs.msg import GoalStatus
 from std_msgs.msg import Bool, String
+from rcl_interfaces.msg import Log
+from lifecycle_msgs.msg import TransitionEvent
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
 from std_msgs.msg import String as StringMsg
@@ -107,6 +111,8 @@ class RobotState:
     # NavigateToPose goal_seq for the replacement goal after retarget; Nav2 may
     # report ABORTED while tearing down the cancelled goal — do not blacklist.
     retarget_abort_blacklist_suppress_seq: Optional[int] = None
+    # Reason for the most recent explorer-issued cancel request.
+    last_cancel_reason: str = ''
     # First NavigateToPose of the current leg; retargets must stay near this.
     retarget_anchor: Optional[Tuple[float, float]] = None
     # Set when we cancel Nav2 after tacit "close enough" success (see plan_tick).
@@ -130,6 +136,10 @@ class RobotState:
     nav2_lethal_active: bool = False
     # First timestamp when nav2_lethal_active became True.
     nav2_lethal_since: float = 0.0
+    # True while robot-side nav2_retrace_escape is executing retreat.
+    nav2_retrace_active: bool = False
+    # First timestamp when nav2_retrace_active became True.
+    nav2_retrace_since: float = 0.0
     # Goal to preserve while robot is in lethal space; resent after recovery.
     held_goal_position: Optional[Tuple[float, float]] = None
     # Robot-side topic: RegulatedPurePursuitController "collision ahead" (debounced).
@@ -162,6 +172,12 @@ class RobotState:
     precheck_fail_events: int = 0
     precheck_timeout_events: int = 0
     precheck_server_unavailable_events: int = 0
+    # Last known planner lifecycle state label ("active", "inactive", ...).
+    planner_state_label: str = ''
+    planner_state_update_time: float = 0.0
+    # Track repeated transient ABORTED precheck outcomes for the same goal.
+    precheck_transient_goal_xy: Optional[Tuple[float, float]] = None
+    precheck_transient_repeat_count: int = 0
     # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
     arrival_probe_in_progress: bool = False
     arrival_probe_goal_handle: Optional[object] = None
@@ -496,6 +512,10 @@ class MultiRobotExplorer(Node):
         # This catches Nav2 never publishing SUCCEEDED while the robot is on
         # the target. Set 0 to disable.
         self.declare_parameter('tacit_goal_success_hold_sec', 1.0)
+        # On STATUS_CANCELED, optionally blacklist when goal ended far from target
+        # and the cancel was not an intentional administrative action.
+        self.declare_parameter('blacklist_on_canceled_when_far', True)
+        self.declare_parameter('canceled_blacklist_min_goal_dist_m', 0.30)
         # For very small initial maps, Nav2 can legitimately report success
         # with a relatively large distance_remaining because the frontier
         # centroid may still be outside the tiny explored region. To avoid
@@ -569,9 +589,13 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('lethal_hold_enabled', True)
         self.declare_parameter(
             'nav2_lethal_topic_pattern', '/{robot}/nav2_lethal_inflation')
+        self.declare_parameter(
+            'nav2_retrace_topic_pattern', '/{robot}/nav2_retrace_active')
         self.declare_parameter('skip_blacklist_on_nav2_lethal', True)
         self.declare_parameter('lethal_hold_max_sec', 30.0)
         self.declare_parameter('lethal_retry_delay_sec', 0.5)
+        self.declare_parameter('retrace_hold_enabled', True)
+        self.declare_parameter('retrace_hold_max_sec', 30.0)
         # Debounced Bool from turtlebot3_navigation2/nav2_controller_collision_watch.py
         self.declare_parameter(
             'nav2_collision_ahead_topic_pattern', '/{robot}/nav2_collision_ahead')
@@ -589,6 +613,25 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('nav2_path_precheck_server_wait_sec', 0.5)
         self.declare_parameter('nav2_path_precheck_timeout_sec', 3.0)
         self.declare_parameter('nav2_path_min_poses', 2)
+        # If ABORTED precheck has no explicit error code, treat repeated failures
+        # for the same goal as hard-unreachable after this many repeats.
+        self.declare_parameter('nav2_path_precheck_transient_abort_repeat_limit', 3)
+        # Parse planner_server /rosout no-valid-path hints and map them back
+        # onto precheck goals to force hard blacklist when Nav2 result fields
+        # are missing detail.
+        self.declare_parameter('nav2_path_precheck_use_rosout_no_path_hint', True)
+        self.declare_parameter('nav2_path_precheck_rosout_no_path_window_sec', 6.0)
+        self.declare_parameter('nav2_path_precheck_rosout_goal_match_tol_m', 0.30)
+        # If true, immediately treat matched planner no-path rosout hints as
+        # hard failures (blacklist + precheck abort) instead of waiting for
+        # subsequent retries/result callbacks.
+        self.declare_parameter('nav2_path_precheck_rosout_immediate_blacklist', True)
+        # Enrichment for ambiguous ABORTED precheck reasons.
+        self.declare_parameter('nav2_path_precheck_use_planner_lifecycle_hint', True)
+        self.declare_parameter('nav2_path_precheck_planner_state_stale_sec', 8.0)
+        # If precheck ABORTED is non-explicit but planner is confirmed active
+        # (and data path looks healthy), treat it as hard no-path immediately.
+        self.declare_parameter('nav2_path_precheck_abort_active_planner_is_hard_fail', True)
         # Must match planner_server.planner_plugins id (e.g. GridBased in burger.yaml).
         self.declare_parameter('nav2_path_precheck_planner_id', 'GridBased')
         # Near-goal arrival probe: replan from current TF pose, score path on merged map.
@@ -673,6 +716,13 @@ class MultiRobotExplorer(Node):
         )
         self.tacit_goal_success_hold_sec = float(
             self.get_parameter('tacit_goal_success_hold_sec').value
+        )
+        self.blacklist_on_canceled_when_far: bool = bool(
+            self.get_parameter('blacklist_on_canceled_when_far').value
+        )
+        self.canceled_blacklist_min_goal_dist_m: float = max(
+            0.0,
+            float(self.get_parameter('canceled_blacklist_min_goal_dist_m').value),
         )
         self.strict_success_min_map_size = (
             self.get_parameter('strict_success_min_map_size').value)
@@ -772,6 +822,9 @@ class MultiRobotExplorer(Node):
         self.nav2_lethal_topic_pattern = str(
             self.get_parameter('nav2_lethal_topic_pattern').value
         )
+        self.nav2_retrace_topic_pattern = str(
+            self.get_parameter('nav2_retrace_topic_pattern').value
+        )
         self.skip_blacklist_on_nav2_lethal = bool(
             self.get_parameter('skip_blacklist_on_nav2_lethal').value
         )
@@ -780,6 +833,12 @@ class MultiRobotExplorer(Node):
         )
         self.lethal_retry_delay_sec = float(
             self.get_parameter('lethal_retry_delay_sec').value
+        )
+        self.retrace_hold_enabled = bool(
+            self.get_parameter('retrace_hold_enabled').value
+        )
+        self.retrace_hold_max_sec = float(
+            self.get_parameter('retrace_hold_max_sec').value
         )
         self.nav2_collision_ahead_topic_pattern: str = str(
             self.get_parameter('nav2_collision_ahead_topic_pattern').value
@@ -828,6 +887,40 @@ class MultiRobotExplorer(Node):
         )
         self.nav2_path_min_poses: int = max(
             1, int(self.get_parameter('nav2_path_min_poses').value)
+        )
+        self.nav2_path_precheck_transient_abort_repeat_limit: int = max(
+            1, int(self.get_parameter(
+                'nav2_path_precheck_transient_abort_repeat_limit').value)
+        )
+        self.nav2_path_precheck_use_rosout_no_path_hint: bool = bool(
+            self.get_parameter('nav2_path_precheck_use_rosout_no_path_hint').value
+        )
+        self.nav2_path_precheck_rosout_no_path_window_sec: float = max(
+            0.0,
+            float(self.get_parameter(
+                'nav2_path_precheck_rosout_no_path_window_sec').value),
+        )
+        self.nav2_path_precheck_rosout_goal_match_tol_m: float = max(
+            0.0,
+            float(self.get_parameter(
+                'nav2_path_precheck_rosout_goal_match_tol_m').value),
+        )
+        self.nav2_path_precheck_rosout_immediate_blacklist: bool = bool(
+            self.get_parameter(
+                'nav2_path_precheck_rosout_immediate_blacklist').value
+        )
+        self.nav2_path_precheck_use_planner_lifecycle_hint: bool = bool(
+            self.get_parameter(
+                'nav2_path_precheck_use_planner_lifecycle_hint').value
+        )
+        self.nav2_path_precheck_planner_state_stale_sec: float = max(
+            0.0,
+            float(self.get_parameter(
+                'nav2_path_precheck_planner_state_stale_sec').value),
+        )
+        self.nav2_path_precheck_abort_active_planner_is_hard_fail: bool = bool(
+            self.get_parameter(
+                'nav2_path_precheck_abort_active_planner_is_hard_fail').value
         )
         _pid = self.get_parameter('nav2_path_precheck_planner_id').value
         self.nav2_path_precheck_planner_id: str = (
@@ -896,13 +989,24 @@ class MultiRobotExplorer(Node):
         self._return_home_no_pose_logged: set = set()
         self.goal_pubs: Dict[str, object] = {}
         self.lethal_subs: Dict[str, object] = {}
+        self.retrace_subs: Dict[str, object] = {}
         self.collision_ahead_subs: Dict[str, object] = {}
+        self.planner_state_subs: Dict[str, object] = {}
         self.paused: bool = False
         self.in_global_phase: bool = False
         self._merge_state_last: str = 'NO_OVERLAP'
         self._merge_merged_since: float = 0.0
         self._merge_nonmerged_since: float = 0.0
         self.event_logger = ExplorerEventLogger()
+        self._planner_no_path_hints: Dict[str, Tuple[Tuple[float, float], float]] = {}
+        self._planner_no_path_re = re.compile(
+            r'failed to generate a valid path to \(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)',
+            re.IGNORECASE,
+        )
+        self._planner_no_path_plain_re = re.compile(
+            r'failed to create plan,\s*no valid path found',
+            re.IGNORECASE,
+        )
 
         # -- status publishing & control --
         self.status_pub = self.create_publisher(String, self.status_topic, 10)
@@ -968,6 +1072,13 @@ class MultiRobotExplorer(Node):
             self._merge_state_callback,
             10,
         )
+        if self.nav2_path_precheck_use_rosout_no_path_hint:
+            self.rosout_sub = self.create_subscription(
+                Log,
+                '/rosout',
+                self._rosout_callback,
+                100,
+            )
 
         # -- visualisation --
         if self.visualize:
@@ -990,6 +1101,14 @@ class MultiRobotExplorer(Node):
                     lambda msg, rname=name: self._nav2_lethal_callback(msg, rname),
                     10,
                 )
+            if self.retrace_hold_enabled:
+                rtopic = self.nav2_retrace_topic_pattern.format(robot=name)
+                self.retrace_subs[name] = self.create_subscription(
+                    Bool,
+                    rtopic,
+                    lambda msg, rname=name: self._nav2_retrace_callback(msg, rname),
+                    10,
+                )
             if self.goal_arrival_probe_use_collision_ahead:
                 ctopic = self.nav2_collision_ahead_topic_pattern.format(
                     robot=name)
@@ -997,6 +1116,15 @@ class MultiRobotExplorer(Node):
                     Bool,
                     ctopic,
                     lambda msg, rname=name: self._nav2_collision_ahead_callback(
+                        msg, rname),
+                    10,
+                )
+            if self.nav2_path_precheck_use_planner_lifecycle_hint:
+                ptopic = f'/{name}/planner_server/transition_event'
+                self.planner_state_subs[name] = self.create_subscription(
+                    TransitionEvent,
+                    ptopic,
+                    lambda msg, rname=name: self._planner_lifecycle_callback(
                         msg, rname),
                     10,
                 )
@@ -1019,6 +1147,7 @@ class MultiRobotExplorer(Node):
             f'mode={mode}, retarget_enable={self.retarget_enable}, '
             f'retarget_opportunity={self.retarget_opportunity_enable}, '
             f'nav2_path_precheck={self.nav2_path_precheck_enable}, '
+            f'retrace_hold={self.retrace_hold_enabled}, '
             f'goal_arrival_probe={self.goal_arrival_probe_enable}, '
             f'collision_ahead_for_probe={self.goal_arrival_probe_use_collision_ahead}')
         self._publish_status('STARTED')
@@ -1039,6 +1168,168 @@ class MultiRobotExplorer(Node):
         # Store the most recent local map per robot. These are only used in
         # local-per-robot mode.
         self.latest_local_maps[robot] = msg
+
+    def _rosout_callback(self, msg: Log):
+        try:
+            if msg.level < Log.WARN:
+                return
+            name = str(msg.name or '')
+            if '.planner_server' not in name:
+                return
+            text = str(msg.msg or '')
+            text_lower = text.lower()
+            has_coord_no_path = 'failed to generate a valid path to' in text_lower
+            has_plain_no_path = bool(self._planner_no_path_plain_re.search(text))
+            if not has_coord_no_path and not has_plain_no_path:
+                return
+            robot = name.split('.', 1)[0].strip().lstrip('/')
+            if robot not in self.robots:
+                # rosout logger names are not always exactly "<robot>.<node>".
+                # Try matching by namespace token before giving up.
+                for candidate in self.robots.keys():
+                    if f'/{candidate}/' in name or f'{candidate}.' in name:
+                        robot = candidate
+                        break
+            if robot not in self.robots:
+                # Single-robot mode fallback: treat planner warnings as belonging
+                # to the only managed robot namespace.
+                if len(self.robots) == 1:
+                    robot = next(iter(self.robots.keys()))
+                else:
+                    return
+            rs = self.robots[robot]
+            m = self._planner_no_path_re.search(text)
+            if m is not None:
+                try:
+                    gx = float(m.group(1))
+                    gy = float(m.group(2))
+                    hinted_goal = (gx, gy)
+                except Exception:
+                    hinted_goal = rs.path_precheck_goal_xy
+            else:
+                hinted_goal = rs.path_precheck_goal_xy
+            if hinted_goal is None:
+                return
+            now = self.get_clock().now().nanoseconds / 1e9
+            self._planner_no_path_hints[robot] = (hinted_goal, now)
+            if not self.nav2_path_precheck_rosout_immediate_blacklist:
+                return
+            # Fast path: if this matches the currently prechecked goal, do the
+            # blacklist now rather than waiting for repeated ABORTED retries.
+            if (
+                rs.path_precheck_in_progress
+                and rs.path_precheck_goal_xy is not None
+                and _dist(rs.path_precheck_goal_xy, hinted_goal)
+                <= self.nav2_path_precheck_rosout_goal_match_tol_m
+            ):
+                self.get_logger().warn(
+                    f'[{rs.name}] Planner reported no valid path via rosout '
+                    f'for current precheck goal ({hinted_goal[0]:.2f}, {hinted_goal[1]:.2f}); '
+                    'blacklisting immediately'
+                )
+                self._abort_path_precheck(
+                    rs,
+                    cancel_action=True,
+                    blacklist_xy=rs.path_precheck_goal_xy,
+                    cooldown=not rs.degraded_active,
+                )
+                rs.precheck_transient_goal_xy = None
+                rs.precheck_transient_repeat_count = 0
+                return
+            # Secondary path: if precheck already ended but hint is fresh, mark
+            # this goal region as bad so it is not reselected immediately.
+            if not rs.degraded_active:
+                self._append_blacklist_if_distant(rs, hinted_goal)
+        except Exception:
+            # Never let rosout parsing faults tear down the explorer.
+            return
+
+    def _matches_recent_planner_no_path_hint(
+        self, rs: RobotState, goal_xy: Optional[Tuple[float, float]]
+    ) -> bool:
+        if goal_xy is None:
+            return False
+        hint = self._planner_no_path_hints.get(rs.name)
+        if hint is None:
+            return False
+        hinted_xy, ts = hint
+        now = self.get_clock().now().nanoseconds / 1e9
+        if (
+            self.nav2_path_precheck_rosout_no_path_window_sec > 0.0
+            and (now - ts) > self.nav2_path_precheck_rosout_no_path_window_sec
+        ):
+            return False
+        return (
+            _dist(goal_xy, hinted_xy)
+            <= self.nav2_path_precheck_rosout_goal_match_tol_m
+        )
+
+    def _planner_lifecycle_callback(self, msg: TransitionEvent, robot: str):
+        rs = self.robots.get(robot)
+        if rs is None:
+            return
+        try:
+            label = str(msg.goal_state.label or '').strip().lower()
+        except Exception:
+            label = ''
+        rs.planner_state_label = label
+        rs.planner_state_update_time = self.get_clock().now().nanoseconds / 1e9
+
+    def _enrich_transient_precheck_reason(
+        self, rs: RobotState, goal_xy: Optional[Tuple[float, float]], reason: str
+    ) -> str:
+        now = self.get_clock().now().nanoseconds / 1e9
+        if (
+            self.nav2_path_precheck_use_planner_lifecycle_hint
+            and rs.planner_state_label
+            and rs.planner_state_update_time > 0.0
+            and (
+                self.nav2_path_precheck_planner_state_stale_sec <= 0.0
+                or (now - rs.planner_state_update_time)
+                <= self.nav2_path_precheck_planner_state_stale_sec
+            )
+            and rs.planner_state_label != 'active'
+        ):
+            return (
+                'precheck_transient_planner_lifecycle_'
+                f'{rs.planner_state_label} ({reason})'
+            )
+        if (
+            rs.last_tf_update_time > 0.0
+            and (now - rs.last_tf_update_time) > self.tf_stale_timeout_sec
+        ):
+            return (
+                'precheck_transient_tf_stale '
+                f'(tf_age={now - rs.last_tf_update_time:.2f}s, '
+                f'threshold={self.tf_stale_timeout_sec:.2f}s, base={reason})'
+            )
+        if (
+            self.nav2_path_precheck_use_rosout_no_path_hint
+            and goal_xy is not None
+            and rs.name in self._planner_no_path_hints
+        ):
+            hinted_xy, ts = self._planner_no_path_hints[rs.name]
+            age = now - ts
+            return (
+                'precheck_transient_rosout_no_match '
+                f'(hint_xy={hinted_xy}, hint_age={age:.2f}s, goal={goal_xy}, base={reason})'
+            )
+        return reason
+
+    def _planner_state_recently_active(self, rs: RobotState) -> bool:
+        if not rs.planner_state_label:
+            return False
+        if rs.planner_state_label != 'active':
+            return False
+        if rs.planner_state_update_time <= 0.0:
+            return False
+        if self.nav2_path_precheck_planner_state_stale_sec <= 0.0:
+            return True
+        now = self.get_clock().now().nanoseconds / 1e9
+        return (
+            now - rs.planner_state_update_time
+            <= self.nav2_path_precheck_planner_state_stale_sec
+        )
 
     def _publish_status(self, state: str):
         msg = String()
@@ -1062,7 +1353,7 @@ class MultiRobotExplorer(Node):
                 self.get_logger().info('Pause requested on control topic — cancelling active goals')
                 for rs in self.robots.values():
                     if rs.goal_active:
-                        self._cancel_goal(rs)
+                        self._cancel_goal(rs, reason='pause')
             self.paused = True
             self._publish_status('PAUSED')
 
@@ -1197,6 +1488,7 @@ class MultiRobotExplorer(Node):
                             'counting success'
                         )
                         rs.tacit_success_pending_cancel = True
+                        rs.last_cancel_reason = 'tacit_success'
                         rs.ignore_cooldown_on_next_cancel = True
                         try:
                             rs.goal_handle.cancel_goal_async()
@@ -1254,6 +1546,26 @@ class MultiRobotExplorer(Node):
                 continue
             if self.degraded_hold_enabled and rs.degraded_active:
                 continue
+            if self.retrace_hold_enabled and rs.nav2_retrace_active:
+                hold_age = (
+                    now - rs.nav2_retrace_since
+                    if rs.nav2_retrace_since > 0.0
+                    else 0.0
+                )
+                if (
+                    self.retrace_hold_max_sec > 0.0
+                    and hold_age > self.retrace_hold_max_sec
+                ):
+                    self.get_logger().warn(
+                        f'[{rs.name}] retrace hold timeout after {hold_age:.1f}s; '
+                        'resuming normal watchdog behavior'
+                    )
+                    rs.nav2_retrace_active = False
+                    rs.nav2_retrace_since = 0.0
+                else:
+                    if rs.goal_position is not None and rs.held_goal_position is None:
+                        rs.held_goal_position = rs.goal_position
+                    continue
             if self.lethal_hold_enabled and rs.nav2_lethal_active:
                 hold_age = now - rs.nav2_lethal_since if rs.nav2_lethal_since > 0.0 else 0.0
                 if self.lethal_hold_max_sec > 0.0 and hold_age > self.lethal_hold_max_sec:
@@ -1290,16 +1602,16 @@ class MultiRobotExplorer(Node):
                     f'(pose_stagnation_age={pose_stagnation_age:.1f}s); '
                     'cancelling and blacklisting'
                 )
-                self._cancel_goal(rs)
+                self._cancel_goal(rs, reason='stall_watchdog')
                 if rs.homing_active:
                     self._return_home_note_failure(rs)
                 elif rs.goal_position:
                     rs.blacklist.append(rs.goal_position)
                 self._arm_post_failure_cooldown(rs)
 
-        if self.lethal_hold_enabled:
+        if self.lethal_hold_enabled or self.retrace_hold_enabled:
             for rs in self.robots.values():
-                if rs.nav2_lethal_active:
+                if rs.nav2_lethal_active or rs.nav2_retrace_active:
                     continue
                 if rs.held_goal_position is None:
                     continue
@@ -1401,7 +1713,7 @@ class MultiRobotExplorer(Node):
         self._return_home_no_pose_logged.clear()
         for rs in self.robots.values():
             if rs.homing_active and (rs.goal_active or rs.goal_pending):
-                self._cancel_goal(rs)
+                self._cancel_goal(rs, reason='return_home_reset')
             rs.return_home_done = False
             rs.homing_active = False
             rs.return_home_failures = 0
@@ -1976,11 +2288,16 @@ class MultiRobotExplorer(Node):
         rs.next_assign_allowed_time = now + max(0.0, self.post_failure_cooldown_sec)
 
     def _should_skip_blacklist_due_to_lethal(self, rs: RobotState) -> bool:
-        return (
+        lethal_skip = (
             self.lethal_hold_enabled
             and self.skip_blacklist_on_nav2_lethal
             and rs.nav2_lethal_active
         )
+        retrace_skip = (
+            self.retrace_hold_enabled
+            and rs.nav2_retrace_active
+        )
+        return lethal_skip or retrace_skip
 
     def _resend_held_goal(self, rs: RobotState) -> None:
         goal = rs.held_goal_position
@@ -2036,7 +2353,34 @@ class MultiRobotExplorer(Node):
             return
         rs.nav2_collision_ahead = bool(msg.data)
 
+    def _nav2_retrace_callback(self, msg: Bool, robot_name: str):
+        rs = self.robots.get(robot_name)
+        if rs is None:
+            return
+        retrace_now = bool(msg.data)
+        now = self.get_clock().now().nanoseconds / 1e9
+        if retrace_now == rs.nav2_retrace_active:
+            return
+        rs.nav2_retrace_active = retrace_now
+        if retrace_now:
+            rs.nav2_retrace_since = now
+            if rs.goal_position is not None:
+                rs.held_goal_position = rs.goal_position
+            self.get_logger().warn(
+                f'[{rs.name}] Nav2 retrace active; holding current goal'
+            )
+            return
+        rs.nav2_retrace_since = 0.0
+        if rs.held_goal_position is not None:
+            rs.next_assign_allowed_time = min(
+                rs.next_assign_allowed_time,
+                now + max(0.0, self.lethal_retry_delay_sec),
+            )
+        self.get_logger().info(f'[{rs.name}] Nav2 retrace cleared')
+
     def _robot_may_assign_now(self, rs: RobotState, now: float) -> bool:
+        if self.retrace_hold_enabled and rs.nav2_retrace_active:
+            return False
         return now >= rs.next_assign_allowed_time
 
     def _goal_point_blacklisted(
@@ -2263,6 +2607,8 @@ class MultiRobotExplorer(Node):
             return
         if rs.homing_active:
             return
+        if self.retrace_hold_enabled and rs.nav2_retrace_active:
+            return
         if rs.arrival_probe_in_progress:
             return
         if not rs.goal_active or rs.goal_pending or rs.position is None or rs.goal_position is None:
@@ -2314,7 +2660,7 @@ class MultiRobotExplorer(Node):
                         f'new=({new_goal[0]:.2f}, {new_goal[1]:.2f})'
                     )
                     rs.ignore_cooldown_on_next_cancel = True
-                    self._cancel_goal(rs)
+                    self._cancel_goal(rs, reason='retarget_opportunity')
                     rs.last_retarget_time = now
                     self._send_goal(rs, best_fr, from_retarget=True)
                     return
@@ -2347,7 +2693,7 @@ class MultiRobotExplorer(Node):
             f'new=({new_goal[0]:.2f}, {new_goal[1]:.2f})'
         )
         rs.ignore_cooldown_on_next_cancel = True
-        self._cancel_goal(rs)
+        self._cancel_goal(rs, reason='retarget_stagnation')
         rs.blacklist.append(current_goal)
         rs.last_retarget_time = now
         self._send_goal(rs, best_fr, from_retarget=True)
@@ -2720,6 +3066,78 @@ class MultiRobotExplorer(Node):
                 f'failures (count={rs.precheck_fail_events})'
             )
 
+    def _compute_path_error_name(self, error_code: Optional[int]) -> str:
+        """Return symbolic ComputePathToPose result error name if available."""
+        if error_code is None:
+            return 'NONE'
+        try:
+            code = int(error_code)
+        except Exception:
+            return f'code_{error_code}'
+        for attr in dir(ComputePathToPose.Result):
+            if not attr.isupper():
+                continue
+            try:
+                val = getattr(ComputePathToPose.Result, attr)
+            except Exception:
+                continue
+            if isinstance(val, int) and int(val) == code:
+                return attr
+        return f'code_{code}'
+
+    def _classify_precheck_failure(
+        self, status: int, result_obj: Optional[object]
+    ) -> Tuple[bool, str]:
+        """Return (hard_unreachable, reason)."""
+        status_name = {
+            GoalStatus.STATUS_ABORTED: 'ABORTED',
+            GoalStatus.STATUS_CANCELED: 'CANCELED',
+            GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
+        }.get(int(status), f'status_{int(status)}')
+        error_code = getattr(result_obj, 'error_code', None) if result_obj is not None else None
+        error_msg = str(getattr(result_obj, 'error_msg', '') or '').lower()
+        error_name = self._compute_path_error_name(error_code)
+        reason_base = f'status={status_name}, error={error_name}'
+
+        # Only blacklist on explicit no-valid-path signals.
+        if error_name == 'NO_VALID_PATH':
+            return True, f'precheck_hard_no_valid_path ({reason_base})'
+        if 'no valid path' in error_msg or 'failed to generate a valid path' in error_msg:
+            return True, f'precheck_hard_no_valid_path_msg ({reason_base}, msg={error_msg})'
+
+        # Explicit lethal/start occupied is treated as transient per policy.
+        if (
+            'starting point in lethal space' in error_msg
+            or 'start occupied' in error_msg
+            or error_name in ('START_OCCUPIED', 'START_IN_COLLISION')
+        ):
+            return False, f'precheck_transient_lethal_start ({reason_base})'
+        return False, f'precheck_transient_non_explicit ({reason_base})'
+
+    def _note_transient_precheck_abort_and_maybe_escalate(
+        self, rs: RobotState, goal_xy: Optional[Tuple[float, float]], reason: str
+    ) -> Tuple[bool, str]:
+        """Escalate repeated same-goal transient ABORTED prechecks to hard fail."""
+        if goal_xy is None:
+            return False, reason
+        if (
+            rs.precheck_transient_goal_xy is None
+            or _dist(rs.precheck_transient_goal_xy, goal_xy) > 0.05
+        ):
+            rs.precheck_transient_goal_xy = (float(goal_xy[0]), float(goal_xy[1]))
+            rs.precheck_transient_repeat_count = 1
+            return False, reason
+        rs.precheck_transient_repeat_count += 1
+        if (
+            rs.precheck_transient_repeat_count
+            >= self.nav2_path_precheck_transient_abort_repeat_limit
+        ):
+            return True, (
+                'precheck_hard_repeated_transient_abort '
+                f'(count={rs.precheck_transient_repeat_count}, base={reason})'
+            )
+        return False, reason
+
     def _begin_nav2_path_precheck(
         self,
         rs: RobotState,
@@ -2831,9 +3249,79 @@ class MultiRobotExplorer(Node):
                     count_for_degraded=False,
                 )
                 return
-            if not rs.degraded_active:
-                self._blacklist_or_home_fail(rs, goal_xy)
-                self._arm_post_failure_cooldown(rs)
+            hard_unreachable, reason = self._classify_precheck_failure(
+                int(status), wrapped.result
+            )
+            if (
+                not hard_unreachable
+                and self.nav2_path_precheck_use_rosout_no_path_hint
+                and self._matches_recent_planner_no_path_hint(rs, goal_xy)
+            ):
+                hard_unreachable = True
+                reason = (
+                    'precheck_hard_no_valid_path_rosout_hint '
+                    f'(goal={goal_xy})'
+                )
+            if (
+                not hard_unreachable
+                and int(status) == GoalStatus.STATUS_ABORTED
+                and 'precheck_transient_non_explicit' in reason
+            ):
+                tf_fresh = (
+                    rs.last_tf_update_time <= 0.0
+                    or (now_ts - rs.last_tf_update_time) <= self.tf_stale_timeout_sec
+                )
+                planner_active_hint = self._planner_state_recently_active(rs)
+                # transition_event hints are sometimes absent even when the planner
+                # is healthy; once compute_path_to_pose server has been observed
+                # outside warmup, treat that as an "active enough" signal.
+                planner_server_seen = rs.path_precheck_server_seen_time > 0.0
+                if (
+                    self.nav2_path_precheck_abort_active_planner_is_hard_fail
+                    and tf_fresh
+                    and (planner_active_hint or planner_server_seen)
+                ):
+                    hard_unreachable = True
+                    planner_hint = (
+                        'lifecycle_active'
+                        if planner_active_hint else
+                        'server_seen'
+                    )
+                    reason = (
+                        'precheck_hard_aborted_with_active_planner '
+                        f'(planner_hint={planner_hint}, '
+                        f'planner_state={rs.planner_state_label}, '
+                        f'planner_state_age={now_ts - rs.planner_state_update_time:.2f}s, '
+                        f'tf_age={now_ts - rs.last_tf_update_time:.2f}s)'
+                    )
+                else:
+                    reason = self._enrich_transient_precheck_reason(rs, goal_xy, reason)
+            if (
+                not hard_unreachable
+                and int(status) == GoalStatus.STATUS_ABORTED
+                and 'precheck_transient_non_explicit' in reason
+            ):
+                hard_unreachable, reason = (
+                    self._note_transient_precheck_abort_and_maybe_escalate(
+                        rs, goal_xy, reason
+                    )
+                )
+            if hard_unreachable:
+                self.get_logger().warn(
+                    f'[{rs.name}] Path precheck hard failure -> blacklist ({reason})'
+                )
+                if not rs.degraded_active:
+                    self._blacklist_or_home_fail(rs, goal_xy)
+                    self._arm_post_failure_cooldown(rs)
+                    rs.precheck_transient_goal_xy = None
+                    rs.precheck_transient_repeat_count = 0
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Degraded hold active; suppressing precheck blacklist ({reason})'
+                    )
+                return
+            reason = self._enrich_transient_precheck_reason(rs, goal_xy, reason)
+            self._path_precheck_transient_fail(rs, reason)
             return
 
         result = wrapped.result
@@ -2847,11 +3335,15 @@ class MultiRobotExplorer(Node):
             if not rs.degraded_active:
                 self._blacklist_or_home_fail(rs, goal_xy)
                 self._arm_post_failure_cooldown(rs)
+                rs.precheck_transient_goal_xy = None
+                rs.precheck_transient_repeat_count = 0
             return
 
         if frontier is None or goal_xy is None:
             return
         goal_x, goal_y = goal_xy
+        rs.precheck_transient_goal_xy = None
+        rs.precheck_transient_repeat_count = 0
         self._dispatch_navigate_to_pose(
             rs, frontier, goal_x, goal_y, from_retarget)
 
@@ -3102,6 +3594,7 @@ class MultiRobotExplorer(Node):
             )
             if tacit_follow and rs.goal_handle is not None:
                 rs.tacit_success_pending_cancel = True
+                rs.last_cancel_reason = 'tacit_success'
                 rs.ignore_cooldown_on_next_cancel = True
                 try:
                     rs.goal_handle.cancel_goal_async()
@@ -3130,7 +3623,7 @@ class MultiRobotExplorer(Node):
         self.get_logger().warn(
             f'[{rs.name}] Arrival probe failed — blacklisting goal and cancelling'
         )
-        self._cancel_goal(rs)
+        self._cancel_goal(rs, reason='arrival_probe_fail')
         if gp is not None and not (
             self.degraded_hold_enabled and rs.degraded_active
         ):
@@ -3163,6 +3656,7 @@ class MultiRobotExplorer(Node):
         rs.goal_active = True
         rs.goal_pending = True
         rs.goal_status = 'pending'
+        rs.last_cancel_reason = ''
         rs.goal_seq_counter += 1
         goal_seq = rs.goal_seq_counter
         rs.active_goal_seq = goal_seq
@@ -3773,7 +4267,51 @@ class MultiRobotExplorer(Node):
                 self._arm_post_failure_cooldown(rs)
             else:
                 rs.goal_status = 'canceled'
-                self.get_logger().info(f'[{rs.name}] Goal cancelled')
+                admin_cancel_reasons = {
+                    'retarget_opportunity',
+                    'retarget_stagnation',
+                    'pause',
+                    'shutdown',
+                    'return_home_reset',
+                    'tacit_success',
+                    'arrival_probe_fail',
+                    'stall_watchdog',
+                    'retrace_escape',
+                }
+                cancel_reason = rs.last_cancel_reason or 'unspecified'
+                pose_dist = (
+                    _dist(rs.position, rs.goal_position)
+                    if rs.position is not None and rs.goal_position is not None
+                    else None
+                )
+                far_from_goal = (
+                    pose_dist is None
+                    or pose_dist > max(
+                        self.tacit_goal_success_radius_m,
+                        self.canceled_blacklist_min_goal_dist_m,
+                    )
+                )
+                should_blacklist_cancel = (
+                    self.blacklist_on_canceled_when_far
+                    and not was_homing
+                    and cancel_reason not in admin_cancel_reasons
+                    and far_from_goal
+                    and not (self.degraded_hold_enabled and rs.degraded_active)
+                    and not self._should_skip_blacklist_due_to_lethal(rs)
+                )
+                if should_blacklist_cancel and rs.goal_position is not None:
+                    self.get_logger().warn(
+                        f'[{rs.name}] Goal canceled far from target; blacklisting '
+                        f'(reason={cancel_reason}, pose_dist_m={pose_dist}, '
+                        f'thresh_m={max(self.tacit_goal_success_radius_m, self.canceled_blacklist_min_goal_dist_m):.2f})'
+                    )
+                    self._blacklist_or_home_fail(rs, rs.goal_position)
+                else:
+                    self.get_logger().info(
+                        f'[{rs.name}] Goal cancelled '
+                        f'(reason={cancel_reason}, pose_dist_m={pose_dist}, '
+                        f'blacklist={should_blacklist_cancel})'
+                    )
                 if rs.ignore_cooldown_on_next_cancel:
                     rs.ignore_cooldown_on_next_cancel = False
                 elif was_homing:
@@ -3827,8 +4365,9 @@ class MultiRobotExplorer(Node):
         rs.last_motion_sample_time = now
         rs.near_goal_since = None
 
-    def _cancel_goal(self, rs: RobotState):
+    def _cancel_goal(self, rs: RobotState, *, reason: str = 'unspecified'):
         now = self.get_clock().now().nanoseconds / 1e9
+        rs.last_cancel_reason = reason
         if rs.arrival_probe_in_progress:
             self._abort_arrival_probe(rs, cancel_action=True)
         if rs.path_precheck_in_progress:
@@ -3947,15 +4486,17 @@ def main(args=None):
         # Treat Ctrl+C and external shutdown events as normal exit paths.
         pass
     except Exception:
-        # During shutdown the rclpy context can become invalid and raise
-        # RCLError-like exceptions from the executor. Ignore these so that
-        # teardown remains quiet while still running the cleanup below.
-        pass
+        # Keep cleanup path, but surface the real exception for debugging.
+        traceback.print_exc()
     finally:
+        try:
+            executor.shutdown()
+        except Exception:
+            pass
         # cancel all active goals
         for rs in node.robots.values():
             if rs.goal_active:
-                node._cancel_goal(rs)
+                node._cancel_goal(rs, reason='shutdown')
         try:
             node.destroy_node()
         except Exception:
