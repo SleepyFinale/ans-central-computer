@@ -1,0 +1,44 @@
+name: clyde_bridge
+topics:
+  /clyde/map_wire_z:
+    type: std_msgs/msg/UInt8MultiArray
+    from_domain: 80
+    to_domain: 90
+  /clyde/nav2_collision_ahead:
+    type: std_msgs/msg/Bool
+    from_domain: 80
+    to_domain: 90
+  /clyde/nav2_retrace_active:
+    type: std_msgs/msg/Bool
+    from_domain: 80
+    to_domain: 90
+  /clyde/navigate_to_pose/_action/status:
+    type: action_msgs/msg/GoalStatusArray
+    from_domain: 80
+    to_domain: 90
+  /clyde/navigate_to_pose/_action/feedback:
+    type: nav2_msgs/action/NavigateToPose_FeedbackMessage
+    from_domain: 80
+    to_domain: 90
+  /clyde/navigate_to_pose/_action/result:
+    type: nav2_msgs/action/NavigateToPose_Result
+    from_domain: 80
+    to_domain: 90
+services:
+  /clyde/navigate_to_pose/_action/send_goal:
+    type: nav2_msgs/action/NavigateToPose_SendGoal
+    from_domain: 90
+    to_domain: 80
+  /clyde/navigate_to_pose/_action/get_result:
+    type: nav2_msgs/action/NavigateToPose_GetResult
+    from_domain: 90
+    to_domain: 80
+  /clyde/navigate_to_pose/_action/cancel_goal:
+    type: action_msgs/srv/CancelGoal
+    from_domain: 90
+    to_domain: 80
+actions:
+  /clyde/navigate_to_pose:
+    type: nav2_msgs/action/NavigateToPose
+    from_domain: 90
+    to_domain: 80

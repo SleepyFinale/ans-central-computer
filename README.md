@@ -192,7 +192,9 @@ To connect this central computer to the TurtleBot3 robots you need:
 
 - The **correct SSH target (IP/hostname)** for each robot
 - The **same WiFi network** between robot and central PC
-- A shared **ROS domain** (lab default `ROS_DOMAIN_ID=50`; use **one** value consistently on all machines)
+- A ROS domain policy:
+  - `shared_domain` (legacy): one domain ID on all machines
+  - `bridged_domains` (recommended for fleet stability): per-robot domains bridged into a central domain
 
 ### Robot SSH targets
 
@@ -239,17 +241,35 @@ When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]
 
 ### ROS domain (ROS_DOMAIN_ID)
 
-All robots and the central PC share a **single ROS 2 domain** (the lab default is `ROS_DOMAIN_ID=50`). Every machine that needs to talk to the robots should use the **same** value:
+This stack now supports two comms modes.
+
+1) `shared_domain` (legacy compatibility)
+- All robots and central share one domain (lab default `50`).
+- Start central normally: `./scripts/start_central.sh`.
+
+2) `bridged_domains` (recommended)
+- Central uses `fleet_domain_map.central_domain_id` (default `90`).
+- Each robot uses a deterministic per-robot domain from `config/fleet_domain_map.yaml`.
+- Central starts per-robot domain bridges and keeps explorer/action behavior unchanged.
+
+Central setup for bridged mode:
 
 ```bash
-echo $ROS_DOMAIN_ID
+cd ~/ans-central-computer
+source scripts/ros_domain_profile.bash
+./scripts/start_central.sh --comms-mode bridged_domains
 ```
 
-If you see a different value on any terminal (robot or central PC), set:
+Optional robot subset still works:
 
 ```bash
-export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
+./scripts/start_central.sh -pi --comms-mode bridged_domains
 ```
+
+Bridge/domain sources used by startup:
+- `config/fleet_domain_map.yaml`
+- `config/fleet_bridge_contract.yaml`
+- generated bridge configs in `config/generated_domain_bridge/`
 
 ---
 
@@ -1080,64 +1100,19 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 
 7. **Clock sync (NTP / chrony):** Unstable scan–TF matching or odd `/tf` behavior across machines can come from **skewed clocks**. Install **`chrony`** (or enable **`systemd-timesyncd`**) on each Pi and the central PC; verify with `timedatectl` and `chronyc sources -v` (or `systemctl status systemd-timesyncd`).
 
-**Stability tuning profile (Apr 2026):**
+**Stability tuning profile (Mar 2026):**
 
 - Central `src/m-explore-ros2/explore/config/multi_robot_explorer.yaml` tuned values:
-  - `post_failure_cooldown_sec: 8.0`
-  - `retarget_enable: false`
-  - `retarget_stagnation_sec: 24.0`
+  - `post_failure_cooldown_sec: 5.0`
+  - `retarget_stagnation_sec: 15.0`
   - `retarget_opportunity_enable: false`
-  - `min_goal_replan_interval_s: 12.0`
-  - `max_stuck_time_s: 18.0`
-  - `min_frontier_cells_for_goal: 16`
+  - `min_goal_replan_interval_s: 8.0`
+  - `max_stuck_time_s: 12.0`
 - Robot `ans-turtlebot3` Nav2 profile is tuned in `turtlebot3_navigation2/param/humble/burger.yaml`:
-  - controller loop and BT tick de-rated for Pi load (`controller_frequency: 8.0`, `bt_loop_duration: 100`)
-  - progress checker relaxed (`required_movement_radius: 0.10`, `movement_time_allowance: 32.0`)
-  - costmap/recovery/behavior `transform_timeout: 1.0` (aligned)
-  - global/local inflation radius tuned to `0.20` for fewer doorway deadlocks
-
-**Run-level KPI checker (recommended for A/B/C):**
-
-Use `scripts/analyze_nav2_stability_run.py` on each run and compare normalized rates:
-
-```bash
-cd ~/ans-central-computer
-python3 scripts/analyze_nav2_stability_run.py \
-  --duration-sec 623 \
-  --jsonl /home/schen08/ans-turtlebot3/logs/pinky/session-20260420-130421.jsonl \
-  --central-log /path/to/central.log \
-  --robot-log /path/to/robot.log
-```
-
-Track these gates against your Run A baseline:
-
-- planner ABORTED rate reduction target: >= 40%
-- `plan_stale_while_executing` target: <= 5.0%
-- `global_costmap_unavailable_or_stale` target: <= 2.5%
-- no prolonged (>60 s) precheck timeout/ABORT loops on one frontier region
-
-**A/B/C comparison helper:**
-
-```bash
-# Generate one summary JSON per run
-python3 scripts/analyze_nav2_stability_run.py --duration-sec <runA_sec> \
-  --jsonl <runA_jsonl> --central-log <runA_central_log> --robot-log <runA_robot_log> \
-  --out-json /tmp/runA.json
-
-python3 scripts/analyze_nav2_stability_run.py --duration-sec <runB_sec> \
-  --jsonl <runB_jsonl> --central-log <runB_central_log> --robot-log <runB_robot_log> \
-  --out-json /tmp/runB.json
-
-python3 scripts/analyze_nav2_stability_run.py --duration-sec <runC_sec> \
-  --jsonl <runC_jsonl> --central-log <runC_central_log> --robot-log <runC_robot_log> \
-  --out-json /tmp/runC.json
-
-# Compare normalized metrics and improvement percentages vs Run A
-python3 scripts/compare_nav2_stability_runs.py \
-  --run-a /tmp/runA.json --run-b /tmp/runB.json --run-c /tmp/runC.json
-```
-
-**Selected profile:** the Apr 2026 robot + central tuning values above are the default profile to deploy first (equivalent to Run C candidate) because they explicitly target the dominant baseline failure signatures: precheck timeout/ABORT loops, controller missed-rate abort pressure, and repeated near-goal retarget churn.
+  - progress checker relaxed (`required_movement_radius: 0.10`, `movement_time_allowance: 28.0`)
+  - costmap `transform_timeout: 0.2` (raise in YAML if you see transform timeouts)
+  - local costmap rolling window `3 x 3` m
+  - DWB `min_speed_theta: 0.10`, higher `BaseObstacle.scale`, wider global/local inflation to **avoid wall-hugging** (see robot README stability profile)
 
 **A/B/C validation sequence (recommended):**
 

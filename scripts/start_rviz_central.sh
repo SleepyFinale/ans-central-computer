@@ -117,6 +117,11 @@ else
     echo "  $TMP_CFG"
     echo "Fixed frame: map, map topic: /${ROBOT_NAME}/map"
     echo "Costmap overlays: /${ROBOT_NAME}/global_costmap/costmap and /${ROBOT_NAME}/local_costmap/costmap"
+    echo ""
+    echo "Performance (Wi‑Fi / domain_bridge): RViz is capped at 10 Hz; global costmap overlay"
+    echo "starts disabled (enable in Displays if you need it). Two Map layers + high FPS often"
+    echo "cause GPU stalls and GLSL warnings on central machines."
+    echo ""
     exec rviz2 -d "$TMP_CFG"
 fi
 

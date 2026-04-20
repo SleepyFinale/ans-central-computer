@@ -606,11 +606,18 @@ class MultiRobotExplorer(Node):
         # Per-robot local map topic pattern. By default we assume the standard
         # namespaced SLAM layout '/<robot>/map'.
         self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
+        # Bridge contract: allow disabling per-robot local map ingestion when
+        # operating strictly on merged global map to reduce fleet DDS load.
+        self.declare_parameter('local_map_subscriptions_enable', True)
         # Call /<robot>/compute_path_to_pose before NavigateToPose so goals
         # Nav2 cannot plan through the global costmap are skipped here.
         self.declare_parameter('nav2_path_precheck_enable', True)
         self.declare_parameter('nav2_path_precheck_required', True)
         self.declare_parameter('nav2_path_precheck_server_wait_sec', 0.5)
+        # First connection to NavigateToPose can exceed ~200 ms across
+        # domain_bridge or lossy links; ros2 action list may show the server
+        # before ActionClient.wait_for_server succeeds.
+        self.declare_parameter('navigate_to_pose_server_wait_sec', 5.0)
         self.declare_parameter('nav2_path_precheck_timeout_sec', 3.0)
         self.declare_parameter('nav2_path_min_poses', 2)
         # If ABORTED precheck has no explicit error code, treat repeated failures
@@ -855,6 +862,9 @@ class MultiRobotExplorer(Node):
         self.local_map_topic_pattern: str = (
             self.get_parameter('local_map_topic_pattern').value
         )
+        self.local_map_subscriptions_enable: bool = bool(
+            self.get_parameter('local_map_subscriptions_enable').value
+        )
         self.nav2_path_precheck_enable: bool = bool(
             self.get_parameter('nav2_path_precheck_enable').value
         )
@@ -863,6 +873,10 @@ class MultiRobotExplorer(Node):
         )
         self.nav2_path_precheck_server_wait_sec: float = float(
             self.get_parameter('nav2_path_precheck_server_wait_sec').value
+        )
+        self.navigate_to_pose_server_wait_sec: float = max(
+            0.05,
+            float(self.get_parameter('navigate_to_pose_server_wait_sec').value),
         )
         self.nav2_path_precheck_timeout_sec: float = float(
             self.get_parameter('nav2_path_precheck_timeout_sec').value
@@ -1048,22 +1062,26 @@ class MultiRobotExplorer(Node):
 
         # -- per-robot local map subscriptions --
         self._local_map_subs = []
-        for name in self.robot_names:
-            topic = self.local_map_topic_pattern.format(robot=name)
-            sub_t = self.create_subscription(
-                OccupancyGrid,
-                topic,
-                lambda msg, r=name: self._local_map_callback(msg, r),
-                map_qos_transient,
-            )
-            sub_c = self.create_subscription(
-                OccupancyGrid,
-                topic,
-                lambda msg, r=name: self._local_map_callback(msg, r),
-                map_qos_compatible,
-            )
-            self._local_map_subs.append(sub_t)
-            self._local_map_subs.append(sub_c)
+        use_local_maps = (
+            self.local_map_subscriptions_enable and self.mode != 'global_only'
+        )
+        if use_local_maps:
+            for name in self.robot_names:
+                topic = self.local_map_topic_pattern.format(robot=name)
+                sub_t = self.create_subscription(
+                    OccupancyGrid,
+                    topic,
+                    lambda msg, r=name: self._local_map_callback(msg, r),
+                    map_qos_transient,
+                )
+                sub_c = self.create_subscription(
+                    OccupancyGrid,
+                    topic,
+                    lambda msg, r=name: self._local_map_callback(msg, r),
+                    map_qos_compatible,
+                )
+                self._local_map_subs.append(sub_t)
+                self._local_map_subs.append(sub_c)
 
         # -- merge state subscription (optional) --
         self.merge_state_sub = self.create_subscription(
@@ -1143,13 +1161,15 @@ class MultiRobotExplorer(Node):
             f'Multi-robot explorer started: robots={self.robot_names}, '
             f'map_topic={map_topic}, world_frame={self.world_frame}, '
             f'freq={freq:.2f} Hz, '
+            f'local_map_subs={use_local_maps}, '
             f'use_pose_goal_fallback={self.use_pose_goal_fallback}, '
             f'mode={mode}, retarget_enable={self.retarget_enable}, '
             f'retarget_opportunity={self.retarget_opportunity_enable}, '
             f'nav2_path_precheck={self.nav2_path_precheck_enable}, '
             f'retrace_hold={self.retrace_hold_enabled}, '
             f'goal_arrival_probe={self.goal_arrival_probe_enable}, '
-            f'collision_ahead_for_probe={self.goal_arrival_probe_use_collision_ahead}')
+            f'collision_ahead_for_probe={self.goal_arrival_probe_use_collision_ahead}, '
+            f'navigate_to_pose_wait_sec={self.navigate_to_pose_server_wait_sec:.1f}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -3721,7 +3741,8 @@ class MultiRobotExplorer(Node):
                 self._return_home_note_failure(rs)
             return
 
-        if not rs.action_client.wait_for_server(timeout_sec=0.2):
+        if not rs.action_client.wait_for_server(
+                timeout_sec=self.navigate_to_pose_server_wait_sec):
             if not rs.server_unavailable_logged:
                 self.get_logger().warn(
                     f'[{rs.name}] NavigateToPose action server not available '
@@ -4103,6 +4124,20 @@ class MultiRobotExplorer(Node):
                     and rs.last_distance_remaining > suspicious_thresh
                 )
                 made_progress = self._has_goal_leg_progress(rs)
+                # Nav2 runs on the robot while pose comes from bridged TF/map; the
+                # explorer can miss centroid motion on the central leg even when Nav2
+                # feedback shows a clean terminal approach (distance_remaining).
+                if (
+                    self.single_robot_offloaded_nav2
+                    and not made_progress
+                    and rs.last_distance_remaining is not None
+                    and rs.last_distance_remaining
+                    <= max(
+                        self.tacit_abort_max_distance_remaining_m * 2.0,
+                        self.suspicious_success_distance,
+                    )
+                ):
+                    made_progress = True
                 if (suspicious and not small_map) or (not made_progress and not small_map):
                     rs.goals_failed += 1
                     rs.goal_status = 'failed'

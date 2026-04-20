@@ -94,6 +94,10 @@ def main(args=None):
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # Shutdown race: context can be invalidated mid-wait after Ctrl+C.
+        if rclpy.ok():
+            raise
     finally:
         if node is not None:
             try:

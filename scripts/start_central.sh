@@ -1,8 +1,10 @@
 #!/bin/bash
 # Start all central-computer processes for multi-robot exploration.
 #
-# This is the single entry point for the central computer when using the
-# single-domain, namespaced multi-robot setup. It starts:
+# This is the central entry point for both:
+#   - shared-domain mode (legacy)
+#   - bridged multi-domain mode (per-robot domains + central domain)
+# It starts:
 #   1. TF relay        (/<robot>/tf → /tf with consistent frame prefixing)
 #   1b. Single-robot only: static TF map → <robot>/map (identity bridge)
 #   1c. Single-robot only: relay /<robot>/map → /map (fleet Nav2 + global RViz)
@@ -10,7 +12,11 @@
 #   3. Explorer        (detect frontiers, send Nav2 action goals)
 #
 # Prerequisites:
-#   - All robots and the central PC use the same ROS_DOMAIN_ID (typically 50)
+#   - shared_domain mode:
+#       all robots and central use the same ROS_DOMAIN_ID (typically 50)
+#   - bridged_domains mode:
+#       central uses fleet_domain_map central_domain_id, robots use
+#       robot-specific domain IDs, and domain_bridge is installed.
 #   - Each robot is powered on and running:
 #       * bringup       (robot.launch.py)
 #       * SLAM + Nav2   (navigation2_slam.launch.py fleet_mode:=True with this script)
@@ -32,10 +38,15 @@ EXPLORE_SCRIPT_DIR="${EXPLORE_PKG_DIR}/scripts"
 MAP_MERGE_PKG_DIR="${WORKSPACE_DIR}/src/m-explore-ros2/map_merge"
 MAP_MERGE_CONFIG_FILE="${MAP_MERGE_PKG_DIR}/config/multirobot_params_unknown_poses.yaml"
 EXPLORE_CONFIG_FILE="${EXPLORE_PKG_DIR}/config/multi_robot_explorer.yaml"
+BRIDGE_CONTRACT_FILE="${WORKSPACE_DIR}/config/fleet_bridge_contract.yaml"
+DOMAIN_MAP_FILE="${WORKSPACE_DIR}/config/fleet_domain_map.yaml"
+BRIDGE_CONFIG_GENERATOR="${WORKSPACE_DIR}/scripts/generate_domain_bridge_configs.py"
+GENERATED_BRIDGE_CONFIG_DIR="${WORKSPACE_DIR}/config/generated_domain_bridge"
 TF_RELAY_SCRIPT="${EXPLORE_SCRIPT_DIR}/tf_relay_multirobot.py"
 EXPLORER_SCRIPT="${EXPLORE_SCRIPT_DIR}/multi_robot_explorer.py"
 SINGLE_ROBOT_WORLD_TF_SCRIPT="${EXPLORE_SCRIPT_DIR}/single_robot_world_tf_bridge.py"
 SINGLE_ROBOT_MAP_RELAY_SCRIPT="${EXPLORE_SCRIPT_DIR}/single_robot_map_relay.py"
+ACTION_RELAY_SCRIPT="${SCRIPT_DIR}/fleet_navigate_to_pose_service_relay.py"
 
 cd "$WORKSPACE_DIR"
 source /opt/ros/humble/setup.bash
@@ -66,20 +77,76 @@ if [[ ! -f "$MAP_MERGE_CONFIG_FILE" ]]; then
     exit 1
 fi
 
-export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}
-
-# Optional selection string like "-bpi" to restrict robots.
-SELECTION_RAW="${1:-}"
+COMMS_MODE="${CENTRAL_COMMS_MODE:-shared_domain}"
 SELECTION=""
-if [[ -n "$SELECTION_RAW" && "$SELECTION_RAW" == -* ]]; then
-    SELECTION="${SELECTION_RAW#-}"
+while (($# > 0)); do
+    case "$1" in
+        --comms-mode)
+            shift
+            if (($# == 0)); then
+                echo "ERROR: --comms-mode requires value shared_domain|bridged_domains"
+                exit 1
+            fi
+            COMMS_MODE="$1"
+            ;;
+        -[bpic]*)
+            SELECTION="${1#-}"
+            ;;
+        -h|--help)
+            cat <<'EOF'
+Usage:
+  ./scripts/start_central.sh [robot_filter] [--comms-mode <shared_domain|bridged_domains>]
+
+Examples:
+  ./scripts/start_central.sh
+  ./scripts/start_central.sh -pi
+  ./scripts/start_central.sh --comms-mode bridged_domains
+  ./scripts/start_central.sh -b --comms-mode bridged_domains
+EOF
+            exit 0
+            ;;
+        *)
+            echo "ERROR: unknown argument '$1'"
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [[ "$COMMS_MODE" != "shared_domain" && "$COMMS_MODE" != "bridged_domains" ]]; then
+    echo "ERROR: invalid --comms-mode '$COMMS_MODE' (use shared_domain|bridged_domains)"
+    exit 1
+fi
+
+if [[ "$COMMS_MODE" == "shared_domain" ]]; then
+    export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}
 fi
 
 echo "=========================================="
 echo "  Central Computer — Multi-Robot Exploration"
 echo "=========================================="
 echo ""
-echo "  ROS_DOMAIN_ID = $ROS_DOMAIN_ID"
+if [[ "$COMMS_MODE" == "shared_domain" ]]; then
+    echo "  Comms mode      = shared_domain"
+    echo "  ROS_DOMAIN_ID   = $ROS_DOMAIN_ID"
+else
+    echo "  Comms mode      = bridged_domains"
+    if [[ -f "$DOMAIN_MAP_FILE" ]]; then
+        central_domain_from_map="$(python3 - <<'PY' "$DOMAIN_MAP_FILE"
+import sys, yaml
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+print(data.get("fleet_domain_map", {}).get("central_domain_id", "unset"))
+PY
+)"
+        export ROS_DOMAIN_ID="${central_domain_from_map}"
+        echo "  ROS_DOMAIN_ID   = ${ROS_DOMAIN_ID} (from fleet_domain_map)"
+        echo "  Domain map      = ${DOMAIN_MAP_FILE}"
+    else
+        echo "ERROR: missing domain map file for bridged mode: ${DOMAIN_MAP_FILE}"
+        exit 1
+    fi
+fi
 if [[ -n "$SELECTION" ]]; then
     echo "  Robot filter    = -$SELECTION  (b=blinky, p=pinky, i=inky, c=clyde)"
 else
@@ -100,8 +167,11 @@ if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
 else
     echo "  Explorer frequency override = (using YAML default)"
 fi
-echo "  Robots must run SLAM+Nav2 with fleet_mode:=True when using this script"
-echo "  (global /tf + /map). See README: Robot Terminal 2 — SLAM + Nav2."
+if [[ -f "$BRIDGE_CONTRACT_FILE" ]]; then
+    echo "  Bridge contract   = ${BRIDGE_CONTRACT_FILE}"
+fi
+echo "  Recommended robot mode for stability: fleet_mode:=false (local-first)"
+echo "  Use fleet_mode:=true only when central-coupled global /tf + /map is needed."
 echo ""
 
 # Prevent multiple central stacks from running at once. If you start this
@@ -118,14 +188,17 @@ ensure_no_central_stack_running() {
     #  - single_robot_world_tf_bridge.py (single-robot mode)
     #  - single_robot_map_relay.py (single-robot mode)
     #  - multi_robot_explorer.py using the central params file
+    #  - fleet_navigate_to_pose_service_relay.py (bridged_domains only)
     local pattern_tf="python3 .*tf_relay_multirobot\\.py"
     local pattern_bridge="python3 .*single_robot_world_tf_bridge\\.py"
     local pattern_map_relay="python3 .*single_robot_map_relay\\.py"
     local pattern_explorer="python3 .*multi_robot_explorer\\.py .*--params-file .*multi_robot_explorer\\.yaml"
+    local pattern_domain_bridge="domain_bridge .*\\.domain_bridge\\.yaml"
+    local pattern_action_relay="python3 .*fleet_navigate_to_pose_service_relay\\.py"
 
     # Collect matching PIDs + commands (skip the grep processes themselves).
     local existing
-    existing="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer" | grep -v grep || true)"
+    existing="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer|$pattern_domain_bridge|$pattern_action_relay" | grep -v grep || true)"
 
     if [[ -z "$existing" ]]; then
         return 0
@@ -164,24 +237,53 @@ ensure_no_central_stack_running() {
     done
     echo ""
 
+    # PIDs from ps aux (column 2). Sort -u in case multiple lines match one process.
+    local pids_raw
+    pids_raw="$(echo "$existing" | awk '{print $2}' | sort -u)"
+
+    kill_matching_central_pids() {
+        # Multiprocessing relays (e.g. fleet_navigate_to_pose_service_relay) may
+        # ignore SIGTERM while blocked in rclpy; escalate to SIGKILL. Kill known
+        # children first so the parent can reap where possible.
+        local pid
+        for pid in $pids_raw; do
+            [[ -n "$pid" ]] || continue
+            local child
+            for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+                kill -TERM "$child" 2>/dev/null || true
+            done
+            kill -TERM "$pid" 2>/dev/null || true
+        done
+        sleep 2
+        for pid in $pids_raw; do
+            [[ -n "$pid" ]] || continue
+            if kill -0 "$pid" 2>/dev/null; then
+                for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+                    kill -KILL "$child" 2>/dev/null || true
+                done
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    }
+
     # If non-interactive auto-kill is explicitly enabled, skip prompt.
     if [[ "${CENTRAL_AUTO_KILL:-false}" == "true" && ! -t 0 ]]; then
         echo "CENTRAL_AUTO_KILL=true and non-interactive shell detected — killing matching processes without prompting..."
-        echo "$existing" | awk '{print $2}' | xargs -r kill || true
+        kill_matching_central_pids
     else
         read -r -p "Kill these processes and continue? [y/N] " reply
         if [[ "$reply" != "y" && "$reply" != "Y" ]]; then
             echo "Aborting without killing any processes."
             exit 1
         fi
-        echo "Killing matching processes..."
-        echo "$existing" | awk '{print $2}' | xargs -r kill || true
+        echo "Killing matching processes (SIGTERM, then SIGKILL if needed)..."
+        kill_matching_central_pids
     fi
 
     # Give the OS a moment, then re-check.
     sleep 1
     local remaining
-    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer" | grep -v grep || true)"
+    remaining="$(ps aux | grep -E "$pattern_tf|$pattern_bridge|$pattern_map_relay|$pattern_explorer|$pattern_domain_bridge|$pattern_action_relay" | grep -v grep || true)"
     if [[ -n "$remaining" ]]; then
         echo "WARNING: Some central processes still appear to be running:"
         echo "$remaining"
@@ -209,11 +311,12 @@ if [[ -n "$NODES_RAW" ]]; then
     fi
 fi
 
-# Detect robot names from available topics (e.g., /blinky/tf, /pinky/tf).
-# Important: transient discovery lag can momentarily hide one robot and
-# accidentally push the stack into single-robot mode. Wait briefly for the
-# expected count before deciding mode.
-echo "Detecting robots from ROS topics..."
+# Detect/select robots.
+if [[ "$COMMS_MODE" == "shared_domain" ]]; then
+    echo "Detecting robots from ROS topics..."
+else
+    echo "Selecting robots from domain map (bridged mode)..."
+fi
 
 CENTRAL_DISCOVERY_TIMEOUT_SEC="${CENTRAL_DISCOVERY_TIMEOUT_SEC:-5}"
 CENTRAL_DISCOVERY_POLL_SEC="${CENTRAL_DISCOVERY_POLL_SEC:-1}"
@@ -272,6 +375,73 @@ detect_robots_once() {
     fi
 }
 
+detect_active_robots_bridged() {
+    local selection_letters="$1"
+    local timeout_sec="$2"
+    local poll_sec="$3"
+    local robot_domain_lines
+
+    robot_domain_lines="$(python3 - <<'PY' "$DOMAIN_MAP_FILE"
+import sys, yaml
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+robot_map = data.get("fleet_domain_map", {}).get("robot_domain_ids", {})
+for name, domain in sorted(robot_map.items()):
+    print(f"{name} {domain}")
+PY
+)"
+
+    local candidates=()
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local name domain
+        name="$(echo "$line" | awk '{print $1}')"
+        domain="$(echo "$line" | awk '{print $2}')"
+        if [[ -n "$selection_letters" ]]; then
+            local first_char="${name:0:1}"
+            [[ "$selection_letters" == *"$first_char"* ]] || continue
+        fi
+        candidates+=("${name}:${domain}")
+    done <<< "$robot_domain_lines"
+
+    if ((${#candidates[@]} == 0)); then
+        return 0
+    fi
+
+    local active=()
+    local elapsed=0
+    while :; do
+        active=()
+        for entry in "${candidates[@]}"; do
+            local name="${entry%%:*}"
+            local domain="${entry##*:}"
+            local topics_raw
+            topics_raw="$(ROS_DOMAIN_ID="$domain" ros2 topic list 2>/dev/null || true)"
+            if echo "$topics_raw" | grep -Eq "^/${name}/(tf|map)$"; then
+                active+=("$name")
+            fi
+        done
+
+        if ((${#active[@]} >= MIN_EXPECTED_ROBOTS)); then
+            printf '%s\n' "${active[@]}" | sort -u
+            return 0
+        fi
+        if (( elapsed >= timeout_sec )); then
+            printf '%s\n' "${active[@]}" | sort -u
+            return 0
+        fi
+        if (( elapsed == 0 )); then
+            if [[ -n "$selection_letters" ]]; then
+                echo "Waiting up to ${timeout_sec}s for selected bridged robots (-${selection_letters}) to publish /<robot>/(tf|map)..." >&2
+            else
+                echo "Waiting up to ${timeout_sec}s for bridged robots to publish /<robot>/(tf|map)..." >&2
+            fi
+        fi
+        sleep "$poll_sec"
+        elapsed=$((elapsed + poll_sec))
+    done
+}
+
 # Determine how many robots should be visible before finalizing mode.
 if [[ -n "$SELECTION" ]]; then
     # Count unique selection letters (b/p/i/c).
@@ -292,29 +462,38 @@ if (( MIN_EXPECTED_ROBOTS < 1 )); then
 fi
 
 DETECTED_ROBOTS=()
-elapsed=0
-while :; do
-    TOPICS_RAW="$(ros2 topic list 2>/dev/null || true)"
-    readarray -t DETECTED_ROBOTS < <(detect_robots_once "$TOPICS_RAW")
+if [[ "$COMMS_MODE" == "shared_domain" ]]; then
+    elapsed=0
+    while :; do
+        TOPICS_RAW="$(ros2 topic list 2>/dev/null || true)"
+        readarray -t DETECTED_ROBOTS < <(detect_robots_once "$TOPICS_RAW")
 
-    if ((${#DETECTED_ROBOTS[@]} >= MIN_EXPECTED_ROBOTS)); then
-        break
-    fi
-
-    if (( elapsed >= CENTRAL_DISCOVERY_TIMEOUT_SEC )); then
-        break
-    fi
-
-    if (( elapsed == 0 )); then
-        if [[ -n "$SELECTION" ]]; then
-            echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for selected robots (-${SELECTION}) to appear..."
-        else
-            echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for >=${MIN_EXPECTED_ROBOTS} robots to appear..."
+        if ((${#DETECTED_ROBOTS[@]} >= MIN_EXPECTED_ROBOTS)); then
+            break
         fi
-    fi
-    sleep "$CENTRAL_DISCOVERY_POLL_SEC"
-    elapsed=$((elapsed + CENTRAL_DISCOVERY_POLL_SEC))
-done
+
+        if (( elapsed >= CENTRAL_DISCOVERY_TIMEOUT_SEC )); then
+            break
+        fi
+
+        if (( elapsed == 0 )); then
+            if [[ -n "$SELECTION" ]]; then
+                echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for selected robots (-${SELECTION}) to appear..."
+            else
+                echo "Waiting up to ${CENTRAL_DISCOVERY_TIMEOUT_SEC}s for >=${MIN_EXPECTED_ROBOTS} robots to appear..."
+            fi
+        fi
+        sleep "$CENTRAL_DISCOVERY_POLL_SEC"
+        elapsed=$((elapsed + CENTRAL_DISCOVERY_POLL_SEC))
+    done
+else
+    readarray -t DETECTED_ROBOTS < <(
+        detect_active_robots_bridged \
+            "$SELECTION" \
+            "$CENTRAL_DISCOVERY_TIMEOUT_SEC" \
+            "$CENTRAL_DISCOVERY_POLL_SEC"
+    )
+fi
 
 if ((${#DETECTED_ROBOTS[@]} == 0)); then
     echo "ERROR: Could not detect any robot namespaces from topics."
@@ -378,6 +557,101 @@ cleanup() {
     echo "Done."
 }
 trap cleanup SIGHUP SIGINT SIGTERM EXIT
+
+start_domain_bridges() {
+    if [[ "$COMMS_MODE" != "bridged_domains" ]]; then
+        return 0
+    fi
+    if ! command -v ros2 >/dev/null 2>&1; then
+        echo "ERROR: ros2 CLI not found for bridged mode"
+        exit 1
+    fi
+    if [[ ! -f "$BRIDGE_CONFIG_GENERATOR" ]]; then
+        echo "ERROR: bridge config generator missing: $BRIDGE_CONFIG_GENERATOR"
+        exit 1
+    fi
+    echo "Generating domain bridge configs..."
+    python3 "$BRIDGE_CONFIG_GENERATOR" \
+        --domain-map "$DOMAIN_MAP_FILE" \
+        --bridge-contract "$BRIDGE_CONTRACT_FILE" \
+        --robots "${SELECTED_ROBOTS[@]}" \
+        --output-dir "$GENERATED_BRIDGE_CONFIG_DIR"
+
+    echo "Starting domain_bridge processes..."
+    for robot in "${SELECTED_ROBOTS[@]}"; do
+        cfg="${GENERATED_BRIDGE_CONFIG_DIR}/${robot}.domain_bridge.yaml"
+        if [[ ! -f "$cfg" ]]; then
+            echo "ERROR: generated bridge config missing: $cfg"
+            exit 1
+        fi
+        ros2 run domain_bridge domain_bridge "$cfg" &
+        PIDS+=($!)
+    done
+
+    bridge_wait_timeout="${BRIDGE_READY_TIMEOUT_SEC:-15}"
+    if ! [[ "$bridge_wait_timeout" =~ ^[0-9]+$ ]]; then
+        bridge_wait_timeout=15
+    fi
+    echo "Waiting up to ${bridge_wait_timeout}s for bridge outputs..."
+    elapsed=0
+    while (( elapsed <= bridge_wait_timeout )); do
+        topics_now="$(ros2 topic list 2>/dev/null || true)"
+        all_ready=true
+        for robot in "${SELECTED_ROBOTS[@]}"; do
+            # local-first robots may only expose /<robot>/map (no map_wire_z).
+            if ! echo "$topics_now" | grep -Eq "^/${robot}/(map_wire_z|map|tf)$"; then
+                all_ready=false
+                break
+            fi
+        done
+        if [[ "$all_ready" == "true" ]]; then
+            echo "Bridge ready."
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo "WARNING: bridge readiness timeout reached; continuing startup."
+}
+
+start_domain_bridges
+
+# ---- 0c. Nav2 action *services* relay (bridged_domains only) ----
+# domain_bridge YAML loads topic bridges only; action clients need
+# send_goal/get_result/cancel_goal on central for navigate_to_pose and
+# compute_path_to_pose (explorer path precheck).
+start_nav_action_relays() {
+    if [[ "$COMMS_MODE" != "bridged_domains" ]]; then
+        return 0
+    fi
+    if [[ ! -f "$ACTION_RELAY_SCRIPT" ]]; then
+        echo "ERROR: NavigateToPose relay missing: ${ACTION_RELAY_SCRIPT}"
+        exit 1
+    fi
+    echo "[0c] Starting Nav2 action service relays (navigate_to_pose + compute_path_to_pose)..."
+    for robot in "${SELECTED_ROBOTS[@]}"; do
+        robot_domain_id="$(
+            python3 -c "
+import sys, yaml
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    data = yaml.safe_load(f) or {}
+rid = data.get('fleet_domain_map', {}).get('robot_domain_ids', {}).get(sys.argv[2])
+if rid is None:
+    print('ERROR: robot not found in fleet_domain_map.yaml', file=sys.stderr)
+    sys.exit(1)
+print(int(rid))
+" "$DOMAIN_MAP_FILE" "$robot"
+        )"
+        python3 "$ACTION_RELAY_SCRIPT" \
+            --robot "$robot" \
+            --robot-domain "$robot_domain_id" \
+            --central-domain "$ROS_DOMAIN_ID" &
+        PIDS+=($!)
+    done
+    sleep 1
+}
+
+start_nav_action_relays
 
 # ---- 1. TF relay (same policy for 1 or N robots) ----
 echo "[1/3] Starting TF relay (prefix_frames=true)..."

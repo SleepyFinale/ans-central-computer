@@ -2,7 +2,9 @@
 #
 # Sources ROS 2 Humble plus this workspace install/ overlay.
 #
-# Fleet: use ROS_DOMAIN_ID=50 on central PC and every robot (see robot README).
+# Fleet:
+#   - shared_domain mode: same ROS_DOMAIN_ID on central and robots (legacy).
+#   - bridged_domains mode: central and robots use per-domain profiles.
 # Per-robot SSH targets: source scripts/set_robot_env.sh <blinky|pinky|inky|clyde>
 # Namespaces match hostnames: /blinky, /pinky, /inky, /clyde.
 

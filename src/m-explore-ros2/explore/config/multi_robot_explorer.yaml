@@ -42,6 +42,9 @@ multi_robot_explorer:
     # Pattern for per-robot local map topics, filled with each robot name.
     # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
     local_map_topic_pattern: "/{robot}/map"
+    # Bridge contract: disable per-robot local-map subscriptions only when
+    # central runs strict global-only planning to cut DDS traffic.
+    local_map_subscriptions_enable: true
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
     # Matches m-explore-ros2's planner_frequency semantics.
@@ -58,7 +61,9 @@ multi_robot_explorer:
     # Wait duration (s) for compute_path_to_pose server readiness before defer.
     # Longer waits reduce false skips while Nav2 lifecycle / planner warms up (fleet Pi load).
     nav2_path_precheck_server_wait_sec: 3.0
-    nav2_path_precheck_timeout_sec: 8.0
+    # Domain bridge + WiFi: compute_path_to_pose round-trip can exceed a few
+    # seconds; 8s caused frequent false timeouts while Nav2 was still planning.
+    nav2_path_precheck_timeout_sec: 30.0
     nav2_path_min_poses: 2
     # If ABORTED precheck returns no explicit error detail, escalate to
     # blacklist after this many repeats for the same goal.
@@ -88,7 +93,8 @@ multi_robot_explorer:
     goal_arrival_probe_max_distance_remaining_m: 0.35
     # No distance progress (last_progress_time) for this long triggers stagnation probe.
     goal_arrival_probe_stagnation_sec: 3.0
-    goal_arrival_probe_timeout_sec: 3.0
+    # Bridged domains / Wi‑Fi: feedback can lag; 3s false-triggered probe timeouts.
+    goal_arrival_probe_timeout_sec: 10.0
     # Run probe before tacit "at goal" cancel/success when gate conditions hold.
     goal_arrival_probe_before_tacit_success: true
     # Reject if planned path length / Euclidean(straight line) exceeds this.
@@ -110,7 +116,7 @@ multi_robot_explorer:
 
     # After abort, reject, watchdog cancel, or other failure paths, wait this
     # many seconds before assigning a new frontier (per robot).
-    post_failure_cooldown_sec: 8.0
+    post_failure_cooldown_sec: 5.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
     goal_reject_warmup_sec: 30.0
@@ -140,7 +146,7 @@ multi_robot_explorer:
     # frontier cells. Tiny slivers (often along walls) produce goals that
     # Nav2 plans to but the local controller cannot follow ("Failed to make
     # progress"). Set to 0 to disable. 18-cell slivers are typical failures.
-    min_frontier_cells_for_goal: 16
+    min_frontier_cells_for_goal: 8
 
     # When Nav2 reports success but the last feedback still shows a non-trivial
     # distance_remaining, the explorer can optionally treat this as a
@@ -284,12 +290,12 @@ multi_robot_explorer:
     # - When enabled, active goals can be cancelled and reassigned before
     #   completion if the current target becomes risky (near obstacles) or
     #   stale (limited progress).
-    retarget_enable: false
+    retarget_enable: true
     # Align with multi_robot_explorer.py defaults (12.0): fewer mid-route cancel cycles.
     retarget_cooldown_sec: 12.0
     retarget_min_goal_shift_m: 0.25
     retarget_min_utility_gain: 0.2
-    retarget_stagnation_sec: 24.0
+    retarget_stagnation_sec: 15.0
     retarget_clearance_threshold_m: 0.40
     # While the robot is advancing on the current goal, preempt for a new goal
     # only if frontier utility improves by at least this much (explore more
@@ -302,10 +308,10 @@ multi_robot_explorer:
     # Set to 0 to allow retargets anywhere on the map.
     retarget_max_offset_from_anchor_m: 0.5
     # Goal replacement gate to avoid frequent Nav2 preemption (node default: 4.0).
-    min_goal_replan_interval_s: 12.0
+    min_goal_replan_interval_s: 8.0
     min_goal_change_dist_m: 0.30
     min_progress_before_replan_m: 0.08
-    max_stuck_time_s: 18.0
+    max_stuck_time_s: 12.0
     allow_replan_when_no_progress: true
 
     # Minimum separation between the robot and a candidate goal (metres).
@@ -326,6 +332,10 @@ multi_robot_explorer:
     # workflow, set EXPLORER_USE_GOAL_POSE_FALLBACK=true before running
     # start_central.sh.
     use_pose_goal_fallback: false
+
+    # Seconds to wait for /<robot>/navigate_to_pose when sending each goal.
+    # Cross-domain bridges need more than ~200 ms for the first ready match.
+    navigate_to_pose_server_wait_sec: 5.0
 
     robot_base_frame: base_footprint
 
