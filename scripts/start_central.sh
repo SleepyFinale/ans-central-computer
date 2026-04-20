@@ -446,7 +446,10 @@ else
     # from per-robot local exploration to global merged exploration.
     python3 "${SCRIPT_DIR}/map_merge_state_monitor.py" --ros-args \
         -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
-        -p "world_frame:=map" &
+        -p "world_frame:=map" \
+        -p "stability_pos_threshold:=0.28" \
+        -p "merged_dwell_time:=12.0" \
+        -p "motion_jitter_confirm_ticks:=3" &
     PIDS+=($!)
 
     # ---- 3. Explorer ----

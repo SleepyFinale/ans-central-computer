@@ -35,7 +35,9 @@ multi_robot_explorer:
     # This avoids global-planning thrash when map_merge briefly reports MERGED
     # during weak/unstable feature matches.
     merge_stable_hold_sec: 20.0
-    merge_degrade_grace_sec: 2.0
+    # Longer grace when map_merge/monitor briefly reports PARTIAL so we do not
+    # thrash global vs local exploration on TF jitter (see map_merge_state_monitor).
+    merge_degrade_grace_sec: 8.0
 
     # Pattern for per-robot local map topics, filled with each robot name.
     # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
@@ -55,8 +57,8 @@ multi_robot_explorer:
     nav2_path_precheck_required: true
     # Wait duration (s) for compute_path_to_pose server readiness before defer.
     # Longer waits reduce false skips while Nav2 lifecycle / planner warms up (fleet Pi load).
-    nav2_path_precheck_server_wait_sec: 2.0
-    nav2_path_precheck_timeout_sec: 6.0
+    nav2_path_precheck_server_wait_sec: 3.0
+    nav2_path_precheck_timeout_sec: 8.0
     nav2_path_min_poses: 2
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
@@ -99,7 +101,7 @@ multi_robot_explorer:
     post_failure_cooldown_sec: 5.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
-    goal_reject_warmup_sec: 20.0
+    goal_reject_warmup_sec: 30.0
     # Robot-side helper topic (from turtlebot3_navigation2/nav2_lethal_watch.py):
     # when true, the robot is currently in a lethal Nav2 costmap cell.
     nav2_lethal_topic_pattern: "/{robot}/nav2_lethal_inflation"
@@ -128,7 +130,9 @@ multi_robot_explorer:
     # goal. This threshold controls how large that remaining distance must be
     # to be considered suspicious once the map has grown beyond the initial
     # tiny phase.
-    suspicious_success_distance: 0.30
+    # Nav2 can report success with distance_remaining just above the old 0.30 m
+    # cut (e.g. 0.32 m) on merged maps; avoid blacklisting near-success legs.
+    suspicious_success_distance: 0.35
 
     # For very small maps (both width and height below this size in metres),
     # the suspicious-success heuristic is disabled and such goals are accepted
@@ -160,7 +164,7 @@ multi_robot_explorer:
     # after progress_timeout seconds without meaningful physical movement.
     # Keep this above Nav2 controller movement_time_allowance (5s in burger.yaml)
     # so the explorer does not preempt DWB while Nav2 still considers the goal active.
-    progress_timeout: 14.0
+    progress_timeout: 18.0
     progress_min_delta: 0.05
     # Minimum TF pose displacement (m) to count as robot movement.
     motion_progress_min_delta_m: 0.03
@@ -168,7 +172,10 @@ multi_robot_explorer:
     motion_progress_window_sec: 2.0
     # If no fresh TF pose update for longer than this, robot pose is treated as
     # unavailable for assignment/stall logic to avoid stale-pose decisions.
-    tf_stale_timeout_sec: 1.5
+    # map_merge world TF can be sparse; stay above typical inter-publish gaps.
+    # map_merge + SLAM stamps often skew ~4–5 s under Pi load; hold below that
+    # spuriously trips degraded mode and starves assignment.
+    tf_stale_timeout_sec: 6.0
     # Degraded-data hold: when TF or Nav2 precheck are clearly unhealthy, pause
     # new assignments and avoid treating failures as map/frontier issues.
     degraded_hold_enabled: true
@@ -180,7 +187,7 @@ multi_robot_explorer:
     # Rolling window (s) for counting precheck failures/unavailable events.
     degraded_precheck_window_sec: 10.0
     # Require this many seconds of healthy signals before clearing degraded hold.
-    degraded_recovery_stable_sec: 4.0
+    degraded_recovery_stable_sec: 5.0
 
     # Distance (m) at which a frontier near another robot's active goal
     # gets a penalty (discourages sending robots to the same area).

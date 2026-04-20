@@ -9,7 +9,12 @@ State machine:
   - NO_OVERLAP : initial state, or transforms are missing for some robots.
   - PARTIAL    : transforms exist for all robots but have not yet stabilised.
   - MERGED     : transforms exist for all robots and have remained within a
-                 small motion threshold for a configured dwell time.
+                 motion threshold (with debouncing) for a configured dwell time.
+
+  Motion debouncing: a single tick of map->robot/map motion above the threshold
+  does not drop MERGED; several consecutive violations are required. This pairs
+  with multi_robot_explorer merge_degrade_grace_sec to reduce MERGED<->PARTIAL
+  flapping when map_merge refines weak feature matches.
 
 This avoids having to introspect internal map_merge diagnostics while still
 providing a robust signal for "maps are now consistently merged".
@@ -34,12 +39,17 @@ class MapMergeStateMonitor(Node):
         self.declare_parameter('robot_names', ['blinky', 'pinky', 'inky', 'clyde'])
         self.declare_parameter('world_frame', 'map')
         self.declare_parameter('robot_map_suffix', '/map')
-        # Maximum allowed motion (m) for a robot map frame over the dwell time
-        # window before we consider the estimate to be unstable.
-        self.declare_parameter('stability_pos_threshold', 0.10)
+        # Maximum allowed motion (m) for a robot map frame between consecutive
+        # samples before we consider the estimate unstable. map_merge can jitter
+        # more than a few cm per second while refining overlap; keep this loose
+        # enough that MERGED does not flap on every weak estimate tick.
+        self.declare_parameter('stability_pos_threshold', 0.28)
         # Dwell time (s) for which all robot map frames must remain within the
         # stability threshold in order to declare MERGED.
-        self.declare_parameter('merged_dwell_time', 10.0)
+        self.declare_parameter('merged_dwell_time', 12.0)
+        # Require this many consecutive motion-violation ticks before leaving
+        # MERGED for PARTIAL (ignores single-sample TF spikes).
+        self.declare_parameter('motion_jitter_confirm_ticks', 3)
         # Publish rate (Hz).
         self.declare_parameter('rate', 1.0)
 
@@ -56,6 +66,9 @@ class MapMergeStateMonitor(Node):
         self.merged_dwell_time: float = float(
             self.get_parameter('merged_dwell_time').value
         )
+        self.motion_jitter_confirm_ticks: int = max(
+            1, int(self.get_parameter('motion_jitter_confirm_ticks').value)
+        )
         rate_hz: float = float(self.get_parameter('rate').value)
 
         self.tf_buffer = tf2_ros.Buffer()
@@ -68,6 +81,7 @@ class MapMergeStateMonitor(Node):
         self._last_positions: Dict[str, Tuple[float, float]] = {}
         self._last_stable_time: float = 0.0
         self._current_state: str = 'NO_OVERLAP'
+        self._motion_bad_streak: int = 0
 
         period = 1.0 / rate_hz if rate_hz > 0 else 1.0
         self.timer = self.create_timer(period, self._tick)
@@ -75,7 +89,7 @@ class MapMergeStateMonitor(Node):
     def _tick(self) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
         all_present = True
-        all_within_thresh = True
+        motion_within_thresh = True
 
         for name in self.robot_names:
             child_frame = f'{name}{self.robot_map_suffix}'
@@ -88,7 +102,7 @@ class MapMergeStateMonitor(Node):
                 )
             except Exception:
                 all_present = False
-                all_within_thresh = False
+                motion_within_thresh = False
                 continue
 
             pos = (
@@ -101,22 +115,33 @@ class MapMergeStateMonitor(Node):
                 dy = pos[1] - last[1]
                 dist = math.hypot(dx, dy)
                 if dist > self.stability_pos_threshold:
-                    all_within_thresh = False
+                    motion_within_thresh = False
             self._last_positions[child_frame] = pos
 
         new_state = self._current_state
         if not all_present:
+            self._motion_bad_streak = 0
             new_state = 'NO_OVERLAP'
             self._last_stable_time = now
-        elif not all_within_thresh:
-            new_state = 'PARTIAL'
-            self._last_stable_time = now
+        elif not motion_within_thresh:
+            self._motion_bad_streak += 1
+            motion_acceptable = (
+                self._motion_bad_streak < self.motion_jitter_confirm_ticks
+            )
         else:
-            # All frames present and positions stable; check dwell time.
-            if (now - self._last_stable_time) >= self.merged_dwell_time:
-                new_state = 'MERGED'
-            else:
+            self._motion_bad_streak = 0
+            motion_acceptable = True
+
+        if all_present:
+            if not motion_within_thresh and not motion_acceptable:
                 new_state = 'PARTIAL'
+                self._last_stable_time = now
+            elif motion_within_thresh or motion_acceptable:
+                # All frames present; motion is either fine or within debounce.
+                if (now - self._last_stable_time) >= self.merged_dwell_time:
+                    new_state = 'MERGED'
+                else:
+                    new_state = 'PARTIAL'
 
         if new_state != self._current_state:
             self.get_logger().info(

@@ -478,7 +478,7 @@ class MultiRobotExplorer(Node):
         # Minimum separation between robot and candidate goal used as a final
         # safety net; most shaping is done via min_goal_distance.
         self.declare_parameter('min_goal_separation', 0.5)
-        self.declare_parameter('suspicious_success_distance', 0.15)
+        self.declare_parameter('suspicious_success_distance', 0.35)
         # If NavigateToPose ends in ABORTED (e.g. controller "Failed to make
         # progress") but the robot is within this distance of the goal in the
         # map frame, count as reached and do not blacklist — Nav2 often aborts
@@ -615,7 +615,7 @@ class MultiRobotExplorer(Node):
         # local if merge degrades for long enough. This avoids thrashing when
         # map_merge briefly reports MERGED on weak feature matches.
         self.declare_parameter('merge_stable_hold_sec', 8.0)
-        self.declare_parameter('merge_degrade_grace_sec', 2.0)
+        self.declare_parameter('merge_degrade_grace_sec', 8.0)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value)
@@ -809,7 +809,7 @@ class MultiRobotExplorer(Node):
             self.get_parameter('nav2_path_precheck_timeout_sec').value
         )
         self.tf_stale_timeout_sec: float = float(
-            self.declare_parameter('tf_stale_timeout_sec', 1.5).value
+            self.declare_parameter('tf_stale_timeout_sec', 4.0).value
         )
         self.degraded_hold_enabled: bool = bool(
             self.get_parameter('degraded_hold_enabled').value
@@ -2671,7 +2671,13 @@ class MultiRobotExplorer(Node):
         if cooldown:
             self._arm_post_failure_cooldown(rs)
 
-    def _path_precheck_transient_fail(self, rs: RobotState, detail: str) -> None:
+    def _path_precheck_transient_fail(
+        self,
+        rs: RobotState,
+        detail: str,
+        *,
+        count_for_degraded: bool = True,
+    ) -> None:
         """Planner compute_path_to_pose rejected the goal or send failed.
 
         Nav2's planner server rejects goals while server_active_ is false
@@ -2694,13 +2700,15 @@ class MultiRobotExplorer(Node):
             retry_s = 0.5
         rs.next_assign_allowed_time = max(
             rs.next_assign_allowed_time, now + retry_s)
-        rs.precheck_fail_events += 1
+        if count_for_degraded:
+            rs.precheck_fail_events += 1
         self.get_logger().info(
             f'[{rs.name}] Path precheck {detail}; '
             f'retry in {retry_s:.1f}s (planner may still be activating)'
         )
         if (
-            self.degraded_hold_enabled
+            count_for_degraded
+            and self.degraded_hold_enabled
             and not rs.degraded_active
             and rs.precheck_fail_events >= self.degraded_precheck_fail_threshold
         ):
@@ -2760,8 +2768,12 @@ class MultiRobotExplorer(Node):
             return
 
         if not goal_handle.accepted:
+            # Warmup rejects are expected; do not push toward degraded hold.
             self._path_precheck_transient_fail(
-                rs, 'goal rejected (planner server inactive during lifecycle)')
+                rs,
+                'goal rejected (planner server inactive during lifecycle)',
+                count_for_degraded=False,
+            )
             return
 
         rs.path_precheck_goal_handle = goal_handle
@@ -2801,6 +2813,24 @@ class MultiRobotExplorer(Node):
             self.get_logger().info(
                 f'[{rs.name}] Path precheck failed ({st}); skipping NavigateToPose'
             )
+            now_ts = self.get_clock().now().nanoseconds / 1e9
+            in_warmup = (
+                rs.path_precheck_server_seen_time > 0.0
+                and (now_ts - rs.path_precheck_server_seen_time)
+                < self.goal_reject_warmup_sec
+            )
+            # ABORTED often means planner/costmap still settling; treat like reject.
+            if (
+                in_warmup
+                and int(status) == GoalStatus.STATUS_ABORTED
+                and goal_xy is not None
+            ):
+                self._path_precheck_transient_fail(
+                    rs,
+                    f'failed ({st}) during planner warmup',
+                    count_for_degraded=False,
+                )
+                return
             if not rs.degraded_active:
                 self._blacklist_or_home_fail(rs, goal_xy)
                 self._arm_post_failure_cooldown(rs)
