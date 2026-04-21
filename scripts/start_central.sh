@@ -79,6 +79,27 @@ fi
 
 COMMS_MODE="${CENTRAL_COMMS_MODE:-shared_domain}"
 SELECTION=""
+declare -A LETTER_TO_ROBOT=(
+    [b]="blinky"
+    [p]="pinky"
+    [i]="inky"
+    [c]="clyde"
+)
+declare -A SELECTED_ROBOT_SET=()
+parse_selection_letters() {
+    local letters="$1"
+    SELECTED_ROBOT_SET=()
+    [[ -z "$letters" ]] && return 0
+    for ((idx=0; idx<${#letters}; idx++)); do
+        local ch="${letters:$idx:1}"
+        if [[ -z "${LETTER_TO_ROBOT[$ch]:-}" ]]; then
+            echo "ERROR: invalid robot selector '${ch}' in '-${letters}'"
+            echo "Use any combination of: b=blinky, p=pinky, i=inky, c=clyde"
+            exit 1
+        fi
+        SELECTED_ROBOT_SET["${LETTER_TO_ROBOT[$ch]}"]=1
+    done
+}
 while (($# > 0)); do
     case "$1" in
         --comms-mode)
@@ -117,6 +138,7 @@ if [[ "$COMMS_MODE" != "shared_domain" && "$COMMS_MODE" != "bridged_domains" ]];
     echo "ERROR: invalid --comms-mode '$COMMS_MODE' (use shared_domain|bridged_domains)"
     exit 1
 fi
+parse_selection_letters "$SELECTION"
 
 if [[ "$COMMS_MODE" == "shared_domain" ]]; then
     export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}
@@ -398,8 +420,7 @@ PY
         name="$(echo "$line" | awk '{print $1}')"
         domain="$(echo "$line" | awk '{print $2}')"
         if [[ -n "$selection_letters" ]]; then
-            local first_char="${name:0:1}"
-            [[ "$selection_letters" == *"$first_char"* ]] || continue
+            [[ -n "${SELECTED_ROBOT_SET[$name]:-}" ]] || continue
         fi
         candidates+=("${name}:${domain}")
     done <<< "$robot_domain_lines"
@@ -444,13 +465,7 @@ PY
 
 # Determine how many robots should be visible before finalizing mode.
 if [[ -n "$SELECTION" ]]; then
-    # Count unique selection letters (b/p/i/c).
-    declare -A _sel_letters=()
-    for ((i=0; i<${#SELECTION}; i++)); do
-        ch="${SELECTION:$i:1}"
-        _sel_letters["$ch"]=1
-    done
-    MIN_EXPECTED_ROBOTS="${#_sel_letters[@]}"
+    MIN_EXPECTED_ROBOTS="${#SELECTED_ROBOT_SET[@]}"
 else
     MIN_EXPECTED_ROBOTS="${CENTRAL_MIN_ROBOTS_DEFAULT}"
 fi
@@ -507,8 +522,7 @@ for r in "${DETECTED_ROBOTS[@]}"; do
     if [[ -z "$SELECTION" ]]; then
         SELECTED_ROBOTS+=("$r")
     else
-        first_char="${r:0:1}"
-        if [[ "$SELECTION" == *"$first_char"* ]]; then
+        if [[ -n "${SELECTED_ROBOT_SET[$r]:-}" ]]; then
             SELECTED_ROBOTS+=("$r")
         fi
     fi
