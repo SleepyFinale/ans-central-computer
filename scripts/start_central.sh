@@ -444,11 +444,15 @@ PY
         done
 
         if ((${#active[@]} >= MIN_EXPECTED_ROBOTS)); then
-            printf '%s\n' "${active[@]}" | sort -u
+            if ((${#active[@]} > 0)); then
+                printf '%s\n' "${active[@]}" | sort -u
+            fi
             return 0
         fi
         if (( elapsed >= timeout_sec )); then
-            printf '%s\n' "${active[@]}" | sort -u
+            if ((${#active[@]} > 0)); then
+                printf '%s\n' "${active[@]}" | sort -u
+            fi
             return 0
         fi
         if (( elapsed == 0 )); then
@@ -519,6 +523,7 @@ fi
 # Apply selection filter (map letters to robot name first char).
 SELECTED_ROBOTS=()
 for r in "${DETECTED_ROBOTS[@]}"; do
+    [[ -n "$r" ]] || continue
     if [[ -z "$SELECTION" ]]; then
         SELECTED_ROBOTS+=("$r")
     else
