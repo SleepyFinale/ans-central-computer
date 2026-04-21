@@ -722,8 +722,10 @@ else
         -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
         -p "world_frame:=map" \
         -p "stability_pos_threshold:=0.28" \
-        -p "merged_dwell_time:=12.0" \
-        -p "motion_jitter_confirm_ticks:=3" &
+        -p "merged_dwell_time:=20.0" \
+        -p "motion_jitter_confirm_ticks:=3" \
+        -p "min_known_cells_per_robot:=450" \
+        -p "min_known_area_m2_per_robot:=1.1" &
     PIDS+=($!)
 
     # ---- 3. Explorer ----

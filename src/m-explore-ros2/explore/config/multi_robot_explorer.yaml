@@ -18,6 +18,12 @@ multi_robot_explorer:
     # TF world frame (must match map_merge world_frame)
     world_frame: map
 
+    # Path 2 (local Nav2 maps): transform NavigateToPose / compute_path_to_pose
+    # goals from world_frame into each robot's map frame (nav_goal_frame_pattern).
+    dispatch_nav_goals_in_robot_map_frame: true
+    nav_goal_frame_pattern: "{robot}/map"
+    nav_goal_tf_transform_timeout_sec: 0.5
+
     # Explorer mode:
     #   - auto        : start with per-robot local maps, switch to global
     #                   merged map when map_merge reports MERGED.
@@ -48,8 +54,8 @@ multi_robot_explorer:
 
     # How often to replan (Hz). Lower = less CPU, higher = more responsive.
     # Matches m-explore-ros2's planner_frequency semantics.
-    # 1.0 Hz reduces rapid goal preemption with Nav2 after failures.
-    explore_frequency: 1.0
+    # Slightly below 1.0 Hz eases central load once merge/pose health is stable.
+    explore_frequency: 0.70
 
     # Call /<robot>/compute_path_to_pose (same Nav2 planner + global costmap as
     # navigation) before each NavigateToPose. Failed or empty plans skip the
@@ -67,16 +73,16 @@ multi_robot_explorer:
     nav2_path_min_poses: 2
     # If ABORTED precheck returns no explicit error detail, escalate to
     # blacklist after this many repeats for the same goal.
-    nav2_path_precheck_transient_abort_repeat_limit: 3
+    nav2_path_precheck_transient_abort_repeat_limit: 5
     # Parse planner-server rosout "failed to generate a valid path to (x, y)"
     # and treat matching precheck ABORTED goals as hard failures.
     nav2_path_precheck_use_rosout_no_path_hint: true
     nav2_path_precheck_rosout_no_path_window_sec: 6.0
     nav2_path_precheck_rosout_goal_match_tol_m: 0.30
-    nav2_path_precheck_rosout_immediate_blacklist: true
+    nav2_path_precheck_rosout_immediate_blacklist: false
     nav2_path_precheck_use_planner_lifecycle_hint: true
     nav2_path_precheck_planner_state_stale_sec: 8.0
-    nav2_path_precheck_abort_active_planner_is_hard_fail: true
+    nav2_path_precheck_abort_active_planner_is_hard_fail: false
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
 
@@ -153,10 +159,16 @@ multi_robot_explorer:
     # suspicious success (likely abort / early convergence) and blacklist the
     # goal. This threshold controls how large that remaining distance must be
     # to be considered suspicious once the map has grown beyond the initial
-    # tiny phase.
-    # Nav2 can report success with distance_remaining just above the old 0.30 m
-    # cut (e.g. 0.32 m) on merged maps; avoid blacklisting near-success legs.
-    suspicious_success_distance: 0.35
+    # tiny phase (strictly greater than this value).
+    # Default matches Nav2 xy_goal_tolerance on TurtleBot3 (0.25 m). If your
+    # controller routinely reports SUCCEEDED with distance_remaining above
+    # that (e.g. ~0.32 m on merged maps), bump this slightly so those legs are
+    # not classified as suspicious.
+    suspicious_success_distance: 0.40
+    # Nav2 SUCCEEDED with distance_remaining at or below this: accept success
+    # even when bridged map TF shows little leg progress (~0.2 m remaining vs
+    # motion_progress was a common false negative on Clyde).
+    trust_nav2_terminal_distance_remaining_m: 0.36
 
     # For very small maps (both width and height below this size in metres),
     # the suspicious-success heuristic is disabled and such goals are accepted
@@ -204,7 +216,7 @@ multi_robot_explorer:
     # map_merge world TF can be sparse; stay above typical inter-publish gaps.
     # map_merge + SLAM stamps often skew ~4–5 s under Pi load; hold below that
     # spuriously trips degraded mode and starves assignment.
-    tf_stale_timeout_sec: 6.0
+    tf_stale_timeout_sec: 6.5
     # Degraded-data hold: when TF or Nav2 precheck are clearly unhealthy, pause
     # new assignments and avoid treating failures as map/frontier issues.
     degraded_hold_enabled: true
@@ -225,7 +237,7 @@ multi_robot_explorer:
     # Blacklist radius (m): goals whose centroids fall within this distance
     # of a blacklisted point will be skipped for that robot.
     # Slightly smaller radius reduces cross-robot centroid blacklist overlap / livelock.
-    blacklist_radius: 0.35
+    blacklist_radius: 0.20
 
     # When a robot successfully reaches a goal, blacklist points within this
     # distance (m) of the success pose are removed. Revives spurious
@@ -235,7 +247,7 @@ multi_robot_explorer:
     # If true, after a successful *exploration* (non-return-home) leg, the
     # just-assigned frontier centroid is blacklisted so a new map tick does
     # not immediately re-send the same target while the grid is unchanged.
-    post_success_frontier_avoidance: true
+    post_success_frontier_avoidance: false
 
     # Safety net: if the planner selects a goal within this many metres of the
     # previous one this many times in a row, blacklist and pick elsewhere.

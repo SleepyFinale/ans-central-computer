@@ -49,6 +49,7 @@
 #include <map_msgs/msg/occupancy_grid_update.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 
 #include <boost/thread.hpp>
@@ -87,11 +88,14 @@ private:
     bool publish_tf_;
     /** When true (unknown poses), publish identity map-><robot>/map until pose estimates are valid so tf2 has a ``map`` frame for Nav2. */
     bool publish_provisional_tf_ {true};
+    /** Publish std_msgs/String on ``robot_tf_estimate_health`` (robot:0|1 per robot) for merge gating. */
+    bool publish_robot_tf_health_ {true};
     /** Origin margin in meters; adds padding so map bounds extend beyond (0,0) to avoid Nav2 "sensor out of map bounds" (e.g. 0.05). */
     double origin_margin_;
 
     // publishing
     rclcpp::Publisher < nav_msgs::msg::OccupancyGrid > ::SharedPtr merged_map_publisher_;
+    rclcpp::Publisher < std_msgs::msg::String > ::SharedPtr robot_tf_health_pub_;
     std::unique_ptr < tf2_ros::TransformBroadcaster > tf_broadcaster_;
     // maps robots namespaces to maps. does not own
     std::unordered_map < std::string, MapSubscription * > robots_;

@@ -31,7 +31,7 @@ import rclpy
 from action_msgs.srv import CancelGoal
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import SingleThreadedExecutor
+from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.serialization import deserialize_message, serialize_message
 
@@ -83,6 +83,17 @@ def _safe_rclpy_shutdown() -> None:
         pass
 
 
+def _safe_spin_once_worker(node: Node, timeout_sec: float = 0.0) -> bool:
+    """Return False if the node should stop (invalid context / shutdown)."""
+    try:
+        rclpy.spin_once(node, timeout_sec=timeout_sec)
+    except Exception:
+        if not rclpy.ok():
+            return False
+        raise
+    return bool(rclpy.ok())
+
+
 def _relay_log_error(node: Node | None, text: str) -> None:
     """Avoid rosout when context is tearing down (Ctrl+C on central)."""
     try:
@@ -124,7 +135,8 @@ def _robot_worker(
                 ready_evt.set()
                 break
             time.sleep(0.2)
-            rclpy.spin_once(node, timeout_sec=0.0)
+            if not _safe_spin_once_worker(node, 0.0):
+                break
 
         if not ready_evt.is_set():
             node.get_logger().error(
@@ -142,7 +154,8 @@ def _robot_worker(
             try:
                 item = q_in.get(timeout=0.5)
             except queue.Empty:
-                rclpy.spin_once(node, timeout_sec=0.0)
+                if not _safe_spin_once_worker(node, 0.0):
+                    break
                 continue
             if item is None:
                 break
@@ -325,16 +338,22 @@ def main() -> int:
     executor = SingleThreadedExecutor()
     executor.add_node(node)
 
-    def _on_term(_signum, _frame):
-        # Same teardown path as Ctrl+C; SIGTERM alone often never reached spin().
-        raise KeyboardInterrupt
+    # Do not raise KeyboardInterrupt from a signal handler: it can fire during
+    # executor.shutdown() and corrupt teardown (rclpy guard_condition errors).
+    shutdown_evt = threading.Event()
 
-    signal.signal(signal.SIGTERM, _on_term)
+    def _request_shutdown(_signum=None, _frame=None):
+        shutdown_evt.set()
+
+    signal.signal(signal.SIGINT, _request_shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
 
     try:
-        executor.spin()
-    except KeyboardInterrupt:
-        pass
+        while rclpy.ok() and not shutdown_evt.is_set():
+            try:
+                executor.spin_once(timeout_sec=0.2)
+            except ExternalShutdownException:
+                break
     finally:
         # Unblock service threads waiting on _r2c before tearing down rclpy.
         node._shutdown.set()

@@ -42,6 +42,7 @@
 #include <map_merge/map_merge.h>
 #include <map_merge/ros1_names.hpp>
 #include <rcpputils/asserts.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <opencv2/core.hpp>
 
@@ -123,6 +124,9 @@ MapMerge::MapMerge()
   if (!this->has_parameter("publish_provisional_tf")) {
     this->declare_parameter<bool>("publish_provisional_tf", true);
   }
+  if (!this->has_parameter("publish_robot_tf_estimate_health")) {
+    this->declare_parameter<bool>("publish_robot_tf_estimate_health", true);
+  }
 
   this->get_parameter("merging_rate", merging_rate_);
   this->get_parameter("discovery_rate", discovery_rate_);
@@ -137,6 +141,7 @@ MapMerge::MapMerge()
   this->get_parameter("origin_margin", origin_margin_);
   this->get_parameter("publish_tf", publish_tf_);
   this->get_parameter("publish_provisional_tf", publish_provisional_tf_);
+  this->get_parameter("publish_robot_tf_estimate_health", publish_robot_tf_health_);
 
 
   /* publishing */
@@ -151,6 +156,10 @@ MapMerge::MapMerge()
     RCLCPP_INFO(
       logger_, "TF broadcasting enabled: %s -> <robot>/map",
       world_frame_.c_str());
+  }
+  if (publish_robot_tf_health_) {
+    robot_tf_health_pub_ = this->create_publisher<std_msgs::msg::String>(
+      "robot_tf_estimate_health", 10);
   }
 
   // Timers
@@ -337,6 +346,7 @@ void MapMerge::publishTransforms(
 {
   auto now = this->now();
   std::vector<geometry_msgs::msg::TransformStamped> tf_msgs;
+  std::string health_payload;
 
   if (have_initial_poses_) {
     // Known poses: publish the user-provided init_pose directly as TF.
@@ -363,6 +373,11 @@ void MapMerge::publishTransforms(
         continue;
       }
       tf_msgs.push_back(tf_msg);
+      if (!health_payload.empty()) {
+        health_payload += ";";
+      }
+      health_payload += name;
+      health_payload += ":1";
     }
   } else {
     // Estimated poses: convert pixel-space transforms to metric TF.
@@ -492,7 +507,19 @@ void MapMerge::publishTransforms(
           tf_msgs.push_back(fallback);
         }
       }
+
+      if (!health_payload.empty()) {
+        health_payload += ";";
+      }
+      health_payload += robot_names[i];
+      health_payload += have_metric_tf ? ":1" : ":0";
     }
+  }
+
+  if (publish_robot_tf_health_ && robot_tf_health_pub_ && !health_payload.empty()) {
+    std_msgs::msg::String hm;
+    hm.data = health_payload;
+    robot_tf_health_pub_->publish(hm);
   }
 
   if (!tf_msgs.empty() && tf_broadcaster_) {

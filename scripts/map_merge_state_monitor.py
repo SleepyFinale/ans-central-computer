@@ -16,14 +16,21 @@ State machine:
   with multi_robot_explorer merge_degrade_grace_sec to reduce MERGED<->PARTIAL
   flapping when map_merge refines weak feature matches.
 
+  Pose health: map_merge publishes ``/robot_tf_estimate_health`` (``robot:0|1``).
+  A ``0`` means that cycle reused a provisional / last TF instead of a fresh
+  metric estimate — MERGED is capped at PARTIAL so the explorer does not rely on
+  global mode while inter-map poses are invalid.
+
 This avoids having to introspect internal map_merge diagnostics while still
 providing a robust signal for "maps are now consistently merged".
 """
 
 import math
+import time
 from typing import Dict, List, Tuple
 
 import rclpy
+from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from rclpy.duration import Duration
 
@@ -52,6 +59,17 @@ class MapMergeStateMonitor(Node):
         self.declare_parameter('motion_jitter_confirm_ticks', 3)
         # Publish rate (Hz).
         self.declare_parameter('rate', 1.0)
+        # map_merge publishes ``robot:0|1`` on this topic (1 = fresh metric TF).
+        self.declare_parameter('robot_tf_health_topic', '/robot_tf_estimate_health')
+        # If no health message for this long (seconds), ignore health gating (older map_merge).
+        self.declare_parameter('robot_tf_health_stale_sec', 15.0)
+        # Prevent early false MERGED: require each robot map to have grown enough.
+        self.declare_parameter('local_map_topic_pattern', '/{robot}/map')
+        # Minimum known cells (>=0 occupancy value) each robot map must contain
+        # before MERGED can be emitted.
+        self.declare_parameter('min_known_cells_per_robot', 400)
+        # Also require minimum explored area (known cells * resolution^2).
+        self.declare_parameter('min_known_area_m2_per_robot', 1.0)
 
         self.robot_names: List[str] = (
             self.get_parameter('robot_names').value
@@ -70,11 +88,45 @@ class MapMergeStateMonitor(Node):
             1, int(self.get_parameter('motion_jitter_confirm_ticks').value)
         )
         rate_hz: float = float(self.get_parameter('rate').value)
+        self._health_topic: str = str(
+            self.get_parameter('robot_tf_health_topic').value
+        )
+        self._health_stale_sec: float = float(
+            self.get_parameter('robot_tf_health_stale_sec').value
+        )
+        self._local_map_topic_pattern: str = str(
+            self.get_parameter('local_map_topic_pattern').value
+        )
+        self._min_known_cells_per_robot: int = max(
+            0, int(self.get_parameter('min_known_cells_per_robot').value)
+        )
+        self._min_known_area_m2_per_robot: float = max(
+            0.0, float(self.get_parameter('min_known_area_m2_per_robot').value)
+        )
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.state_pub = self.create_publisher(String, 'map_merge/merge_state', 10)
+
+        self._health_by_robot: Dict[str, bool] = {}
+        self._health_rx_wall_time: float = 0.0
+        self.create_subscription(
+            String,
+            self._health_topic,
+            self._on_tf_health,
+            10,
+        )
+        self._known_cells_by_robot: Dict[str, int] = {}
+        self._known_area_by_robot: Dict[str, float] = {}
+        for name in self.robot_names:
+            topic = self._local_map_topic_pattern.format(robot=name)
+            self.create_subscription(
+                OccupancyGrid,
+                topic,
+                lambda msg, robot=name: self._on_local_map(robot, msg),
+                10,
+            )
 
         # Track last seen positions and timestamps per robot map frame so we
         # can reason about motion over time.
@@ -85,6 +137,56 @@ class MapMergeStateMonitor(Node):
 
         period = 1.0 / rate_hz if rate_hz > 0 else 1.0
         self.timer = self.create_timer(period, self._tick)
+
+    def _on_tf_health(self, msg: String) -> None:
+        self._health_rx_wall_time = time.monotonic()
+        self._health_by_robot.clear()
+        for part in msg.data.split(';'):
+            part = part.strip()
+            if not part or ':' not in part:
+                continue
+            name, flag = part.split(':', 1)
+            name = name.strip()
+            try:
+                self._health_by_robot[name] = bool(int(flag.strip()))
+            except ValueError:
+                self._health_by_robot[name] = False
+
+    def _pose_tf_estimates_ok(self) -> bool:
+        """False when map_merge reports any robot reusing stale TF / bad estimate."""
+        if self._health_stale_sec <= 0.0 or not self._health_by_robot:
+            return True
+        age = time.monotonic() - self._health_rx_wall_time
+        if age > self._health_stale_sec or self._health_rx_wall_time <= 0.0:
+            return True
+        for name in self.robot_names:
+            ok = self._health_by_robot.get(name)
+            if ok is None:
+                return False
+            if not ok:
+                return False
+        return True
+
+    def _on_local_map(self, robot: str, msg: OccupancyGrid) -> None:
+        known_cells = 0
+        for cell in msg.data:
+            if cell >= 0:
+                known_cells += 1
+        self._known_cells_by_robot[robot] = known_cells
+        self._known_area_by_robot[robot] = known_cells * float(msg.info.resolution) ** 2
+
+    def _maps_mature_for_merge(self) -> bool:
+        """Require each robot map to grow beyond a minimum known footprint."""
+        if self._min_known_cells_per_robot <= 0 and self._min_known_area_m2_per_robot <= 0.0:
+            return True
+        for name in self.robot_names:
+            known_cells = self._known_cells_by_robot.get(name, 0)
+            known_area = self._known_area_by_robot.get(name, 0.0)
+            if known_cells < self._min_known_cells_per_robot:
+                return False
+            if known_area < self._min_known_area_m2_per_robot:
+                return False
+        return True
 
     def _tick(self) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
@@ -142,6 +244,13 @@ class MapMergeStateMonitor(Node):
                     new_state = 'MERGED'
                 else:
                     new_state = 'PARTIAL'
+
+        pose_tf_ok = self._pose_tf_estimates_ok()
+        maps_mature = self._maps_mature_for_merge()
+        if new_state == 'MERGED' and not pose_tf_ok:
+            new_state = 'PARTIAL'
+        if new_state == 'MERGED' and not maps_mature:
+            new_state = 'PARTIAL'
 
         if new_state != self._current_state:
             self.get_logger().info(

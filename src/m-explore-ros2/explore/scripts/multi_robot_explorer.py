@@ -9,8 +9,10 @@ Each planning cycle:
   1. Detect frontier regions on the merged occupancy grid.
   2. For every idle robot, pick the best unassigned frontier using a
      utility function that balances proximity vs information gain.
-  3. Send a NavigateToPose goal in the world frame; Nav2 uses TF to
-     convert it into the robot's local frame.
+  3. Send a NavigateToPose goal: frontiers are chosen in the merged world
+     ``map`` frame, then (by default) TF-transformed into ``<robot>/map``
+     for Nav2 when ``dispatch_nav_goals_in_robot_map_frame`` is enabled
+     (Path 2: local SLAM costmaps on each robot).
 
 Handles the no-overlap case transparently: the merged map already
 contains all robot maps (placed side-by-side by map_merge), so each
@@ -45,6 +47,7 @@ from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from visualization_msgs.msg import Marker, MarkerArray
 
 import tf2_ros
+import tf2_geometry_msgs  # noqa: F401 — registers PoseStamped for Buffer.transform()
 from central_explorer_event_logger import ExplorerEventLogger
 
 
@@ -54,11 +57,13 @@ from central_explorer_event_logger import ExplorerEventLogger
 
 @dataclass
 class Frontier:
-    centroid_world: Tuple[float, float]  # (x, y) in world frame (metres)
+    centroid_world: Tuple[float, float]  # (x, y) in pose_frame_id (metres)
     size: int                            # number of frontier cells
     size_m: float                        # size * resolution (metres)
     cells: int = 0                       # alias for size
     indices: Optional[np.ndarray] = None  # (N, 2) array of (y, x) cell indices
+    # TF frame for centroid_world / goal points (merged map or /<robot>/map).
+    pose_frame_id: Optional[str] = None
 
 
 @dataclass
@@ -151,6 +156,8 @@ class RobotState:
     path_precheck_frontier: Optional[Frontier] = None
     path_precheck_from_retarget: bool = False
     path_precheck_goal_xy: Optional[Tuple[float, float]] = None
+    # World-frame goal (merged map) for blacklists / NavigateToPose after precheck.
+    path_precheck_world_goal_xy: Optional[Tuple[float, float]] = None
     path_precheck_started_time: float = 0.0
     # First time compute_path_to_pose wait_for_server succeeded (Nav2 warm-up).
     path_precheck_server_seen_time: float = 0.0
@@ -244,6 +251,7 @@ def detect_frontiers(
     origin_x: float,
     origin_y: float,
     min_size_m: float,
+    pose_frame_id: Optional[str] = None,
 ) -> List[Frontier]:
     """Find frontier regions on an OccupancyGrid.
 
@@ -293,6 +301,7 @@ def detect_frontiers(
             size_m=n * resolution,
             cells=n,
             indices=indices,
+            pose_frame_id=pose_frame_id,
         ))
 
     return frontiers
@@ -451,6 +460,11 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('robot_names', ['blinky', 'pinky', 'inky', 'clyde'])
         self.declare_parameter('map_topic', 'map')
         self.declare_parameter('world_frame', 'map')
+        # Path 2: send NavigateToPose / compute_path_to_pose in each robot's map
+        # frame (e.g. pinky/map) by TF-transforming from frontier pose_frame_id.
+        self.declare_parameter('dispatch_nav_goals_in_robot_map_frame', True)
+        self.declare_parameter('nav_goal_frame_pattern', '{robot}/map')
+        self.declare_parameter('nav_goal_tf_transform_timeout_sec', 0.5)
         # New parameters to control local-vs-global behaviour.
         # mode:
         #   - 'auto'        : start in local-per-robot mode and switch to global
@@ -494,7 +508,13 @@ class MultiRobotExplorer(Node):
         # Minimum separation between robot and candidate goal used as a final
         # safety net; most shaping is done via min_goal_distance.
         self.declare_parameter('min_goal_separation', 0.5)
-        self.declare_parameter('suspicious_success_distance', 0.35)
+        # Match Nav2 goal-check tolerance (e.g. TurtleBot3 burger.yaml
+        # controller_server.xy_goal_tolerance: 0.25). Suspicious-success only
+        # triggers when last distance_remaining is strictly greater than this.
+        self.declare_parameter('suspicious_success_distance', 0.25)
+        # SUCCEEDED + distance_remaining at/below this: trust Nav2 terminal feedback
+        # even when map-frame leg progress is tiny (bridged TF lags the robot).
+        self.declare_parameter('trust_nav2_terminal_distance_remaining_m', 0.30)
         # If NavigateToPose ends in ABORTED (e.g. controller "Failed to make
         # progress") but the robot is within this distance of the goal in the
         # map frame, count as reached and do not blacklist — Nav2 often aborts
@@ -672,6 +692,16 @@ class MultiRobotExplorer(Node):
         map_topic = self.get_parameter('map_topic').value
         self.map_topic = map_topic
         self.world_frame = self.get_parameter('world_frame').value
+        self.dispatch_nav_goals_in_robot_map_frame: bool = bool(
+            self.get_parameter('dispatch_nav_goals_in_robot_map_frame').value
+        )
+        self.nav_goal_frame_pattern: str = str(
+            self.get_parameter('nav_goal_frame_pattern').value
+        )
+        self.nav_goal_tf_transform_timeout_sec: float = max(
+            0.05,
+            float(self.get_parameter('nav_goal_tf_transform_timeout_sec').value),
+        )
         self.mode: str = (
             self.get_parameter('mode').value or 'auto'
         ).lower()
@@ -715,6 +745,9 @@ class MultiRobotExplorer(Node):
             self.get_parameter('min_goal_separation').value)
         self.suspicious_success_distance = (
             self.get_parameter('suspicious_success_distance').value)
+        self.trust_nav2_terminal_distance_remaining_m = float(
+            self.get_parameter('trust_nav2_terminal_distance_remaining_m').value
+        )
         self.tacit_goal_success_radius_m = float(
             self.get_parameter('tacit_goal_success_radius_m').value
         )
@@ -1169,7 +1202,9 @@ class MultiRobotExplorer(Node):
             f'retrace_hold={self.retrace_hold_enabled}, '
             f'goal_arrival_probe={self.goal_arrival_probe_enable}, '
             f'collision_ahead_for_probe={self.goal_arrival_probe_use_collision_ahead}, '
-            f'navigate_to_pose_wait_sec={self.navigate_to_pose_server_wait_sec:.1f}')
+            f'navigate_to_pose_wait_sec={self.navigate_to_pose_server_wait_sec:.1f}, '
+            f'dispatch_nav_goals_in_robot_map_frame='
+            f'{self.dispatch_nav_goals_in_robot_map_frame}')
         self._publish_status('STARTED')
 
     # -----------------------------------------------------------------------
@@ -1793,6 +1828,7 @@ class MultiRobotExplorer(Node):
                 size_m=max(self.min_frontier_size, 0.01),
                 cells=max(1, self.min_frontier_cells_for_goal),
                 indices=None,
+                pose_frame_id=str(self.world_frame),
             )
             self.get_logger().info(
                 f'[{rs.name}] Return home: sending goal to start '
@@ -1835,6 +1871,7 @@ class MultiRobotExplorer(Node):
             if not rs.goal_active and not rs.goal_pending and rs.position is not None
             and self._robot_may_assign_now(rs, now))
 
+        gframe = (m.header.frame_id or '').strip() or str(self.world_frame)
         frontiers = detect_frontiers(
             m.data,
             m.info.width,
@@ -1843,6 +1880,7 @@ class MultiRobotExplorer(Node):
             m.info.origin.position.x,
             m.info.origin.position.y,
             self.min_frontier_size,
+            pose_frame_id=gframe,
         )
 
         if not frontiers:
@@ -1929,6 +1967,7 @@ class MultiRobotExplorer(Node):
             self._current_goal_map = lm
             self._map_size_x = lm.info.width * lm.info.resolution
             self._map_size_y = lm.info.height * lm.info.resolution
+            lframe = (lm.header.frame_id or '').strip() or f'{name}/map'
             frontiers = detect_frontiers(
                 lm.data,
                 lm.info.width,
@@ -1937,6 +1976,7 @@ class MultiRobotExplorer(Node):
                 lm.info.origin.position.x,
                 lm.info.origin.position.y,
                 self.min_frontier_size,
+                pose_frame_id=lframe,
             )
             if not frontiers:
                 continue
@@ -2102,6 +2142,94 @@ class MultiRobotExplorer(Node):
                             f'[{rs.name}] Entering degraded hold due to stale TF '
                             f'(age={now - rs.last_tf_update_time:.2f}s)'
                         )
+
+    # -----------------------------------------------------------------------
+    # Nav2 dispatch frame (Path 2: goals in <robot>/map)
+    # -----------------------------------------------------------------------
+
+    def _nav_dispatch_frame_id(self, rs: RobotState) -> str:
+        if not self.dispatch_nav_goals_in_robot_map_frame:
+            return str(self.world_frame)
+        return self.nav_goal_frame_pattern.format(robot=rs.name)
+
+    def _goal_pose_source_frame(self, frontier: Optional[Frontier]) -> str:
+        if frontier is not None and frontier.pose_frame_id:
+            return str(frontier.pose_frame_id)
+        return str(self.world_frame)
+
+    def _transform_plan_xy(
+        self,
+        rs: RobotState,
+        from_frame: str,
+        x: float,
+        y: float,
+        to_frame: str,
+    ) -> Optional[Tuple[float, float]]:
+        """Transform a 2D plan point between TF frames (latest stamp)."""
+        if not from_frame or not to_frame or from_frame == to_frame:
+            return (float(x), float(y))
+        ps = PoseStamped()
+        ps.header.frame_id = from_frame
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x = float(x)
+        ps.pose.position.y = float(y)
+        ps.pose.position.z = 0.0
+        ps.pose.orientation.w = 1.0
+        try:
+            out = self.tf_buffer.transform(
+                ps,
+                to_frame,
+                timeout=Duration(seconds=self.nav_goal_tf_transform_timeout_sec),
+            )
+            return (float(out.pose.position.x), float(out.pose.position.y))
+        except (tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] TF plan point {from_frame!r} -> {to_frame!r} '
+                f'failed: {exc}'
+            )
+            return None
+
+    def _pose_stamped_for_nav_dispatch(
+        self,
+        rs: RobotState,
+        source_frame: str,
+        x: float,
+        y: float,
+        yaw: float,
+    ) -> Optional[PoseStamped]:
+        """Build a PoseStamped for Nav2 in the robot dispatch frame (Path 2)."""
+        dst = self._nav_dispatch_frame_id(rs)
+        ps = PoseStamped()
+        ps.header.stamp = self.get_clock().now().to_msg()
+        ps.pose.position.x = float(x)
+        ps.pose.position.y = float(y)
+        ps.pose.position.z = 0.0
+        ps.pose.orientation.x = 0.0
+        ps.pose.orientation.y = 0.0
+        ps.pose.orientation.z = math.sin(yaw * 0.5)
+        ps.pose.orientation.w = math.cos(yaw * 0.5)
+        if not self.dispatch_nav_goals_in_robot_map_frame:
+            ps.header.frame_id = str(self.world_frame)
+            return ps
+        ps.header.frame_id = source_frame
+        if source_frame == dst:
+            ps.header.frame_id = dst
+            return ps
+        try:
+            return self.tf_buffer.transform(
+                ps,
+                dst,
+                timeout=Duration(seconds=self.nav_goal_tf_transform_timeout_sec),
+            )
+        except (tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as exc:
+            self.get_logger().warn(
+                f'[{rs.name}] TF goal transform {source_frame!r} -> {dst!r} failed: {exc}'
+            )
+            return None
 
     # -----------------------------------------------------------------------
     # Nav2 goal management
@@ -2335,6 +2463,7 @@ class MultiRobotExplorer(Node):
             size_m=max(self.min_frontier_size, 0.01),
             cells=max(1, self.min_frontier_cells_for_goal),
             indices=None,
+            pose_frame_id=str(self.world_frame),
         )
         self._send_goal(rs, proxy_frontier)
         if rs.goal_active or rs.goal_pending:
@@ -3030,6 +3159,7 @@ class MultiRobotExplorer(Node):
         rs.path_precheck_frontier = None
         rs.path_precheck_from_retarget = False
         rs.path_precheck_goal_xy = None
+        rs.path_precheck_world_goal_xy = None
         rs.path_precheck_started_time = 0.0
         rs.goal_pending = False
         if blacklist_xy is not None:
@@ -3166,12 +3296,27 @@ class MultiRobotExplorer(Node):
         goal_y: float,
         from_retarget: bool,
     ) -> None:
+        """goal_x, goal_y are in ``world_frame`` (merged map coordinates)."""
+        nav_goal = self._pose_stamped_for_nav_dispatch(
+            rs, str(self.world_frame), goal_x, goal_y, 0.0)
+        if nav_goal is None:
+            self.get_logger().warn(
+                f'[{rs.name}] Path precheck skipped: TF to Nav2 dispatch frame failed'
+            )
+            self._path_precheck_transient_fail(
+                rs, 'tf_nav_dispatch_transform_failed', count_for_degraded=False)
+            return
+
+        rs.path_precheck_world_goal_xy = (float(goal_x), float(goal_y))
         rs.goal_pending = True
         rs.goal_active = False
         rs.path_precheck_in_progress = True
         rs.path_precheck_frontier = frontier
         rs.path_precheck_from_retarget = from_retarget
-        rs.path_precheck_goal_xy = (goal_x, goal_y)
+        rs.path_precheck_goal_xy = (
+            float(nav_goal.pose.position.x),
+            float(nav_goal.pose.position.y),
+        )
         rs.path_precheck_started_time = (
             self.get_clock().now().nanoseconds / 1e9
         )
@@ -3179,21 +3324,16 @@ class MultiRobotExplorer(Node):
         cp_goal = ComputePathToPose.Goal()
         cp_goal.use_start = False
         cp_goal.planner_id = self.nav2_path_precheck_planner_id
-        cp_goal.goal.header.frame_id = self.world_frame
-        cp_goal.goal.header.stamp = self.get_clock().now().to_msg()
-        cp_goal.goal.pose.position.x = goal_x
-        cp_goal.goal.pose.position.y = goal_y
-        cp_goal.goal.pose.position.z = 0.0
-        cp_goal.goal.pose.orientation.x = 0.0
-        cp_goal.goal.pose.orientation.y = 0.0
-        cp_goal.goal.pose.orientation.z = 0.0
-        cp_goal.goal.pose.orientation.w = 1.0
+        cp_goal.goal = nav_goal
 
         send_future = rs.path_precheck_client.send_goal_async(cp_goal)
         send_future.add_done_callback(
             lambda f, r=rs: self._path_precheck_goal_response_callback(f, r))
         self.get_logger().info(
-            f'[{rs.name}] Nav2 path precheck → ({goal_x:.2f}, {goal_y:.2f})'
+            f'[{rs.name}] Nav2 path precheck '
+            f'{nav_goal.header.frame_id} '
+            f'({nav_goal.pose.position.x:.2f}, {nav_goal.pose.position.y:.2f}) '
+            f'[world {goal_x:.2f}, {goal_y:.2f}]'
         )
 
     def _path_precheck_goal_response_callback(self, future, rs: RobotState):
@@ -3223,20 +3363,23 @@ class MultiRobotExplorer(Node):
         rs.path_precheck_goal_handle = None
         rs.path_precheck_in_progress = False
         goal_xy = rs.path_precheck_goal_xy
+        world_goal_xy = rs.path_precheck_world_goal_xy
         frontier = rs.path_precheck_frontier
         from_retarget = rs.path_precheck_from_retarget
         rs.path_precheck_frontier = None
         rs.path_precheck_goal_xy = None
+        rs.path_precheck_world_goal_xy = None
         rs.path_precheck_from_retarget = False
         rs.path_precheck_started_time = 0.0
         rs.goal_pending = False
+        bl_xy = world_goal_xy if world_goal_xy is not None else goal_xy
 
         try:
             wrapped = future.result()
         except Exception as exc:
             self.get_logger().warn(
                 f'[{rs.name}] Path precheck result error: {exc}')
-            self._blacklist_or_home_fail(rs, goal_xy)
+            self._blacklist_or_home_fail(rs, bl_xy)
             self._arm_post_failure_cooldown(rs)
             return
 
@@ -3331,7 +3474,7 @@ class MultiRobotExplorer(Node):
                     f'[{rs.name}] Path precheck hard failure -> blacklist ({reason})'
                 )
                 if not rs.degraded_active:
-                    self._blacklist_or_home_fail(rs, goal_xy)
+                    self._blacklist_or_home_fail(rs, bl_xy)
                     self._arm_post_failure_cooldown(rs)
                     rs.precheck_transient_goal_xy = None
                     rs.precheck_transient_repeat_count = 0
@@ -3353,19 +3496,19 @@ class MultiRobotExplorer(Node):
                 f'({nposes} < {self.nav2_path_min_poses}); skipping goal'
             )
             if not rs.degraded_active:
-                self._blacklist_or_home_fail(rs, goal_xy)
+                self._blacklist_or_home_fail(rs, bl_xy)
                 self._arm_post_failure_cooldown(rs)
                 rs.precheck_transient_goal_xy = None
                 rs.precheck_transient_repeat_count = 0
             return
 
-        if frontier is None or goal_xy is None:
+        if frontier is None or world_goal_xy is None:
             return
-        goal_x, goal_y = goal_xy
+        gwx, gwy = world_goal_xy
         rs.precheck_transient_goal_xy = None
         rs.precheck_transient_repeat_count = 0
         self._dispatch_navigate_to_pose(
-            rs, frontier, goal_x, goal_y, from_retarget)
+            rs, frontier, gwx, gwy, from_retarget)
 
     def _abort_arrival_probe(
         self,
@@ -3424,8 +3567,15 @@ class MultiRobotExplorer(Node):
         path: Optional[Path],
         start_xy: Tuple[float, float],
         goal_xy: Tuple[float, float],
+        rs: Optional[RobotState] = None,
     ) -> Tuple[bool, str]:
-        """Return (ok, reason) for merged-map feasibility of a Nav2 global path."""
+        """Return (ok, reason) for merged-map feasibility of a Nav2 global path.
+
+        ``start_xy`` / ``goal_xy`` are in ``world_frame``. Path poses are
+        typically in Nav2's global frame (e.g. ``<robot>/map``); when that
+        differs from the OccupancyGrid frame, sample points are transformed
+        into the grid frame before cell lookup.
+        """
         if m is None:
             return True, 'no_map_skip'
         if path is None or not path.poses:
@@ -3451,6 +3601,21 @@ class MultiRobotExplorer(Node):
         samples = self._sample_nav_path_points(path, step)
         if not samples:
             samples = [start_xy, goal_xy]
+        path_frame = (path.header.frame_id or '').strip()
+        map_frame = (m.header.frame_id or '').strip() or str(self.world_frame)
+        if (
+            path_frame
+            and map_frame
+            and path_frame != map_frame
+            and rs is not None
+        ):
+            mapped: List[Tuple[float, float]] = []
+            for px, py in samples:
+                conv = self._transform_plan_xy(rs, path_frame, px, py, map_frame)
+                if conv is None:
+                    return True, 'path_score_tf_skip'
+                mapped.append(conv)
+            samples = mapped
         bad = 0
         max_c = 0
         for x, y in samples:
@@ -3506,35 +3671,38 @@ class MultiRobotExplorer(Node):
         rs.arrival_probe_for_goal_seq = rs.active_goal_seq
         rs.arrival_probe_map_ref = self._current_goal_map
 
+        start_pose = self._pose_stamped_for_nav_dispatch(
+            rs,
+            str(self.world_frame),
+            float(rs.position[0]),
+            float(rs.position[1]),
+            float(rs.yaw),
+        )
+        goal_pose = self._pose_stamped_for_nav_dispatch(
+            rs, str(self.world_frame), float(gx), float(gy), 0.0)
+        if start_pose is None or goal_pose is None:
+            self.get_logger().warn(
+                f'[{rs.name}] Arrival probe skipped: TF to Nav2 dispatch frame failed'
+            )
+            self._abort_arrival_probe(rs, cancel_action=False)
+            return
+
         cp_goal = ComputePathToPose.Goal()
         cp_goal.use_start = True
         cp_goal.planner_id = self.nav2_path_precheck_planner_id
-        cp_goal.start.header.frame_id = self.world_frame
-        cp_goal.start.header.stamp = self.get_clock().now().to_msg()
-        cp_goal.start.pose.position.x = rs.position[0]
-        cp_goal.start.pose.position.y = rs.position[1]
-        cp_goal.start.pose.position.z = 0.0
-        yaw = rs.yaw
-        cp_goal.start.pose.orientation.x = 0.0
-        cp_goal.start.pose.orientation.y = 0.0
-        cp_goal.start.pose.orientation.z = math.sin(yaw * 0.5)
-        cp_goal.start.pose.orientation.w = math.cos(yaw * 0.5)
-        cp_goal.goal.header.frame_id = self.world_frame
-        cp_goal.goal.header.stamp = self.get_clock().now().to_msg()
-        cp_goal.goal.pose.position.x = gx
-        cp_goal.goal.pose.position.y = gy
-        cp_goal.goal.pose.position.z = 0.0
-        cp_goal.goal.pose.orientation.x = 0.0
-        cp_goal.goal.pose.orientation.y = 0.0
-        cp_goal.goal.pose.orientation.z = 0.0
-        cp_goal.goal.pose.orientation.w = 1.0
+        cp_goal.start = start_pose
+        cp_goal.goal = goal_pose
 
         send_future = rs.path_precheck_client.send_goal_async(cp_goal)
         send_future.add_done_callback(
             lambda f, r=rs: self._arrival_probe_goal_response_callback(f, r))
         self.get_logger().info(
             f'[{rs.name}] Arrival path probe (tacit_followup={tacit_followup}) '
-            f'→ ({gx:.2f}, {gy:.2f})'
+            f'start={start_pose.header.frame_id} '
+            f'({start_pose.pose.position.x:.2f},{start_pose.pose.position.y:.2f}) '
+            f'goal={goal_pose.header.frame_id} '
+            f'({goal_pose.pose.position.x:.2f},{goal_pose.pose.position.y:.2f}) '
+            f'[world goal {gx:.2f},{gy:.2f}]'
         )
         return True
 
@@ -3607,7 +3775,7 @@ class MultiRobotExplorer(Node):
         if gp is None or sp is None:
             return
         ok, why = self._score_arrival_path_on_map(
-            map_snapshot, nav_path, sp, gp)
+            map_snapshot, nav_path, sp, gp, rs)
         if ok:
             self.get_logger().info(
                 f'[{rs.name}] Arrival probe passed ({why})'
@@ -3658,20 +3826,30 @@ class MultiRobotExplorer(Node):
         goal_y: float,
         from_retarget: bool,
     ) -> None:
+        """goal_x, goal_y are in ``world_frame`` (merged map). Nav2 receives
+        ``PoseStamped`` transformed into the robot dispatch frame when enabled.
+        """
         rs.last_goal_world = (goal_x, goal_y)
         rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
 
+        nav_pose = self._pose_stamped_for_nav_dispatch(
+            rs, str(self.world_frame), goal_x, goal_y, 0.0)
+        if nav_pose is None:
+            self.get_logger().warn(
+                f'[{rs.name}] NavigateToPose skipped: TF to Nav2 dispatch frame failed'
+            )
+            rs.goal_active = False
+            rs.goal_pending = False
+            rs.goal_status = 'failed'
+            if rs.homing_active:
+                self._return_home_note_failure(rs)
+            else:
+                self._blacklist_or_home_fail(rs, (goal_x, goal_y))
+                self._arm_post_failure_cooldown(rs)
+            return
+
         goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = PoseStamped()
-        goal_msg.pose.header.frame_id = self.world_frame
-        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.pose.position.x = goal_x
-        goal_msg.pose.pose.position.y = goal_y
-        goal_msg.pose.pose.position.z = 0.0
-        goal_msg.pose.pose.orientation.x = 0.0
-        goal_msg.pose.pose.orientation.y = 0.0
-        goal_msg.pose.pose.orientation.z = 0.0
-        goal_msg.pose.pose.orientation.w = 1.0
+        goal_msg.pose = nav_pose
 
         rs.goal_active = True
         rs.goal_pending = True
@@ -3714,9 +3892,9 @@ class MultiRobotExplorer(Node):
         try:
             self.event_logger.log_goal_sent(
                 robot=rs.name,
-                goal_x=float(goal_x),
-                goal_y=float(goal_y),
-                frame=self.world_frame,
+                goal_x=float(nav_pose.pose.position.x),
+                goal_y=float(nav_pose.pose.position.y),
+                frame=str(nav_pose.header.frame_id),
                 action_name=f'/{rs.name}/navigate_to_pose',
                 t_ros_ns=int(self.get_clock().now().nanoseconds),
             )
@@ -3725,7 +3903,10 @@ class MultiRobotExplorer(Node):
         send_future.add_done_callback(
             lambda f, r=rs, seq=goal_seq: self._goal_response_callback(f, r, seq))
         self.get_logger().info(
-            f'[{rs.name}] Sending NavigateToPose ({goal_x:.2f}, {goal_y:.2f}) '
+            f'[{rs.name}] Sending NavigateToPose '
+            f'{nav_pose.header.frame_id} '
+            f'({nav_pose.pose.position.x:.2f}, {nav_pose.pose.position.y:.2f}) '
+            f'[world {goal_x:.2f}, {goal_y:.2f}] '
             f'— frontier size {frontier.size_m:.2f}m ({frontier.size} cells)')
 
     def _send_goal(
@@ -3770,16 +3951,54 @@ class MultiRobotExplorer(Node):
             )
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
+        src_frame = self._goal_pose_source_frame(frontier)
+        world_goal = self._transform_plan_xy(
+            rs, src_frame, goal_x, goal_y, str(self.world_frame))
+        if world_goal is None:
+            self.get_logger().warn(
+                f'[{rs.name}] Skipping goal: TF {src_frame!r} -> '
+                f'{self.world_frame!r} failed for ({goal_x:.2f}, {goal_y:.2f})'
+            )
+            rs.goal_active = False
+            rs.goal_pending = False
+            if rs.homing_active:
+                self._return_home_note_failure(rs)
+            else:
+                self._arm_post_failure_cooldown(rs)
+            return
+        wx, wy = world_goal
         if not rs.homing_active:
             rs.last_target_frontier_centroid = frontier.centroid_world
-        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+        if self._repeat_goal_blocks_send(rs, wx, wy, frontier):
             return
         if self.goal_revalidate_before_send:
-            if not self._goal_passes_safety_gate(self._current_goal_map, goal_x, goal_y):
+            m = self._current_goal_map
+            if m is not None:
+                map_frame = (m.header.frame_id or '').strip() or str(
+                    self.world_frame)
+                mxy = self._transform_plan_xy(
+                    rs, src_frame, goal_x, goal_y, map_frame)
+                if mxy is None:
+                    self.get_logger().warn(
+                        f'[{rs.name}] Skipping goal: TF {src_frame!r} -> '
+                        f'{map_frame!r} failed for safety gate'
+                    )
+                    rs.goal_active = False
+                    rs.goal_pending = False
+                    if rs.homing_active:
+                        self._return_home_note_failure(rs)
+                    else:
+                        self._arm_post_failure_cooldown(rs)
+                    return
+                mx, my = mxy
+                gate_xy = (mx, my)
+            else:
+                gate_xy = (wx, wy)
+            if not self._goal_passes_safety_gate(self._current_goal_map, gate_xy[0], gate_xy[1]):
                 self._log_goal_safety_rejection(
-                    rs, goal_x, goal_y, context='pre_send_revalidate'
+                    rs, gate_xy[0], gate_xy[1], context='pre_send_revalidate'
                 )
-                self._blacklist_or_home_fail(rs, (goal_x, goal_y))
+                self._blacklist_or_home_fail(rs, (wx, wy))
                 self._arm_post_failure_cooldown(rs)
                 self.get_logger().info(
                     f'[{rs.name}] Goal rejected by pre-send safety revalidation; '
@@ -3804,13 +4023,13 @@ class MultiRobotExplorer(Node):
             dist_to_goal = None
             if rs.position is not None:
                 dist_to_goal = float(
-                    math.hypot(goal_x - rs.position[0], goal_y - rs.position[1])
+                    math.hypot(wx - rs.position[0], wy - rs.position[1])
                 )
             self.event_logger.log_goal_selected(
                 robot=rs.name,
-                goal_x=float(goal_x),
-                goal_y=float(goal_y),
-                frame=self.world_frame,
+                goal_x=float(wx),
+                goal_y=float(wy),
+                frame=str(self.world_frame),
                 map_topic=self.map_topic,
                 map_meta=map_meta,
                 merge_state=self._merge_state_last,
@@ -3843,7 +4062,7 @@ class MultiRobotExplorer(Node):
                 if rs.path_precheck_server_seen_time <= 0.0:
                     rs.path_precheck_server_seen_time = now_ts
                 self._begin_nav2_path_precheck(
-                    rs, frontier, goal_x, goal_y, from_retarget)
+                    rs, frontier, wx, wy, from_retarget)
                 return
             if self.nav2_path_precheck_required:
                 self.get_logger().warn(
@@ -3874,7 +4093,7 @@ class MultiRobotExplorer(Node):
                 'NavigateToPose without precheck')
 
         self._dispatch_navigate_to_pose(
-            rs, frontier, goal_x, goal_y, from_retarget)
+            rs, frontier, wx, wy, from_retarget)
 
     def _publish_pose_fallback_goal(
         self,
@@ -3889,29 +4108,40 @@ class MultiRobotExplorer(Node):
             return
 
         goal_x, goal_y = self._select_goal_point(rs, frontier)
-        if self._repeat_goal_blocks_send(rs, goal_x, goal_y, frontier):
+        src_frame = self._goal_pose_source_frame(frontier)
+        world_goal = self._transform_plan_xy(
+            rs, src_frame, goal_x, goal_y, str(self.world_frame))
+        if world_goal is None:
+            self.get_logger().warn(
+                f'[{rs.name}] PoseStamped fallback skipped: TF to world failed'
+            )
+            rs.goal_active = False
+            rs.goal_pending = False
+            return
+        wx, wy = world_goal
+        if self._repeat_goal_blocks_send(rs, wx, wy, frontier):
             rs.goal_active = False
             rs.goal_pending = False
             return
 
-        rs.last_goal_world = (goal_x, goal_y)
-        rs.recent_goals.append((goal_x, goal_y, float(frontier.size_m)))
+        rs.last_goal_world = (wx, wy)
+        rs.recent_goals.append((wx, wy, float(frontier.size_m)))
 
-        goal_msg = PoseStamped()
-        goal_msg.header.frame_id = self.world_frame
-        goal_msg.header.stamp = self.get_clock().now().to_msg()
-        goal_msg.pose.position.x = goal_x
-        goal_msg.pose.position.y = goal_y
-        goal_msg.pose.position.z = 0.0
-        goal_msg.pose.orientation.x = 0.0
-        goal_msg.pose.orientation.y = 0.0
-        goal_msg.pose.orientation.z = 0.0
-        goal_msg.pose.orientation.w = 1.0
+        nav_pose = self._pose_stamped_for_nav_dispatch(
+            rs, str(self.world_frame), wx, wy, 0.0)
+        if nav_pose is None:
+            self.get_logger().warn(
+                f'[{rs.name}] PoseStamped fallback skipped: TF to Nav2 frame failed'
+            )
+            rs.goal_active = False
+            rs.goal_pending = False
+            return
 
+        goal_msg = nav_pose
         goal_pub.publish(goal_msg)
         rs.goal_seq_counter += 1
         rs.active_goal_seq = rs.goal_seq_counter
-        rs.goal_position = (goal_x, goal_y)
+        rs.goal_position = (wx, wy)
         now = self.get_clock().now().nanoseconds / 1e9
         rs.last_goal_time = now
         rs.active_goal_sent_time = now
@@ -3922,18 +4152,20 @@ class MultiRobotExplorer(Node):
         rs.last_motion_sample_time = now
         rs.last_motion_time = now
         if rs.position is not None:
-            rs.last_dist_to_goal = _dist(rs.position, (goal_x, goal_y))
+            rs.last_dist_to_goal = _dist(rs.position, (wx, wy))
         else:
             rs.last_dist_to_goal = None
         if not from_retarget:
-            rs.retarget_anchor = (goal_x, goal_y)
+            rs.retarget_anchor = (wx, wy)
         rs.goal_active = True
         rs.goal_pending = False
         rs.goal_status = 'executing'
         rs.goal_handle = None
         self.get_logger().warn(
             f'[{rs.name}] Falling back to PoseStamped goal_pose '
-            f'({goal_x:.2f}, {goal_y:.2f})')
+            f'{goal_msg.header.frame_id} '
+            f'({goal_msg.pose.position.x:.2f}, {goal_msg.pose.position.y:.2f}) '
+            f'[world {wx:.2f}, {wy:.2f}]')
 
     def _goal_response_callback(self, future, rs: RobotState, goal_seq: int):
         if goal_seq != rs.active_goal_seq:
@@ -4128,9 +4360,18 @@ class MultiRobotExplorer(Node):
                 # explorer can miss centroid motion on the central leg even when Nav2
                 # feedback shows a clean terminal approach (distance_remaining).
                 if (
+                    not made_progress
+                    and rs.last_distance_remaining is not None
+                    and math.isfinite(rs.last_distance_remaining)
+                    and rs.last_distance_remaining
+                    <= self.trust_nav2_terminal_distance_remaining_m
+                ):
+                    made_progress = True
+                elif (
                     self.single_robot_offloaded_nav2
                     and not made_progress
                     and rs.last_distance_remaining is not None
+                    and math.isfinite(rs.last_distance_remaining)
                     and rs.last_distance_remaining
                     <= max(
                         self.tacit_abort_max_distance_remaining_m * 2.0,

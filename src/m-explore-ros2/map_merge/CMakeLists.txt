@@ -44,6 +44,7 @@ set(DEPENDENCIES
   image_geometry
   map_msgs
   nav_msgs
+  std_msgs
   tf2_geometry_msgs
   tf2
   tf2_ros
