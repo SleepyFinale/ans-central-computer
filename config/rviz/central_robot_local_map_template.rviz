@@ -112,11 +112,57 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Use Fixed Frame: true
-    - Class: rviz_default_plugins/LaserScan
-      Name: ultrasonic
-      Enabled: false
+    - Class: rviz_default_plugins/Range
+      Name: ultrasonic_l
+      Enabled: true
       Topic:
-        Value: /__ROBOT__/ultrasonic
+        Value: /__ROBOT__/ultrasonic_l
+        Depth: 50
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Filter size: 100
+      Color: 0; 255; 0
+      Color Transformer: FlatColor
+      Style: Points
+      Size (Pixels): 3
+      Size (m): 0.01
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Value: true
+        Min Value: -10
+        Max Value: 10
+      Axis: Z
+      Channel Name: intensity
+      Use Fixed Frame: true
+    - Class: rviz_default_plugins/Range
+      Name: ultrasonic_f
+      Enabled: true
+      Topic:
+        Value: /__ROBOT__/ultrasonic_f
+        Depth: 50
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Filter size: 100
+      Color: 0; 255; 0
+      Color Transformer: FlatColor
+      Style: Points
+      Size (Pixels): 3
+      Size (m): 0.01
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Value: true
+        Min Value: -10
+        Max Value: 10
+      Axis: Z
+      Channel Name: intensity
+      Use Fixed Frame: true
+    - Class: rviz_default_plugins/Range
+      Name: ultrasonic_r
+      Enabled: true
+      Topic:
+        Value: /__ROBOT__/ultrasonic_r
         Depth: 50
         Durability Policy: Volatile
         History Policy: Keep Last
@@ -193,6 +239,14 @@ Visualization Manager:
     - Class: rviz_default_plugins/PublishPoint
       Topic:
         Value: /__ROBOT__/clicked_point
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Single click: true
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /__ROBOT__/goal_pose
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
