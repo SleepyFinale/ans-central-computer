@@ -127,6 +127,13 @@ def _robot_worker(
 
         deadline = time.monotonic() + wait_sec
         while time.monotonic() < deadline and rclpy.ok():
+            # Allow parent shutdown while still waiting for robot-side services.
+            try:
+                maybe_stop = q_in.get_nowait()
+                if maybe_stop is None:
+                    return
+            except queue.Empty:
+                pass
             all_ready = all(
                 sg.service_is_ready() and gr.service_is_ready() and cg.service_is_ready()
                 for sg, gr, cg in clients.values()
@@ -139,10 +146,11 @@ def _robot_worker(
                 break
 
         if not ready_evt.is_set():
-            node.get_logger().error(
-                f'Timed out waiting for NavigateToPose + compute_path_to_pose '
-                f'services on robot domain {robot_domain} ({robot}).'
-            )
+            if rclpy.ok():
+                node.get_logger().error(
+                    f'Timed out waiting for NavigateToPose + compute_path_to_pose '
+                    f'services on robot domain {robot_domain} ({robot}).'
+                )
             return
 
         node.get_logger().info(
@@ -331,6 +339,11 @@ def main() -> int:
         proc.join(timeout=5.0)
         if proc.is_alive():
             proc.terminate()
+            proc.join(timeout=2.0)
+        q_c2r.close()
+        q_r2c.close()
+        q_c2r.join_thread()
+        q_r2c.join_thread()
         return 1
 
     rclpy.init()
@@ -366,6 +379,10 @@ def main() -> int:
         if proc.is_alive():
             proc.terminate()
             proc.join(timeout=2.0)
+        q_c2r.close()
+        q_r2c.close()
+        q_c2r.join_thread()
+        q_r2c.join_thread()
         _safe_destroy_node(node)
         _safe_rclpy_shutdown()
     return 0

@@ -166,13 +166,28 @@ def main() -> int:
         default=Path("config/generated_domain_bridge"),
         help="Directory for generated YAML files",
     )
+    parser.add_argument(
+        "--central-domain",
+        type=int,
+        default=None,
+        help=(
+            "Central ROS domain ID for bridge to_domain/from_domain endpoints. "
+            "When omitted, uses fleet_domain_map.central_domain_id."
+        ),
+    )
     args = parser.parse_args()
 
     domain_map = _load_yaml(args.domain_map).get("fleet_domain_map", {})
     robot_domain_ids = domain_map.get("robot_domain_ids", {})
-    central_domain = domain_map.get("central_domain_id")
+    if args.central_domain is not None:
+        central_domain = args.central_domain
+    else:
+        central_domain = domain_map.get("central_domain_id")
     if not isinstance(central_domain, int):
-        raise SystemExit("fleet_domain_map.central_domain_id must be an integer")
+        raise SystemExit(
+            "Central domain must be an integer: pass --central-domain or set "
+            "fleet_domain_map.central_domain_id in the domain map."
+        )
     if not isinstance(robot_domain_ids, dict):
         raise SystemExit("fleet_domain_map.robot_domain_ids must be a mapping")
 

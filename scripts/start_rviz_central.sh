@@ -19,6 +19,7 @@ WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 GLOBAL_CFG="${WORKSPACE_DIR}/config/rviz/central_global_map.rviz"
 LOCAL_TEMPLATE_CFG="${WORKSPACE_DIR}/config/rviz/central_robot_local_map_template.rviz"
 DOMAIN_MAP_FILE="${WORKSPACE_DIR}/config/fleet_domain_map.yaml"
+DEFAULT_CENTRAL_DOMAIN_ID=244
 
 declare -A ROBOT_DOMAIN_MAP=()
 ROBOT_NAMES=()
@@ -173,7 +174,14 @@ if [[ "$MODE" == "global" ]]; then
     fi
 
     EFFECTIVE_CFG="$GLOBAL_CFG"
-    EFFECTIVE_DOMAIN="${ROS_DOMAIN_ID:-unset}"
+    if [[ -n "${ROS_DOMAIN_ID:-}" ]]; then
+        EFFECTIVE_DOMAIN="${ROS_DOMAIN_ID}"
+        DOMAIN_SOURCE="env(ROS_DOMAIN_ID)"
+    else
+        export ROS_DOMAIN_ID="${DEFAULT_CENTRAL_DOMAIN_ID}"
+        EFFECTIVE_DOMAIN="${ROS_DOMAIN_ID}"
+        DOMAIN_SOURCE="default(${DEFAULT_CENTRAL_DOMAIN_ID})"
+    fi
     EFFECTIVE_MAP_TOPIC="/map"
     EFFECTIVE_ROBOT=""
     EFFECTIVE_FIXED_FRAME="map"
@@ -188,6 +196,7 @@ if [[ "$MODE" == "global" ]]; then
                 if robot_domain="$(get_robot_domain "$EFFECTIVE_ROBOT" || true)" && [[ -n "$robot_domain" ]]; then
                     export ROS_DOMAIN_ID="$robot_domain"
                     EFFECTIVE_DOMAIN="$ROS_DOMAIN_ID"
+                    DOMAIN_SOURCE="auto(single_robot:${EFFECTIVE_ROBOT})"
                     EFFECTIVE_MAP_TOPIC="/${EFFECTIVE_ROBOT}/map"
                     EFFECTIVE_FIXED_FRAME="${EFFECTIVE_ROBOT}/map"
                     EFFECTIVE_CFG="$(mktemp "/tmp/central_rviz_global_single_${EFFECTIVE_ROBOT}_XXXX.rviz")"
@@ -205,6 +214,7 @@ if [[ "$MODE" == "global" ]]; then
         echo "Detected active robots: ${ACTIVE_ROBOTS_RAW:-none/unknown}"
     fi
     echo "Effective ROS_DOMAIN_ID: ${EFFECTIVE_DOMAIN}"
+    echo "Domain source: ${DOMAIN_SOURCE}"
     echo "Fixed frame: ${EFFECTIVE_FIXED_FRAME}, map topic: ${EFFECTIVE_MAP_TOPIC}"
     exec rviz2 -d "$EFFECTIVE_CFG"
 else
@@ -219,14 +229,16 @@ else
         exit 1
     fi
 
-    if [[ "$HAS_DOMAIN_MAP" == true ]]; then
-        robot_domain="$(get_robot_domain "$ROBOT_NAME" || true)"
-        if [[ -z "$robot_domain" ]]; then
-            echo "ERROR: Robot '${ROBOT_NAME}' not found in domain map: $DOMAIN_MAP_FILE" >&2
-            exit 1
-        fi
-        export ROS_DOMAIN_ID="$robot_domain"
+    if [[ "$HAS_DOMAIN_MAP" != true ]]; then
+        echo "ERROR: Domain map is required for --local mode auto-switch: $DOMAIN_MAP_FILE" >&2
+        exit 1
     fi
+    robot_domain="$(get_robot_domain "$ROBOT_NAME" || true)"
+    if [[ -z "$robot_domain" ]]; then
+        echo "ERROR: Robot '${ROBOT_NAME}' not found in domain map: $DOMAIN_MAP_FILE" >&2
+        exit 1
+    fi
+    export ROS_DOMAIN_ID="$robot_domain"
 
     # Warn if the expected map topic is not currently available, but still start RViz.
     if command -v ros2 >/dev/null 2>&1; then
@@ -249,6 +261,7 @@ else
     echo "Starting RViz in LOCAL mode for robot '${ROBOT_NAME}' using:"
     echo "  $TMP_CFG"
     echo "Effective ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-unset}"
+    echo "Domain source: local_robot_map(${ROBOT_NAME})"
     echo "Fixed frame: ${local_fixed_frame}, map topic: /${ROBOT_NAME}/map"
     echo "Costmap overlays: /${ROBOT_NAME}/global_costmap/costmap and /${ROBOT_NAME}/local_costmap/costmap"
     echo ""

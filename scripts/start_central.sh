@@ -15,8 +15,8 @@
 #   - shared_domain mode:
 #       all robots and central use the same ROS_DOMAIN_ID (typically 50)
 #   - bridged_domains mode:
-#       central uses fleet_domain_map central_domain_id, robots use
-#       robot-specific domain IDs, and domain_bridge is installed.
+#       central uses ROS_DOMAIN_ID you set (or default 244); robots use
+#       fleet_domain_map robot_domain_ids; domain_bridge connects them.
 #   - Each robot is powered on and running:
 #       * bringup       (robot.launch.py)
 #       * SLAM + Nav2   (navigation2_slam.launch.py fleet_mode:=True with this script)
@@ -77,7 +77,10 @@ if [[ ! -f "$MAP_MERGE_CONFIG_FILE" ]]; then
     exit 1
 fi
 
+DEFAULT_CENTRAL_DOMAIN_ID=244
 COMMS_MODE="${CENTRAL_COMMS_MODE:-shared_domain}"
+USER_DOMAIN_ARG=""
+DOMAIN_SOURCE=""
 SELECTION=""
 declare -A LETTER_TO_ROBOT=(
     [b]="blinky"
@@ -110,19 +113,28 @@ while (($# > 0)); do
             fi
             COMMS_MODE="$1"
             ;;
+        --domain-id)
+            shift
+            if (($# == 0)); then
+                echo "ERROR: --domain-id requires an integer value."
+                exit 1
+            fi
+            USER_DOMAIN_ARG="$1"
+            ;;
         -[bpic]*)
             SELECTION="${1#-}"
             ;;
         -h|--help)
             cat <<'EOF'
 Usage:
-  ./scripts/start_central.sh [robot_filter] [--comms-mode <shared_domain|bridged_domains>]
+  ./scripts/start_central.sh [robot_filter] [--comms-mode <shared_domain|bridged_domains>] [--domain-id <id>]
 
 Examples:
   ./scripts/start_central.sh
   ./scripts/start_central.sh -pi
+  ./scripts/start_central.sh --domain-id 244
   ./scripts/start_central.sh --comms-mode bridged_domains
-  ./scripts/start_central.sh -b --comms-mode bridged_domains
+  ./scripts/start_central.sh -b --comms-mode bridged_domains --domain-id 244
 EOF
             exit 0
             ;;
@@ -138,10 +150,24 @@ if [[ "$COMMS_MODE" != "shared_domain" && "$COMMS_MODE" != "bridged_domains" ]];
     echo "ERROR: invalid --comms-mode '$COMMS_MODE' (use shared_domain|bridged_domains)"
     exit 1
 fi
+if [[ -n "$USER_DOMAIN_ARG" && ! "$USER_DOMAIN_ARG" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: invalid --domain-id '$USER_DOMAIN_ARG' (must be integer)."
+    exit 1
+fi
 parse_selection_letters "$SELECTION"
 
-if [[ "$COMMS_MODE" == "shared_domain" ]]; then
-    export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-50}
+# Domain precedence (both comms modes):
+#   1) --domain-id
+#   2) existing ROS_DOMAIN_ID in shell
+#   3) default central domain (244)
+if [[ -n "$USER_DOMAIN_ARG" ]]; then
+    export ROS_DOMAIN_ID="$USER_DOMAIN_ARG"
+    DOMAIN_SOURCE="cli(--domain-id)"
+elif [[ -n "${ROS_DOMAIN_ID:-}" ]]; then
+    DOMAIN_SOURCE="env(ROS_DOMAIN_ID)"
+else
+    export ROS_DOMAIN_ID="${DEFAULT_CENTRAL_DOMAIN_ID}"
+    DOMAIN_SOURCE="default(${DEFAULT_CENTRAL_DOMAIN_ID})"
 fi
 
 echo "=========================================="
@@ -153,22 +179,14 @@ if [[ "$COMMS_MODE" == "shared_domain" ]]; then
     echo "  ROS_DOMAIN_ID   = $ROS_DOMAIN_ID"
 else
     echo "  Comms mode      = bridged_domains"
-    if [[ -f "$DOMAIN_MAP_FILE" ]]; then
-        central_domain_from_map="$(python3 - <<'PY' "$DOMAIN_MAP_FILE"
-import sys, yaml
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    data = yaml.safe_load(f) or {}
-print(data.get("fleet_domain_map", {}).get("central_domain_id", "unset"))
-PY
-)"
-        export ROS_DOMAIN_ID="${central_domain_from_map}"
-        echo "  ROS_DOMAIN_ID   = ${ROS_DOMAIN_ID} (from fleet_domain_map)"
-        echo "  Domain map      = ${DOMAIN_MAP_FILE}"
-    else
+    if [[ ! -f "$DOMAIN_MAP_FILE" ]]; then
         echo "ERROR: missing domain map file for bridged mode: ${DOMAIN_MAP_FILE}"
         exit 1
     fi
+    echo "  ROS_DOMAIN_ID   = ${ROS_DOMAIN_ID}"
+    echo "  Domain map      = ${DOMAIN_MAP_FILE}"
 fi
+echo "  Domain source   = ${DOMAIN_SOURCE}"
 if [[ -n "$SELECTION" ]]; then
     echo "  Robot filter    = -$SELECTION  (b=blinky, p=pinky, i=inky, c=clyde)"
 else
@@ -340,7 +358,8 @@ else
     echo "Selecting robots from domain map (bridged mode)..."
 fi
 
-CENTRAL_DISCOVERY_TIMEOUT_SEC="${CENTRAL_DISCOVERY_TIMEOUT_SEC:-5}"
+# Cross-domain DDS discovery from the central PC often needs >5s on Wi‑Fi.
+CENTRAL_DISCOVERY_TIMEOUT_SEC="${CENTRAL_DISCOVERY_TIMEOUT_SEC:-25}"
 CENTRAL_DISCOVERY_POLL_SEC="${CENTRAL_DISCOVERY_POLL_SEC:-1}"
 CENTRAL_MIN_ROBOTS_DEFAULT="${CENTRAL_MIN_ROBOTS_DEFAULT:-2}"
 if ! [[ "$CENTRAL_DISCOVERY_TIMEOUT_SEC" =~ ^[0-9]+$ ]]; then
@@ -438,7 +457,9 @@ PY
             local domain="${entry##*:}"
             local topics_raw
             topics_raw="$(ROS_DOMAIN_ID="$domain" ros2 topic list 2>/dev/null || true)"
-            if echo "$topics_raw" | grep -Eq "^/${name}/(tf|map)$"; then
+            # tf/map are canonical; map_wire_z is the fleet bridge side channel and
+            # appears as soon as SLAM+map_wire republisher are up on the robot.
+            if echo "$topics_raw" | grep -Eq "^/${name}/(tf|map|map_wire_z)$"; then
                 active+=("$name")
             fi
         done
@@ -457,9 +478,9 @@ PY
         fi
         if (( elapsed == 0 )); then
             if [[ -n "$selection_letters" ]]; then
-                echo "Waiting up to ${timeout_sec}s for selected bridged robots (-${selection_letters}) to publish /<robot>/(tf|map)..." >&2
+                echo "Waiting up to ${timeout_sec}s for selected bridged robots (-${selection_letters}) to publish /<robot>/(tf|map|map_wire_z)..." >&2
             else
-                echo "Waiting up to ${timeout_sec}s for bridged robots to publish /<robot>/(tf|map)..." >&2
+                echo "Waiting up to ${timeout_sec}s for bridged robots to publish /<robot>/(tf|map|map_wire_z)..." >&2
             fi
         fi
         sleep "$poll_sec"
@@ -517,6 +538,16 @@ fi
 if ((${#DETECTED_ROBOTS[@]} == 0)); then
     echo "ERROR: Could not detect any robot namespaces from topics."
     echo "Make sure at least one robot is running its namespaced bringup + Nav2/SLAM."
+    if [[ "$COMMS_MODE" == "bridged_domains" ]]; then
+        echo ""
+        echo "Bridged mode: the central PC runs \`ros2 topic list\` on each robot's ROS_DOMAIN_ID"
+        echo "from ${DOMAIN_MAP_FILE} and looks for /<robot>/(tf|map|map_wire_z)."
+        echo "If robots are up but this fails, DDS on the central machine cannot see those domains"
+        echo "(Wi‑Fi client isolation, VLANs, firewall, or ROS_LOCALHOST_ONLY=1)."
+        echo "Quick check from central (example pinky on domain 22):"
+        echo "  ROS_DOMAIN_ID=22 ros2 topic list | grep -E '^/pinky/(tf|map|map_wire_z)\$'"
+        echo "Increase wait: CENTRAL_DISCOVERY_TIMEOUT_SEC=60 ./scripts/start_central.sh --comms-mode bridged_domains"
+    fi
     exit 1
 fi
 
@@ -589,12 +620,34 @@ start_domain_bridges() {
         echo "ERROR: bridge config generator missing: $BRIDGE_CONFIG_GENERATOR"
         exit 1
     fi
+
+    # Central domain must not collide with any robot-assigned domain in the map.
+    collision_robot="$(
+        python3 - <<'PY' "$DOMAIN_MAP_FILE" "$ROS_DOMAIN_ID"
+import sys, yaml
+domain_map_path, central_domain = sys.argv[1], int(sys.argv[2])
+with open(domain_map_path, "r", encoding="utf-8") as f:
+    data = yaml.safe_load(f) or {}
+robot_map = data.get("fleet_domain_map", {}).get("robot_domain_ids", {}) or {}
+for name, dom in robot_map.items():
+    if int(dom) == central_domain:
+        print(name)
+        break
+PY
+    )"
+    if [[ -n "$collision_robot" ]]; then
+        echo "ERROR: Central ROS_DOMAIN_ID=${ROS_DOMAIN_ID} collides with robot '${collision_robot}' domain."
+        echo "Choose a non-robot domain (or pass --domain-id <id>)."
+        exit 1
+    fi
+
     echo "Generating domain bridge configs..."
     python3 "$BRIDGE_CONFIG_GENERATOR" \
         --domain-map "$DOMAIN_MAP_FILE" \
         --bridge-contract "$BRIDGE_CONTRACT_FILE" \
         --robots "${SELECTED_ROBOTS[@]}" \
-        --output-dir "$GENERATED_BRIDGE_CONFIG_DIR"
+        --output-dir "$GENERATED_BRIDGE_CONFIG_DIR" \
+        --central-domain "$ROS_DOMAIN_ID"
 
     echo "Starting domain_bridge processes..."
     for robot in "${SELECTED_ROBOTS[@]}"; do
