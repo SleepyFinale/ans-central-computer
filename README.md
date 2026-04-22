@@ -244,9 +244,10 @@ When switching between robots, run `source scripts/set_robot_env.sh <robot> [ip]
 This stack supports two comms modes, but **fleet runs must use bridges**.
 
 1) `bridged_domains` (**use this**)
-   - Central uses `fleet_domain_map.central_domain_id` (default `90`).
+   - Central uses `fleet_domain_map.central_domain_id` (default `50` in-repo; override in YAML if needed).
    - Each robot uses a deterministic per-robot domain from `config/fleet_domain_map.yaml`.
    - Central starts per-robot domain bridges and keeps explorer/action behavior unchanged.
+   - With the default Fast DDS port layout, keep **every** `ROS_DOMAIN_ID` you use (central and each robot) **≤ 232** so multicast ports stay valid.
 2) `shared_domain` (legacy compatibility only)
    - All robots and central share one domain (lab default `50`).
    - **Not acceptable** for this project’s multi-robot SLAM workload (timing, discovery, and load artifacts); do not A/B fleet debugging against shared domain.

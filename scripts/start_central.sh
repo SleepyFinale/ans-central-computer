@@ -15,7 +15,7 @@
 #   - shared_domain mode:
 #       all robots and central use the same ROS_DOMAIN_ID (typically 50)
 #   - bridged_domains mode:
-#       central uses ROS_DOMAIN_ID you set (or default 244); robots use
+#       central uses ROS_DOMAIN_ID you set (or fleet_domain_map.central_domain_id); robots use
 #       fleet_domain_map robot_domain_ids; domain_bridge connects them.
 #   - Each robot is powered on and running:
 #       * bringup       (robot.launch.py)
@@ -23,8 +23,10 @@
 #   - Central PC and robots are on the same WiFi network
 #
 # Usage:
-#   export ROS_DOMAIN_ID=50
+#   Default comms mode is bridged_domains (override: --comms-mode shared_domain or CENTRAL_COMMS_MODE).
+#   export ROS_DOMAIN_ID=64    # optional; default is fleet_domain_map.central_domain_id when unset
 #   ./scripts/start_central.sh
+#   ./scripts/start_central.sh --comms-mode shared_domain   # legacy single-domain fleet
 #   ./scripts/start_central.sh -b      # only Blinky
 #   ./scripts/start_central.sh -pi     # only Pinky + Inky
 #   ./scripts/start_central.sh -bpic   # Blinky, Pinky, Inky, Clyde (subset must appear on the graph)
@@ -77,8 +79,20 @@ if [[ ! -f "$MAP_MERGE_CONFIG_FILE" ]]; then
     exit 1
 fi
 
-DEFAULT_CENTRAL_DOMAIN_ID=244
-COMMS_MODE="${CENTRAL_COMMS_MODE:-shared_domain}"
+DEFAULT_CENTRAL_DOMAIN_ID="$(
+    python3 - <<'PY' "$DOMAIN_MAP_FILE"
+import sys, yaml
+path, fallback = sys.argv[1], 50
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    cid = data.get("fleet_domain_map", {}).get("central_domain_id")
+    print(int(cid) if cid is not None else fallback)
+except Exception:
+    print(fallback)
+PY
+)"
+COMMS_MODE="${CENTRAL_COMMS_MODE:-bridged_domains}"
 USER_DOMAIN_ARG=""
 DOMAIN_SOURCE=""
 SELECTION=""
@@ -132,9 +146,9 @@ Usage:
 Examples:
   ./scripts/start_central.sh
   ./scripts/start_central.sh -pi
-  ./scripts/start_central.sh --domain-id 244
+  ./scripts/start_central.sh --domain-id 64
   ./scripts/start_central.sh --comms-mode bridged_domains
-  ./scripts/start_central.sh -b --comms-mode bridged_domains --domain-id 244
+  ./scripts/start_central.sh -b --comms-mode bridged_domains --domain-id 64
 EOF
             exit 0
             ;;
@@ -159,7 +173,7 @@ parse_selection_letters "$SELECTION"
 # Domain precedence (both comms modes):
 #   1) --domain-id
 #   2) existing ROS_DOMAIN_ID in shell
-#   3) default central domain (244)
+#   3) default central domain (fleet_domain_map.central_domain_id, else 50)
 if [[ -n "$USER_DOMAIN_ARG" ]]; then
     export ROS_DOMAIN_ID="$USER_DOMAIN_ARG"
     DOMAIN_SOURCE="cli(--domain-id)"

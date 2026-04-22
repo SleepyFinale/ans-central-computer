@@ -19,7 +19,19 @@ WORKSPACE_DIR="$(dirname "$SCRIPT_DIR")"
 GLOBAL_CFG="${WORKSPACE_DIR}/config/rviz/central_global_map.rviz"
 LOCAL_TEMPLATE_CFG="${WORKSPACE_DIR}/config/rviz/central_robot_local_map_template.rviz"
 DOMAIN_MAP_FILE="${WORKSPACE_DIR}/config/fleet_domain_map.yaml"
-DEFAULT_CENTRAL_DOMAIN_ID=244
+DEFAULT_CENTRAL_DOMAIN_ID="$(
+    python3 - <<'PY' "$DOMAIN_MAP_FILE"
+import sys, yaml
+path, fallback = sys.argv[1], 50
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    cid = data.get("fleet_domain_map", {}).get("central_domain_id")
+    print(int(cid) if cid is not None else fallback)
+except Exception:
+    print(fallback)
+PY
+)"
 
 declare -A ROBOT_DOMAIN_MAP=()
 ROBOT_NAMES=()
