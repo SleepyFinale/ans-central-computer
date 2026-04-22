@@ -1,0 +1,363 @@
+# Multi-robot frontier explorer parameters
+# Runs on the central computer alongside map_merge and multi-robot SLAM.
+# Detects frontiers on the merged global map and assigns waypoints to
+# each robot's Nav2 instance.
+
+multi_robot_explorer:
+  ros__parameters:
+    # Robot names (must match Nav2 namespaces and TF frame prefixes).
+    # List every robot that appears idle on TF; the planner assigns frontiers
+    # fairly in this order, with priority rotating to whoever last finished a
+    # goal. Robots not actually running Nav2 still consume frontiers unless
+    # you remove them from this list (or run one explorer per active robot).
+    robot_names: ['blinky', 'pinky', 'inky', 'clyde']
+
+    # Merged map topic (from map_merge) used during global exploration.
+    map_topic: map
+
+    # TF world frame (must match map_merge world_frame)
+    world_frame: map
+
+    # Path 2 (local Nav2 maps): transform NavigateToPose / compute_path_to_pose
+    # goals from world_frame into each robot's map frame (nav_goal_frame_pattern).
+    dispatch_nav_goals_in_robot_map_frame: true
+    nav_goal_frame_pattern: "{robot}/map"
+    nav_goal_tf_transform_timeout_sec: 0.5
+
+    # Explorer mode:
+    #   - auto        : start with per-robot local maps, switch to global
+    #                   merged map when map_merge reports MERGED.
+    #   - local_only  : always use per-robot local maps.
+    #   - global_only : always use the merged global map (legacy behaviour).
+    mode: auto
+
+    # Topic on which a helper node can publish a simple merge state string
+    # (NO_OVERLAP, PARTIAL, MERGED). In auto mode this controls when the
+    # explorer switches from local to global exploration.
+    merge_state_topic: map_merge/merge_state
+    # Merge-state hysteresis (auto mode):
+    # - switch to global only after MERGED is stable for this long
+    # - fall back to local after non-MERGED persists for this long
+    # This avoids global-planning thrash when map_merge briefly reports MERGED
+    # during weak/unstable feature matches.
+    merge_stable_hold_sec: 20.0
+    # Longer grace when map_merge/monitor briefly reports PARTIAL so we do not
+    # thrash global vs local exploration on TF jitter (see map_merge_state_monitor).
+    merge_degrade_grace_sec: 8.0
+
+    # Pattern for per-robot local map topics, filled with each robot name.
+    # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
+    local_map_topic_pattern: "/{robot}/map"
+    # Bridge contract: disable per-robot local-map subscriptions only when
+    # central runs strict global-only planning to cut DDS traffic.
+    local_map_subscriptions_enable: true
+
+    # How often to replan (Hz). Lower = less CPU, higher = more responsive.
+    # Matches m-explore-ros2's planner_frequency semantics.
+    # Slightly below 1.0 Hz eases central load once merge/pose health is stable.
+    explore_frequency: 0.70
+
+    # Call /<robot>/compute_path_to_pose (same Nav2 planner + global costmap as
+    # navigation) before each NavigateToPose. Failed or empty plans skip the
+    # goal so the explorer picks another frontier.
+    nav2_path_precheck_enable: true
+    # If true, never dispatch NavigateToPose when precheck server is unavailable.
+    # Explorer defers assignment and retries instead of bypassing planner precheck.
+    nav2_path_precheck_required: true
+    # Wait duration (s) for compute_path_to_pose server readiness before defer.
+    # Longer waits reduce false skips while Nav2 lifecycle / planner warms up (fleet Pi load).
+    nav2_path_precheck_server_wait_sec: 3.0
+    # Domain bridge + WiFi: compute_path_to_pose round-trip can exceed a few
+    # seconds; 8s caused frequent false timeouts while Nav2 was still planning.
+    nav2_path_precheck_timeout_sec: 30.0
+    nav2_path_min_poses: 2
+    # If ABORTED precheck returns no explicit error detail, escalate to
+    # blacklist after this many repeats for the same goal.
+    nav2_path_precheck_transient_abort_repeat_limit: 5
+    # Parse planner-server rosout "failed to generate a valid path to (x, y)"
+    # and treat matching precheck ABORTED goals as hard failures.
+    nav2_path_precheck_use_rosout_no_path_hint: true
+    nav2_path_precheck_rosout_no_path_window_sec: 6.0
+    nav2_path_precheck_rosout_goal_match_tol_m: 0.30
+    nav2_path_precheck_rosout_immediate_blacklist: false
+    nav2_path_precheck_use_planner_lifecycle_hint: true
+    nav2_path_precheck_planner_state_stale_sec: 8.0
+    nav2_path_precheck_abort_active_planner_is_hard_fail: false
+    # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
+    nav2_path_precheck_planner_id: "GridBased"
+
+    # Near-goal arrival probe: after the robot is close to the goal (or stuck
+    # short of it with low distance_remaining), call compute_path_to_pose with
+    # use_start=true from the current TF pose, then score that path on the
+    # merged/local OccupancyGrid (length vs straight line + high-cost cell
+    # fraction). If the probe fails, cancel NavigateToPose, blacklist the goal,
+    # and pick a new frontier. Skipped for return-home goals (homing_active).
+    goal_arrival_probe_enable: true
+    # Map-frame distance to goal: above tacit_goal_success_radius_m, up to this.
+    goal_arrival_probe_max_pose_dist_m: 1.0
+    # With Nav2 distance_remaining above this, stagnation probe is not triggered.
+    goal_arrival_probe_max_distance_remaining_m: 0.35
+    # No distance progress (last_progress_time) for this long triggers stagnation probe.
+    goal_arrival_probe_stagnation_sec: 3.0
+    # Bridged domains / Wi‑Fi: feedback can lag; 3s false-triggered probe timeouts.
+    goal_arrival_probe_timeout_sec: 10.0
+    # Run probe before tacit "at goal" cancel/success when gate conditions hold.
+    goal_arrival_probe_before_tacit_success: true
+    # Reject if planned path length / Euclidean(straight line) exceeds this.
+    goal_arrival_path_max_length_ratio: 2.5
+    # OccupancyGrid cell value: samples at or above this count as "bad" for fraction.
+    goal_arrival_max_cell_cost: 80
+    # Reject if this fraction of samples along the path are >= goal_arrival_max_cell_cost.
+    goal_arrival_max_bad_fraction: 0.35
+    # Sample step = map_resolution * this (metres), with a small floor.
+    goal_arrival_sample_step_scale: 0.5
+    # Debounced Bool from robot nav2_controller_collision_watch (controller_server
+    # "collision ahead" via /rosout). When true, arrival probe runs sooner.
+    nav2_collision_ahead_topic_pattern: "/{robot}/nav2_collision_ahead"
+    goal_arrival_probe_use_collision_ahead: true
+    # Minimum time in tacit zone before pre-tacit arrival probe when collision ahead.
+    goal_arrival_collision_tacit_hold_sec: 0.15
+    # Stagnation time before arrival probe when collision ahead (vs goal_arrival_probe_stagnation_sec).
+    goal_arrival_probe_stagnation_sec_collision: 0.5
+
+    # After abort, reject, watchdog cancel, or other failure paths, wait this
+    # many seconds before assigning a new frontier (per robot).
+    post_failure_cooldown_sec: 5.0
+    # Ignore initial action-goal rejects during Nav2 warm-up for this long
+    # after NavigateToPose action server first appears.
+    goal_reject_warmup_sec: 30.0
+    # Robot-side helper topic (from turtlebot3_navigation2/nav2_lethal_watch.py):
+    # when true, the robot is currently in a lethal Nav2 costmap cell.
+    nav2_lethal_topic_pattern: "/{robot}/nav2_lethal_inflation"
+    # Robot-side retrace helper topic; true while robot is executing a reverse
+    # memory retreat to escape lethal/stall.
+    nav2_retrace_topic_pattern: "/{robot}/nav2_retrace_active"
+    # While lethal is active, hold the current goal, skip watchdog cancel-driven
+    # blacklisting, and resend the held goal once lethal clears.
+    lethal_hold_enabled: true
+    skip_blacklist_on_nav2_lethal: true
+    # Safety valve so a stale lethal signal cannot suppress watchdog forever.
+    lethal_hold_max_sec: 30.0
+    # Delay before resending held goal after lethal clears.
+    lethal_retry_delay_sec: 0.5
+    # Hold/resume behavior while robot-side retrace is active.
+    retrace_hold_enabled: true
+    retrace_hold_max_sec: 30.0
+
+    # Minimum frontier size (metres) to consider. Filters tiny frontiers
+    # that aren't worth navigating to.
+    min_frontier_size: 0.15
+
+    # Do not assign NavigateToPose goals to clusters smaller than this many
+    # frontier cells. Tiny slivers (often along walls) produce goals that
+    # Nav2 plans to but the local controller cannot follow ("Failed to make
+    # progress"). Set to 0 to disable. 18-cell slivers are typical failures.
+    min_frontier_cells_for_goal: 8
+
+    # When Nav2 reports success but the last feedback still shows a non-trivial
+    # distance_remaining, the explorer can optionally treat this as a
+    # suspicious success (likely abort / early convergence) and blacklist the
+    # goal. This threshold controls how large that remaining distance must be
+    # to be considered suspicious once the map has grown beyond the initial
+    # tiny phase (strictly greater than this value).
+    # Default matches Nav2 xy_goal_tolerance on TurtleBot3 (0.25 m). If your
+    # controller routinely reports SUCCEEDED with distance_remaining above
+    # that (e.g. ~0.32 m on merged maps), bump this slightly so those legs are
+    # not classified as suspicious.
+    suspicious_success_distance: 0.40
+    # Nav2 SUCCEEDED with distance_remaining at or below this: accept success
+    # even when bridged map TF shows little leg progress (~0.2 m remaining vs
+    # motion_progress was a common false negative on Clyde).
+    trust_nav2_terminal_distance_remaining_m: 0.36
+
+    # For very small maps (both width and height below this size in metres),
+    # the suspicious-success heuristic is disabled and such goals are accepted
+    # as successes to allow the map to grow without prematurely blacklisting
+    # useful nearby frontiers.
+    strict_success_min_map_size: 3.0
+
+    # Explorer treats the leg as done if map TF is within this (m) of the goal,
+    # OR Nav2 distance_remaining ≤ tacit_abort_max_distance_remaining_m while map
+    # pose is within (this + that) metres of the goal (prevents stale remain=0).
+    tacit_goal_success_radius_m: 0.15
+    # Tacit success from distance_remaining only if pose is within
+    # tacit_goal_success_radius_m + this (m) of the goal.
+    tacit_abort_max_distance_remaining_m: 0.15
+    # While Nav2 still has an active goal: if pose/feedback say "at goal" for
+    # this long, cancel Nav2 and count success (main fix when SUCCEEDED never
+    # arrives). Set 0 to disable.
+    tacit_goal_success_hold_sec: 1.0
+    # If NavigateToPose ends as CANCELED for a non-admin reason and the robot
+    # is still far from goal, blacklist the goal so exploration does not
+    # repeatedly retry doomed targets.
+    blacklist_on_canceled_when_far: true
+    canceled_blacklist_min_goal_dist_m: 0.30
+
+    # Cost function weights (same semantics as explore_lite):
+    #   cost = potential_scale * distance - gain_scale * frontier_size
+    # Higher potential_scale  = prefer closer frontiers
+    # Higher gain_scale       = prefer larger frontiers
+    potential_scale: 2.0
+    gain_scale: 1.0
+
+    # Stall watchdog: cancellation is based on physical TF pose stagnation.
+    # If a robot has an active goal and is not near goal, it is canceled only
+    # after progress_timeout seconds without meaningful physical movement.
+    # Keep this above Nav2 controller movement_time_allowance (5s in burger.yaml)
+    # so the explorer does not preempt DWB while Nav2 still considers the goal active.
+    progress_timeout: 18.0
+    progress_min_delta: 0.05
+    # Minimum TF pose displacement (m) to count as robot movement.
+    motion_progress_min_delta_m: 0.03
+    # How recent motion must be (s) to suppress stall cancellation.
+    motion_progress_window_sec: 2.0
+    # If no fresh TF pose update for longer than this, robot pose is treated as
+    # unavailable for assignment/stall logic to avoid stale-pose decisions.
+    # map_merge world TF can be sparse; stay above typical inter-publish gaps.
+    # map_merge + SLAM stamps often skew ~4–5 s under Pi load; hold below that
+    # spuriously trips degraded mode and starves assignment.
+    tf_stale_timeout_sec: 6.5
+    # Degraded-data hold: when TF or Nav2 precheck are clearly unhealthy, pause
+    # new assignments and avoid treating failures as map/frontier issues.
+    degraded_hold_enabled: true
+    # Enter degraded hold if TF has been stale for at least this long (s).
+    degraded_tf_hold_sec: 2.0
+    # Enter degraded hold after this many precheck failures/unavailable events
+    # within degraded_precheck_window_sec.
+    degraded_precheck_fail_threshold: 3
+    # Rolling window (s) for counting precheck failures/unavailable events.
+    degraded_precheck_window_sec: 10.0
+    # Require this many seconds of healthy signals before clearing degraded hold.
+    degraded_recovery_stable_sec: 5.0
+
+    # Distance (m) at which a frontier near another robot's active goal
+    # gets a penalty (discourages sending robots to the same area).
+    nearby_penalty_dist: 2.0
+
+    # Blacklist radius (m): goals whose centroids fall within this distance
+    # of a blacklisted point will be skipped for that robot.
+    # Slightly smaller radius reduces cross-robot centroid blacklist overlap / livelock.
+    blacklist_radius: 0.20
+
+    # When a robot successfully reaches a goal, blacklist points within this
+    # distance (m) of the success pose are removed. Revives spurious
+    # failure-payload blacklists; runs before post_success_frontier_avoidance.
+    blacklist_clear_radius: 0.5
+
+    # If true, after a successful *exploration* (non-return-home) leg, the
+    # just-assigned frontier centroid is blacklisted so a new map tick does
+    # not immediately re-send the same target while the grid is unchanged.
+    post_success_frontier_avoidance: false
+
+    # Safety net: if the planner selects a goal within this many metres of the
+    # previous one this many times in a row, blacklist and pick elsewhere.
+    # Set repeat_goal_count_limit: 0 to disable this backstop, or
+    # repeat_goal_dist_threshold: 0.0 to disable the distance test only.
+    repeat_goal_dist_threshold: 0.3
+    repeat_goal_count_limit: 5
+
+    # Publish frontier markers on /explore/frontiers for RViz
+    visualize: true
+
+    # Goal selection strategy within each frontier region:
+    #   - centroid: centroid of the frontier; if the robot is already very
+    #     close to that centroid, the node picks a cell farther into the
+    #     frontier but only within centroid_fallback_max_offset_from_centroid_m
+    #     (avoids both instant Nav2 success and map-wide ping-pong).
+    #   - farthest_cell: farthest frontier cell from the robot (optional).
+    goal_point_strategy: centroid
+    # If distance(robot, centroid) is below this, pick a deeper cell (bounded
+    # by centroid_fallback_max_offset_from_centroid_m) instead of the centroid.
+    centroid_fallback_if_robot_closer_than_m: 0.55
+    centroid_fallback_max_offset_from_centroid_m: 2.5
+
+    # Minimum desired distance from robot to goal (metres). When using the
+    # farthest_cell strategy, the explorer prefers frontier cells at or
+    # beyond this distance, but will fall back to the farthest available
+    # cell if the region is smaller than this.
+    min_goal_distance: 0.6
+
+    # Clearance shaping for candidate goals:
+    # - goal_clearance_radius_m: desired minimum wall/obstacle clearance.
+    # - goal_clearance_weight: penalty weight when a candidate sits inside the
+    #   clearance radius from occupied map cells.
+    # Prefer frontier cells deeper in known free space: when > 0, subtract this
+    # many metres from the selection score per unknown 4-neighbour of the cell
+    # (see multi_robot_explorer._pick_frontier_cell_farthest_from_robot). Reduces
+    # goals hugging the unknown band; 0.0 disables (legacy behaviour).
+    goal_unknown_neighbor_penalty_m: 0.10
+
+    # Hard safety gate:
+    # - goal_max_cell_cost: reject candidate goal cells at/above this map cost.
+    # - goal_min_clearance_gate_m: reject candidates with less obstacle
+    #   clearance than this threshold.
+    goal_clearance_radius_m: 0.42
+    goal_clearance_weight: 3.5
+    goal_max_cell_cost: 80
+    goal_min_clearance_gate_m: 0.15
+    # Re-check goal safety immediately before NavigateToPose dispatch.
+    goal_revalidate_before_send: true
+
+    # Adaptive mid-route retargeting:
+    # - When enabled, active goals can be cancelled and reassigned before
+    #   completion if the current target becomes risky (near obstacles) or
+    #   stale (limited progress).
+    retarget_enable: true
+    # Align with multi_robot_explorer.py defaults (12.0): fewer mid-route cancel cycles.
+    retarget_cooldown_sec: 12.0
+    retarget_min_goal_shift_m: 0.25
+    retarget_min_utility_gain: 0.2
+    retarget_stagnation_sec: 15.0
+    retarget_clearance_threshold_m: 0.40
+    # While the robot is advancing on the current goal, preempt for a new goal
+    # only if frontier utility improves by at least this much (explore more
+    # unknown area). Does not blacklist the old goal.
+    retarget_opportunity_enable: false
+    # Raised above node default (1.2) to reduce opportunistic Nav2 preemption.
+    retarget_opportunity_min_utility_gain: 1.8
+    # Retargets may only pick goal poses within this distance (m) of the first
+    # goal of the current leg (stops ping-pong between distant frontiers).
+    # Set to 0 to allow retargets anywhere on the map.
+    retarget_max_offset_from_anchor_m: 0.5
+    # Goal replacement gate to avoid frequent Nav2 preemption (node default: 4.0).
+    min_goal_replan_interval_s: 8.0
+    min_goal_change_dist_m: 0.30
+    min_progress_before_replan_m: 0.08
+    max_stuck_time_s: 12.0
+    allow_replan_when_no_progress: true
+
+    # Minimum separation between the robot and a candidate goal (metres).
+    # Uses the actual goal pose (centroid or bounded fallback). If no frontier
+    # passes this check (e.g. robot just reached a goal on that frontier), the
+    # planner retries with separation 0 so exploration continues; repeat-goal
+    # blacklisting still limits useless resends.
+    min_goal_separation: 0.15
+
+    # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
+    # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose
+    # as a compatibility fallback.
+    #
+    # In the standard single-domain, namespaced multi-robot workflow started via
+    # scripts/start_central.sh, this flag is overridden to "false" so the
+    # explorer *only* drives robots through Nav2's NavigateToPose action
+    # servers. To temporarily re-enable the topic-based fallback in that
+    # workflow, set EXPLORER_USE_GOAL_POSE_FALLBACK=true before running
+    # start_central.sh.
+    use_pose_goal_fallback: false
+
+    # Seconds to wait for /<robot>/navigate_to_pose when sending each goal.
+    # Cross-domain bridges need more than ~200 ms for the first ready match.
+    navigate_to_pose_server_wait_sec: 5.0
+
+    robot_base_frame: base_footprint
+
+    # After exploration_complete (no frontiers), send each idle robot to its
+    # recorded start pose in map frame (first TF after maps are available).
+    return_to_start_enable: true
+    return_to_start_skip_if_within_m: 0.25
+    return_to_start_max_attempts: 5
+
+    # Multi-robot status publishing and pause/resume control, analogous to
+    # explore/status and explore/resume in m-explore-ros2.
+    status_topic: explore_multi/status
+    control_topic: explore_multi/resume

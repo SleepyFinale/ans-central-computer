@@ -47,7 +47,7 @@ namespace combine_grids
 namespace internal
 {
 nav_msgs::msg::OccupancyGrid::SharedPtr GridCompositor::compose(
-    const std::vector<cv::Mat>& grids, const std::vector<cv::Rect>& rois)
+  const std::vector<cv::Mat> & grids, const std::vector<cv::Rect> & rois)
 {
   rcpputils::require_true(grids.size() == rois.size());
 
@@ -57,7 +57,7 @@ nav_msgs::msg::OccupancyGrid::SharedPtr GridCompositor::compose(
   corners.reserve(grids.size());
   std::vector<cv::Size> sizes;
   sizes.reserve(grids.size());
-  for (auto& roi : rois) {
+  for (auto & roi : rois) {
     corners.push_back(roi.tl());
     sizes.push_back(roi.size());
   }
@@ -75,7 +75,7 @@ nav_msgs::msg::OccupancyGrid::SharedPtr GridCompositor::compose(
     cv::Mat result_roi(result, roi);
     // reinterpret warped matrix as signed
     // we will not change this matrix, but opencv does not support const matrices
-    cv::Mat warped_signed (grids[i].size(), CV_8S, const_cast<uchar*>(grids[i].ptr()));
+    cv::Mat warped_signed(grids[i].size(), CV_8S, const_cast<uchar *>(grids[i].ptr()));
     // compose img into result matrix
     cv::max(result_roi, warped_signed, result_roi);
   }

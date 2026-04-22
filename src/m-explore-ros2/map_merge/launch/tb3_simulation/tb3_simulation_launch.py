@@ -35,7 +35,7 @@ def generate_launch_description():
     bringup_dir = get_package_share_directory("nav2_bringup")
     launch_dir = os.path.join(bringup_dir, "launch")
 
-    # Get the launch directory for multirobot_map_merge where we have a modified bringup launch file
+    # multirobot_map_merge launch dir (modified bringup for this package)
     map_merge_dir = get_package_share_directory("multirobot_map_merge")
     launch_dir_map_merge = os.path.join(map_merge_dir, "launch", "tb3_simulation")
 

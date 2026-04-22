@@ -49,79 +49,129 @@
 #include <map_msgs/msg/occupancy_grid_update.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <tf2_ros/transform_broadcaster.h>
 
 #include <boost/thread.hpp>
 
 namespace map_merge
 {
-struct MapSubscription {
-  // protects consistency of writable_map and readonly_map
-  // also protects reads and writes of shared_ptrs
-  std::mutex mutex;
+  struct MapSubscription
+  {
+    // protects consistency of writable_map and readonly_map
+    // also protects reads and writes of shared_ptrs
+    std::mutex mutex;
 
-  geometry_msgs::msg::Transform initial_pose;
-  nav_msgs::msg::OccupancyGrid::SharedPtr writable_map;
-  nav_msgs::msg::OccupancyGrid::ConstSharedPtr readonly_map;
+    geometry_msgs::msg::Transform initial_pose;
+    nav_msgs::msg::OccupancyGrid::SharedPtr writable_map;
+    nav_msgs::msg::OccupancyGrid::ConstSharedPtr readonly_map;
 
-  // ros::Subscriber map_sub;
-  // ros::Subscriber map_updates_sub;
-  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub;
-  rclcpp::Subscription<map_msgs::msg::OccupancyGridUpdate>::SharedPtr map_updates_sub;
-};
+    // ros::Subscriber map_sub;
+    // ros::Subscriber map_updates_sub;
+    rclcpp::Subscription < nav_msgs::msg::OccupancyGrid > ::SharedPtr map_sub;
+    rclcpp::Subscription < map_msgs::msg::OccupancyGridUpdate > ::SharedPtr map_updates_sub;
+  };
 
-class MapMerge : public rclcpp::Node
-{
+  class MapMerge: public rclcpp::Node
+  {
 private:
-  /* parameters */
-  double merging_rate_;
-  double discovery_rate_;
-  double estimation_rate_;
-  double confidence_threshold_;
-  std::string robot_map_topic_;
-  std::string robot_map_updates_topic_;
-  std::string robot_namespace_;
-  std::string world_frame_;
-  bool have_initial_poses_;
+    /* parameters */
+    double merging_rate_;
+    double discovery_rate_;
+    double estimation_rate_;
+    double confidence_threshold_;
+    std::string robot_map_topic_;
+    std::string robot_map_updates_topic_;
+    std::string robot_namespace_;
+    std::string world_frame_;
+    bool have_initial_poses_;
+    bool publish_tf_;
+    /** When true (unknown poses), publish identity map-><robot>/map until pose estimates are valid so tf2 has a ``map`` frame for Nav2. */
+    bool publish_provisional_tf_ {true};
+    /** Publish std_msgs/String on ``robot_tf_estimate_health`` (robot:0|1 per robot) for merge gating. */
+    bool publish_robot_tf_health_ {true};
+    /** Origin margin in meters; adds padding so map bounds extend beyond (0,0) to avoid Nav2 "sensor out of map bounds" (e.g. 0.05). */
+    double origin_margin_;
 
-  // publishing
-  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr merged_map_publisher_;
-  // maps robots namespaces to maps. does not own
-  std::unordered_map<std::string, MapSubscription*> robots_;
-  // owns maps -- iterator safe
-  std::forward_list<MapSubscription> subscriptions_;
-  size_t subscriptions_size_;
-  boost::shared_mutex subscriptions_mutex_;
-  combine_grids::MergingPipeline pipeline_;
-  std::mutex pipeline_mutex_;
+    // publishing
+    rclcpp::Publisher < nav_msgs::msg::OccupancyGrid > ::SharedPtr merged_map_publisher_;
+    rclcpp::Publisher < std_msgs::msg::String > ::SharedPtr robot_tf_health_pub_;
+    std::unique_ptr < tf2_ros::TransformBroadcaster > tf_broadcaster_;
+    // maps robots namespaces to maps. does not own
+    std::unordered_map < std::string, MapSubscription * > robots_;
+    // owns maps -- iterator safe
+    std::forward_list < MapSubscription > subscriptions_;
+    size_t subscriptions_size_;
+    boost::shared_mutex subscriptions_mutex_;
+    combine_grids::MergingPipeline pipeline_;
+    std::mutex pipeline_mutex_;
 
-  rclcpp::Logger logger_;
+    rclcpp::Logger logger_;
 
-  // timers
-  rclcpp::TimerBase::SharedPtr map_merging_timer_;
-  rclcpp::TimerBase::SharedPtr topic_subscribing_timer_;
-  rclcpp::TimerBase::SharedPtr pose_estimation_timer_;
+    // Disable pose estimation after a fatal pipeline/OpenCV failure so we don't
+    // keep invoking a broken feature-matching pipeline.
+    bool pose_estimation_disabled_ = false;
 
-  std::string robotNameFromTopic(const std::string& topic);
-  // bool isRobotMapTopic(const ros::master::TopicInfo& topic);
-  bool isRobotMapTopic(const std::string topic, std::string type);
-  bool getInitPose(const std::string& name, geometry_msgs::msg::Transform& pose);
+    // merge-state tracking (for logging transitions)
+    size_t last_matched_count_ = 0;
+    size_t last_total_grids_ = 0;
+    // Preserve the last valid metric world->robot/map transform per robot so
+    // brief estimator glitches do not force an identity-TF jump.
+    std::unordered_map<std::string, geometry_msgs::msg::Transform> last_valid_world_tf_by_robot_;
 
-  void fullMapUpdate(const nav_msgs::msg::OccupancyGrid::SharedPtr msg,
-                     MapSubscription& map);
-  void partialMapUpdate(const map_msgs::msg::OccupancyGridUpdate::SharedPtr msg,
-                        MapSubscription& map);
+    // timers
+    rclcpp::TimerBase::SharedPtr map_merging_timer_;
+    rclcpp::TimerBase::SharedPtr topic_subscribing_timer_;
+    rclcpp::TimerBase::SharedPtr pose_estimation_timer_;
+
+    std::string robotNameFromTopic(const std::string & topic);
+    // bool isRobotMapTopic(const ros::master::TopicInfo& topic);
+    bool isRobotMapTopic(const std::string topic, std::string type);
+    bool getInitPose(const std::string & name, geometry_msgs::msg::Transform & pose);
+
+    /** Pad merged grid by origin_margin_ so map bounds include negative coords (fixes Nav2 sensor origin warning). */
+    void applyOriginMargin(nav_msgs::msg::OccupancyGrid::SharedPtr & grid);
+
+    /**
+     * @brief Publish TF from world_frame to each robot's map frame.
+     * @details For known poses, publishes the user-provided init_pose directly.
+     *          For estimated poses, converts pixel-space pipeline transforms to
+     *          metric TF using grid origins and resolution.
+     * @param merged_origin_x  X origin of the merged grid (pre-margin), in meters
+     * @param merged_origin_y  Y origin of the merged grid (pre-margin), in meters
+     * @param resolution       Resolution of the merged grid (meters/pixel)
+     */
+    void publishTransforms(
+      double merged_origin_x, double merged_origin_y,
+      float resolution);
+
+    /** When composeGrids has not produced a merged map yet, publish identity
+     *  world_frame -> <robot>/map for each robot that has a map so tf2 registers ``map``.
+     *  Only used when ``!have_initial_poses_`` and ``publish_provisional_tf_``.
+     */
+    void publishProvisionalWorldTFOnly();
+
+    /** When ``known_init_poses`` and no merged grid yet, publish init_pose TF per robot. */
+    void publishInitialPoseWorldTFOnly();
+
+    void fullMapUpdate(
+      const nav_msgs::msg::OccupancyGrid::SharedPtr msg,
+      MapSubscription & map);
+    void partialMapUpdate(
+      const map_msgs::msg::OccupancyGridUpdate::SharedPtr msg,
+      MapSubscription & map);
 
 public:
-  MapMerge();
+    MapMerge();
 
-  void topicSubscribing();
-  void mapMerging();
-  /**
-   * @brief Estimates initial positions of grids
-   * @details Relevant only if initial poses are not known
-   */
-  void poseEstimation();
-};
+    void topicSubscribing();
+    void mapMerging();
+    /**
+     * @brief Estimates initial positions of grids
+     * @details Relevant only if initial poses are not known
+     */
+    void poseEstimation();
+  };
 
 }  // namespace map_merge
 

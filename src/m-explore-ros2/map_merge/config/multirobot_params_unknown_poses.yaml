@@ -1,0 +1,43 @@
+# Map merge params for the multi-robot fleet (unknown initial poses).
+# Expects /<robot>/map from each robot's SLAM (e.g. Blinky, Pinky, Inky, Clyde).
+# map_merge discovers inputs by topic; add/remove robots via running stacks, not this file.
+#
+# How it works:
+#   - Pose estimation uses AKAZE feature matching to detect map overlap.
+#   - When maps overlap, they are merged at the correct relative position.
+#   - When maps do NOT overlap, they are placed side-by-side in the global
+#     map so all robots remain visible and navigable.
+#   - As robots explore and their maps start to overlap, the merge
+#     transitions automatically from independent to feature-matched.
+#
+# TF: map_merge publishes world_frame -> <robot>/map for every robot.
+# Full chain (example): map -> blinky/map -> blinky/odom -> blinky/base_footprint
+# No tf_map_odom_fallback needed.
+#
+# With unknown_init_poses, a merged OccupancyGrid may not exist until the pipeline
+# has enough data to compose; publish_provisional_tf still publishes *identity*
+# world_frame -> <robot>/map as soon as each robot has delivered a local /map,
+# so the parent frame ``map`` appears on /tf before the first successful merge.
+
+map_merge:
+  ros__parameters:
+    # Slightly faster merge/estimate cycles help recover alignment after weak matches;
+    # if FLANN/OpenCV disables pose estimation, restart map_merge (see start_central.sh).
+    # Slightly slower merge cadence + faster pose updates reduces TF quaternion
+    # invalid / weak-match flip-flop seen under two-robot load (tune after Nav2 stable).
+    merging_rate: 4.0
+    discovery_rate: 0.08
+    estimation_rate: 1.0
+    estimation_confidence: 0.65
+    robot_map_topic: map
+    robot_map_updates_topic: map_updates
+    robot_namespace: ""
+    merged_map_topic: map
+    world_frame: map
+    known_init_poses: false
+    origin_margin: 0.15
+    # Publish TF: world_frame -> <robot>/map (metric transforms from the merge pipeline once available)
+    publish_tf: true
+    # Identity world_frame -> <robot>/map whenever a robot has a local map but the merged grid
+    # is not composed yet, and as fallback when pose estimates are still invalid (Nav2 global_costmap).
+    publish_provisional_tf: true

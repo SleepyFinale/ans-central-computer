@@ -45,8 +45,9 @@ namespace combine_grids
 {
 namespace internal
 {
-cv::Rect GridWarper::warp(const cv::Mat& grid, const cv::Mat& transform,
-                          cv::Mat& warped_grid)
+cv::Rect GridWarper::warp(
+  const cv::Mat & grid, const cv::Mat & transform,
+  cv::Mat & warped_grid)
 {
   // for validating function inputs. Throws an std::invalid_argument exception if the condition fails.
   rcpputils::require_true(transform.type() == CV_64F);
@@ -56,21 +57,22 @@ cv::Rect GridWarper::warp(const cv::Mat& grid, const cv::Mat& transform,
   // shift top left corner for warp affine (otherwise the image is cropped)
   H.at<double>(0, 2) -= roi.tl().x;
   H.at<double>(1, 2) -= roi.tl().y;
-  warpAffine(grid, warped_grid, H, roi.size(), cv::INTER_NEAREST,
-             cv::BORDER_CONSTANT,
-             cv::Scalar::all(255) /* this is -1 for signed char */);
-  
-  // For verifying results. Throws a rcpputils::AssertionException if the condition fails. 
+  warpAffine(
+    grid, warped_grid, H, roi.size(), cv::INTER_NEAREST,
+    cv::BORDER_CONSTANT,
+    cv::Scalar::all(255) /* this is -1 for signed char */);
+
+  // For verifying results. Throws a rcpputils::AssertionException if the condition fails.
   // This function becomes a no-op in release builds.
   rcpputils::assert_true(roi.size() == warped_grid.size());
 
   return roi;
 }
 
-cv::Rect GridWarper::warpRoi(const cv::Mat& grid, const cv::Mat& transform)
+cv::Rect GridWarper::warpRoi(const cv::Mat & grid, const cv::Mat & transform)
 {
   cv::Ptr<cv::detail::PlaneWarper> warper =
-      cv::makePtr<cv::detail::PlaneWarper>();
+    cv::makePtr<cv::detail::PlaneWarper>();
   cv::Mat H;
   transform.convertTo(H, CV_32F);
 

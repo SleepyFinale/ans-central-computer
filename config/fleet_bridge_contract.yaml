@@ -1,0 +1,44 @@
+fleet_bridge_contract:
+  version: 1
+  intent: "Local-first robot autonomy with low-rate central observability."
+
+  robot_to_central:
+    - topic: "/{robot}/map_wire_z"
+      msg_type: "std_msgs/msg/UInt8MultiArray"
+      qos: "reliable_transient_local"
+      max_hz: 1.0
+      purpose: "Compressed map snapshots for central ingest/relay."
+    - topic: "/{robot}/nav2_collision_ahead"
+      msg_type: "std_msgs/msg/Bool"
+      qos: "reliable_volatile"
+      max_hz: 4.0
+      purpose: "Near-term collision context for goal probing."
+    - topic: "/{robot}/nav2_retrace_active"
+      msg_type: "std_msgs/msg/Bool"
+      qos: "reliable_volatile"
+      max_hz: 4.0
+      purpose: "Robot-side escape state to avoid conflicting commands."
+    - topic: "/{robot}/navigate_to_pose/_action/*"
+      msg_type: "action status/feedback/result"
+      qos: "default_action_qos"
+      max_hz: 10.0
+      purpose: "Sparse mission progress and terminal outcomes."
+
+  central_to_robot:
+    - topic: "/{robot}/navigate_to_pose"
+      msg_type: "nav2_msgs/action/NavigateToPose"
+      qos: "action_qos"
+      max_hz: 0.5
+      purpose: "High-level mission goals only."
+    - topic: "/{robot}/navigate_to_pose/_action/cancel_goal"
+      msg_type: "action cancel service"
+      qos: "service_qos"
+      max_hz: 0.5
+      purpose: "Sparse supervisory cancellation."
+
+  discouraged_cross_network_topics:
+    - "/tf"
+    - "/tf_static"
+    - "/{robot}/scan"
+    - "/{robot}/scan_normalized"
+    - "/map_updates"

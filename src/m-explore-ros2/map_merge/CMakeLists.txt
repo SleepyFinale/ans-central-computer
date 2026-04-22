@@ -44,6 +44,7 @@ set(DEPENDENCIES
   image_geometry
   map_msgs
   nav_msgs
+  std_msgs
   tf2_geometry_msgs
   tf2
   tf2_ros
@@ -135,27 +136,37 @@ if(BUILD_TESTING)
   #   FILENAME ${PROJECT_NAME}_map00.pgm
   # )
   execute_process(
-    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/map00.pgm ${base_url}/hector_maps/map00.pgm 915609a85793ec1375f310d44f2daf87
+    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/map00.pgm
+      ${base_url}/hector_maps/map00.pgm 915609a85793ec1375f310d44f2daf87
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test
   )
   execute_process(
-    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/map05.pgm ${base_url}/hector_maps/map05.pgm cb9154c9fa3d97e5e992592daca9853a
+    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/map05.pgm
+      ${base_url}/hector_maps/map05.pgm cb9154c9fa3d97e5e992592daca9853a
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test
   )
   execute_process(
-    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/2011-08-09-12-22-52.pgm ${base_url}/gmapping_maps/2011-08-09-12-22-52.pgm 3c2c38e7dec2b7a67f41069ab58badaa
+    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/2011-08-09-12-22-52.pgm
+      ${base_url}/gmapping_maps/2011-08-09-12-22-52.pgm
+      3c2c38e7dec2b7a67f41069ab58badaa
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test
   )
   execute_process(
-    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/2012-01-28-11-12-01.pgm ${base_url}/gmapping_maps/2012-01-28-11-12-01.pgm 681e704044889c95e47b0c3aadd81f1e
+    COMMAND bash download.sh ${CMAKE_BINARY_DIR}/2012-01-28-11-12-01.pgm
+      ${base_url}/gmapping_maps/2012-01-28-11-12-01.pgm
+      681e704044889c95e47b0c3aadd81f1e
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/test
   )
 
   ament_add_gtest(test_merging_pipeline test/test_merging_pipeline.cpp)
   # ensure that test data are downloaded before we run tests
-  # add_dependencies(test_merging_pipeline ${PROJECT_NAME}_map00.pgm ${PROJECT_NAME}_map05.pgm ${PROJECT_NAME}_2011-08-09-12-22-52.pgm ${PROJECT_NAME}_2012-01-28-11-12-01.pgm)
-  target_link_libraries(test_merging_pipeline combine_grids ${catkin_LIBRARIES})
-  
+  # add_dependencies(test_merging_pipeline
+  #   ${PROJECT_NAME}_map00.pgm ${PROJECT_NAME}_map05.pgm
+  #   ${PROJECT_NAME}_2011-08-09-12-22-52.pgm
+  #   ${PROJECT_NAME}_2012-01-28-11-12-01.pgm)
+  target_link_libraries(test_merging_pipeline combine_grids)
+  ament_target_dependencies(test_merging_pipeline ${DEPENDENCIES})
+
 endif()
 
 
