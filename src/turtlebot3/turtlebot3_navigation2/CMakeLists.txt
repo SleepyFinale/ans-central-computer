@@ -16,10 +16,15 @@ find_package(ament_cmake REQUIRED)
 ################################################################################
 # Install
 ################################################################################
-install(
-  DIRECTORY launch map param rviz
-  DESTINATION share/${PROJECT_NAME}
-)
+set(_tb3_nav2_share_dirs launch map rviz param)
+foreach(_dir IN LISTS _tb3_nav2_share_dirs)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}")
+    install(
+      DIRECTORY ${_dir}
+      DESTINATION share/${PROJECT_NAME}
+    )
+  endif()
+endforeach()
 install(
   PROGRAMS scripts/normalize_laser_scan.py
   DESTINATION lib/${PROJECT_NAME}
