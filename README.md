@@ -114,8 +114,8 @@ Clone the repository to your workspace directory:
 
 ```bash
 cd ~
-git clone https://github.com/SleepyFinale/turtlebot3-workspace.git ans-central-computer
-cd ~/ans-central-computer
+git clone https://github.com/SleepyFinale/turtlebot3-workspace.git central-computer
+cd ~/central-computer
 ```
 
 This repository contains all the necessary packages for TurtleBot3 autonomous exploration:
@@ -145,7 +145,7 @@ Performs a complete clean rebuild of the entire workspace:
 **Usage:**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 ./scripts/clean_rebuild.sh
 ```
 
@@ -168,7 +168,7 @@ Performs a minimal rebuild of only the central-PC essentials:
 **Usage:**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 ./scripts/minimal_rebuild.sh
 ```
 
@@ -180,7 +180,7 @@ cd ~/ans-central-computer
 **Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/set_robot_env.sh <robot> [ip]`. If you need to manually source the workspace:
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source scripts/ros_robot_env.bash
 ```
 
@@ -214,7 +214,7 @@ The table below lists the SSH targets for each robot on the supported WiFi netwo
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 
 # Any robot: fixed fleet IPs – script auto-detects SNS vs GCRI_LAB vs ANS_starlink vs RaspAP vs Azure
 source scripts/set_robot_env.sh blinky
@@ -255,7 +255,7 @@ This stack supports two comms modes, but **fleet runs must use bridges**.
 Central setup for bridged mode:
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source scripts/ros_domain_profile.bash
 ./scripts/start_central.sh --comms-mode bridged_domains
 ```
@@ -394,7 +394,7 @@ urdf_file_name : turtlebot3_burger.urdf
 **Verification (from the central PC):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 ros2 topic list | grep "/<robot>/" 
 ros2 topic echo /<robot>/scan --once  # Should show laser scan data
 ```
@@ -486,7 +486,7 @@ With optional **`fleet_mode:=auto`**, the launch inserts another **`wait_for_tf`
 **Verification (from the central PC):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 ros2 topic list | grep "/<robot>/"
 ros2 topic echo /<robot>/map --once           # Should show map data after SLAM initializes
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
@@ -503,7 +503,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 - **Central Terminal 1 – RViz visualization**
 
   ```bash
-  cd ~/ans-central-computer
+  cd ~/central-computer
   source /opt/ros/humble/setup.bash
   source install/setup.bash
 
@@ -524,7 +524,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 - **Central Terminal 2 – coordinator stack**
 
   ```bash
-  cd ~/ans-central-computer
+  cd ~/central-computer
   ./scripts/start_central.sh
   ```
 
@@ -760,7 +760,7 @@ You should see `nav2_msgs` in the list. Then try building again:
 - **Step 3**: Set the same value everywhere. Easiest: use the setup script for your robot (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)).
 
   ```bash
-  cd ~/ans-central-computer
+  cd ~/central-computer
   source scripts/set_robot_env.sh <robot>
   ```
 
@@ -1148,7 +1148,7 @@ For each run, compare:
 - On the central PC you start:
 
   ```bash
-  cd ~/ans-central-computer
+  cd ~/central-computer
   ./scripts/start_central.sh
   ```
 
@@ -1215,7 +1215,7 @@ Use the helper script `scripts/pose_jump_monitor.py` to quantify how much the ro
 **Usage (on Remote PC):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 source scripts/set_robot_env.sh blinky   # or pinky, inky, clyde [optional IP override]
@@ -1257,7 +1257,7 @@ Use `scripts/plot_live_xy_fade.py` on the central PC to visualize position updat
 **Usage (on central PC):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source scripts/ros_robot_env.bash
 
 python3 scripts/plot_live_xy_fade.py
@@ -1299,7 +1299,7 @@ Stop with Ctrl+C to close the node and plot cleanly.
 **Verify (same `ROS_DOMAIN_ID` on central and robot):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
@@ -1347,7 +1347,7 @@ ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py
 **Verify fleet TF (central PC, same `ROS_DOMAIN_ID` as robots):**
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
@@ -1450,7 +1450,7 @@ echo $ROS_DOMAIN_ID
 ### Run multi-robot TF diagnostics
 
 ```bash
-cd ~/ans-central-computer
+cd ~/central-computer
 ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnose_multirobot_tf.py   # e.g. 50
 ```
 

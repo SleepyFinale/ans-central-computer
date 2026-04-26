@@ -22,7 +22,7 @@ You can override defaults with environment variables:
 
 Usage (on the Remote PC, with your usual environment):
 
-  cd ~/ans-central-computer
+  cd ~/central-computer
   source /opt/ros/humble/setup.bash
   source install/setup.bash        # if you built the workspace
   source scripts/set_robot_env.sh blinky   # or your robot

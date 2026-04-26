@@ -2,7 +2,7 @@
 """
 Central explorer structured event logger (copy-ready utility).
 
-Intended target: ans-central-computer/scripts/multi_robot_explorer.py
+Intended target: central-computer/scripts/multi_robot_explorer.py
 Usage:
   from central_explorer_event_logger import ExplorerEventLogger
   logger = ExplorerEventLogger()

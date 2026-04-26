@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eo pipefail
 
-# Copy-ready helper for ans-central-computer.
+# Copy-ready helper for central-computer.
 # Records central-side exploration/correlation topics for one session.
 #
 # Usage:

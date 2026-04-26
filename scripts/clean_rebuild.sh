@@ -16,7 +16,7 @@ cd "$WS_DIR"
 
 # Check if we're in the right directory
 if [ ! -d "src" ]; then
-    echo "Error: Must run from workspace root (e.g. ans-central-computer/)"
+    echo "Error: Must run from workspace root (e.g. central-computer/)"
     exit 1
 fi
 
