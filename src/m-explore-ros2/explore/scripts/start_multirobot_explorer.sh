@@ -6,7 +6,7 @@
 #   - Each robot is running Nav2 + SLAM in its own namespace
 #     (e.g. navigation2_slam_namespaced.launch.py robot_name:=blinky ...)
 #   - TF relay and map_merge are running on the central PC
-#     (for example via ./scripts/start_central.sh)
+#     (for example via ./scripts/core/start_central.sh)
 #
 # Usage:
 #   ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
