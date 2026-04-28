@@ -804,7 +804,7 @@ else
     # This helper publishes a coarse merge state string (NO_OVERLAP, PARTIAL,
     # MERGED) on map_merge/merge_state so the explorer can automatically switch
     # from per-robot local exploration to global merged exploration.
-    python3 "${SCRIPT_DIR}/map_merge_state_monitor.py" --ros-args \
+    python3 "${WORKSPACE_DIR}/scripts/diagnostics/map_merge_state_monitor.py" --ros-args \
         -p "robot_names:=[${ROBOT_LIST_PARAM}]" \
         -p "world_frame:=map" \
         -p "stability_pos_threshold:=0.28" \

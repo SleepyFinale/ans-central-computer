@@ -11,7 +11,7 @@ echo ""
 
 # Resolve script/workspace directories and ensure we're in the workspace root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS_DIR="$(dirname "$SCRIPT_DIR")"
+WS_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 cd "$WS_DIR"
 
 # Check if we're in the right directory

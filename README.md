@@ -14,7 +14,7 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
 4. [Multi-Robot SLAM](#multi-robot-slam)
    - [Robot Terminal 1: Robot Bringup](#robot-terminal-1-robot-bringup)
    - [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)
-   - [Central Terminals: RViz + start_central.sh](#central-terminals-rviz--start_centralsh)
+   - [Central Terminals: start_central.sh + RViz](#central-terminals-start_centralsh--rviz)
 5. [Troubleshooting](#troubleshooting)
 6. [Diagnostic Commands](#diagnostic-commands)
 7. [Additional Resources](#additional-resources)
@@ -212,12 +212,12 @@ To connect this central computer to the TurtleBot3 robots you need:
 
 The table below lists the SSH targets for each robot on the supported WiFi networks.
 
-| Robot  | SNS (lab)             | GCRI_LAB (gcri)      | RaspAP (rpi)        |
-| ------ | --------------------- | -------------------- | ------------------- |
-| Blinky | blinky@192.168.0.158  | blinky@192.168.50.158| blinky@10.3.141.158 |
-| Pinky  | pinky@192.168.0.194   | pinky@192.168.50.194 | pinky@10.3.141.194  |
-| Inky   | inky@192.168.0.139    | inky@192.168.50.139  | inky@10.3.141.139   |
-| Clyde  | clyde@192.168.0.236   | clyde@192.168.50.236 | clyde@10.3.141.236  |
+| Robot  | SNS (lab)             | GCRI_LAB (gcri)       | RaspAP (rpi)        |
+| ------ | --------------------- | --------------------- | ------------------- |
+| Blinky | blinky@192.168.0.158  | blinky@192.168.50.158 | blinky@10.3.141.158 |
+| Pinky  | pinky@192.168.0.194   | pinky@192.168.50.194  | pinky@10.3.141.194  |
+| Inky   | inky@192.168.0.139    | inky@192.168.50.139   | inky@10.3.141.139   |
+| Clyde  | clyde@192.168.0.236   | clyde@192.168.50.236  | clyde@10.3.141.236  |
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
@@ -302,13 +302,15 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
 - Robot environment is set (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)): `source scripts/env/set_robot_env.sh <robot>` — this sets `ROBOT_SSH` appropriately.
 
-**Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC. On the **central PC**, open **RViz first**, then run **`start_central.sh`** (see [Central Terminals](#central-terminals-rviz--start_centralsh)). The robot `navigation2_slam.launch.py` and the central coordinator **depend on each other** when using the default `fleet_mode:=auto`: the launch defers Nav2 until global TF is ready from the central stack, while the explorer on the central PC waits until maps and Nav2’s action servers exist before it can drive exploration (details under [Robot Terminal 2](#robot-terminal-2-slam--nav2) and the central section).
+**Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC, then run the central scripts on the central PC. Default assumption here is **multi-robot** (two or more active robots). Start robot bringup, then robot SLAM/Nav2, then central coordination (`start_central.sh`), then visualization (`start_rviz_central.sh`). The robot and central stacks still depend on each other when `fleet_mode:=auto`: robot launch can defer parts of Nav2 until global TF is ready, while the central explorer waits for map and Nav2 actions to be available.
 
-**Recommended order (multi-robot, fewer surprises):**
+**Recommended order (multi-robot default):**
 
-1. Central: `start_rviz_central.sh`, then `./scripts/core/start_central.sh` (TF relay + map_merge + explorer). Starting the central stack **before** robot Nav2 is correct and recommended; any brief **`Invalid frame ID "map"`** on a robot after that usually means **that robot’s SLAM has not published a local `/<robot>/map` yet** (map_merge needs it to register world TF), not that you started central “too late.”
-2. Each robot: bringup, then `navigation2_slam.launch.py` with **`fleet_mode:=true`** if the central stack is already running (Nav2 starts sooner; still requires global `/tf` and `/map` from the PC).
-3. If you keep the default **`fleet_mode:=auto`**, Nav2 waits (up to `auto_fleet_wait_timeout_sec`, default 300 s) for global `map` → `<robot>/odom` on `/tf`. That chain exists only after `map_merge` publishes `map` → `<robot>/map` and the relay merges SLAM TF. **`map_merge`** publishes **provisional** identity `map` → `<robot>/map` for each robot as soon as that robot’s SLAM has produced a local map (`publish_provisional_tf` in [`src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)), even before the first merged `/map` grid is composed; metric transforms replace these when the merge pipeline has estimates.
+1. On each robot: run bringup (`robot.launch.py`) in terminal 1.
+2. On each robot: run SLAM + Nav2 (`navigation2_slam.launch.py`) in terminal 2.
+3. On central PC: run `./scripts/core/start_central.sh`.
+4. On central PC: run `./scripts/core/start_rviz_central.sh`.
+5. In this default flow, central runs `map_merge` and RViz opens in **GLOBAL** mode with `/map`.
 
 **Faster robot Nav2 startup (optional):**
 
@@ -344,15 +346,17 @@ ros2 launch turtlebot3_bringup robot.launch.py
 **Expected output (if working correctly):**
 
 ```text
-[INFO] [launch]: All log files can be found below /home/<robot_user>/.ros/log/<date-time>-<robot_namespace>-<pid>
+[INFO] [launch]: All log files can be found below /home/<robot_user>/.ros/log/[...]
 [INFO] [launch]: Default logging verbosity is set to INFO
 urdf_file_name : turtlebot3_burger.urdf
+[robot.launch.py] Outdoor mode disabled (outdoor:=false); skipping all GPS serial drivers.
 [INFO] [robot_state_publisher-1]: process started with pid [<pid>]
 [INFO] [ld08_driver-2]: process started with pid [<pid>]
 [INFO] [turtlebot3_ros-3]: process started with pid [<pid>]
+[INFO] [ekf_node-4]: process started with pid [<pid>]
 [turtlebot3_ros-3] [INFO] [...] [<robot>.turtlebot3_node]: Init TurtleBot3 Node Main
 [turtlebot3_ros-3] [INFO] [...] [<robot>.turtlebot3_node]: Init DynamixelSDKWrapper
-[turtlebot3_ros-3] [INFO] [...] [DynamixelSDKWrapper]: Succeeded to open the port(/dev/ttyACM<idx>)!
+[turtlebot3_ros-3] [INFO] [...] [DynamixelSDKWrapper]: Succeeded to open the port(/dev/opencr)!
 [turtlebot3_ros-3] [INFO] [...] [DynamixelSDKWrapper]: Succeeded to change the baudrate!
 [turtlebot3_ros-3] [INFO] [...] [<robot>.turtlebot3_node]: Start Calibration of Gyro
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/base_footprint
@@ -360,11 +364,17 @@ urdf_file_name : turtlebot3_burger.urdf
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/base_scan
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/caster_back_link
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/imu_link
+[robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/gps_link
+[robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/ultrasonic_link_front
+[robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/ultrasonic_link_left
+[robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/ultrasonic_link_right
+[robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/ultrasonic_scan_link
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/wheel_left_link
 [robot_state_publisher-1] [INFO] [...] [<robot>.robot_state_publisher]: got segment <robot>/wheel_right_link
-[ld08_driver-2] /dev/ttyACM0    u-blox 7 - GPS/GNSS Receiver
 [ld08_driver-2] /dev/ttyUSB0    CP2102 USB to UART Bridge Controller
-[ld08_driver-2] /dev/ttyACM<idx>    OpenCR Virtual ComPort in FS Mode
+[ld08_driver-2] /dev/ttyUSB1    CP2102 USB to UART Bridge Controller
+[ld08_driver-2] /dev/ttyUSB2    CP2102 USB to UART Bridge Controller
+[ld08_driver-2] /dev/ttyACM0    OpenCR Virtual ComPort in FS Mode
 [ld08_driver-2] FOUND LDS-02
 [ld08_driver-2] LDS-02 started successfully
 [turtlebot3_ros-3] [INFO] [...] [<robot>.turtlebot3_node]: Calibration End
@@ -388,27 +398,28 @@ urdf_file_name : turtlebot3_burger.urdf
 **What to look for:**
 
 - No error messages about device connections
-- Messages indicating successful initialization
-- Namespaced topics publishing for your robot, e.g.:
-  - `/robot/battery_state`
-  - `/robot/cmd_vel`
-  - `/robot/imu`
-  - `/robot/joint_states`
-  - `/robot/magnetic_field`
-  - `/robot/odom`
-  - `/robot/robot_description`
-  - `/robot/scan`
-  - `/robot/sensor_state`
-  - `/robot/tf`, `/robot/tf_static`
-  - `/robot/ultrasonic`
+- Bringup reaches initialization lines like `Calibration End` and `<robot>.diff_drive_controller ... Run!`
+- Namespaced topics publish for your robot, e.g.:
+  - `/<robot>/battery_state`
+  - `/<robot>/cmd_vel`
+  - `/<robot>/imu`
+  - `/<robot>/joint_states`
+  - `/<robot>/odom`
+  - `/<robot>/scan`
+  - `/<robot>/sensor_state`
+  - `/<robot>/tf`, `/<robot>/tf_static`
+  - `/<robot>/ultrasonic`
 - Robot should respond to velocity commands
 
 **Verification (from the central PC):**
 
 ```bash
 cd ~/central-computer
-ros2 topic list | grep "/<robot>/" 
+source scripts/env/ros_domain_profile.bash
+source scripts/env/ros_robot_env.bash
+ros2 topic list | rg "/<robot>/"
 ros2 topic echo /<robot>/scan --once  # Should show laser scan data
+ros2 topic echo /<robot>/odom --once  # Should show odometry
 ```
 
 ---
@@ -424,6 +435,17 @@ source scripts/env/ros_robot_env.bash
 export TURTLEBOT3_MODEL=burger
 
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
+
+# Optional: add extra Nav2 debug logs
+ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+  enable_debug_logging:=true \
+  debug_log_dir:=/home/<robot_user>/turtlebot3_ws/logs
+```
+
+If you want a wrapper that launches robot Nav2 with optional monitor behavior, use this robot-side script in the `turtlebot3` repository:
+
+```bash
+./scripts/monitor/launch_robot_with_optional_monitor.sh
 ```
 
 **Namespace vs physical robot:** On each Pi, the default ROS namespace is the **machine hostname** when it is a meaningful name (not a stock image default such as **`ubuntu`** or **`raspberrypi`**); otherwise it falls back to **`USER`/`LOGNAME`** (see `navigation2_slam.launch.py` in [`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)). **Definitive check:** from the **central PC**, publish a small twist to **one** namespace at a time and see which **physical** robot moves:
@@ -449,32 +471,41 @@ all **namespaced per robot** (e.g. `/<robot>/...`) so multiple robots can share 
 **Expected output (if working correctly):**
 
 ```text
-[INFO] [launch]: All log files can be found below /home/<robot_user>/.ros/log/<date-time>-<robot_namespace>-<pid>
+[INFO] [launch]: All log files can be found below /home/<robot_user>/.ros/log/[...]
 [INFO] [launch]: Default logging verbosity is set to INFO
 [INFO] [normalize_laser_scan.py-1]: process started with pid [<pid>]
-[INFO] [async_slam_toolbox_node-2]: process started with pid [<pid>]
-[INFO] [python3-3]: process started with pid [<pid>]
-[async_slam_toolbox_node-2] [INFO] [...] [<robot>.slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
-[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Laser scan normalizer started: scan -> scan_normalized (normalizing to 228 readings, publishing every 1 scan(s))
-[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Scan 1: received <N_in> readings, normalizing to 228
-[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Scan 1: published 228 readings (target: 228)
-[async_slam_toolbox_node-2] Registering sensor: [Custom Described Lidar]
-[python3-3] [INFO] [...] [wait_for_tf]: Waiting for TF (odom only). Need <robot>/odom->(one of ['<robot>/base_footprint', '<robot>/base_link']). Timeout: 30.0s
-[python3-3] [INFO] [...] [wait_for_tf]: TF ready: <robot>/odom -> <robot>/base_footprint
-[python3-3] [INFO] [...] [wait_for_tf]: TF tree looks ready.
-[INFO] [python3-3]: process has finished cleanly [pid <pid>]
-[INFO] [controller_server-4]: process started with pid [<pid>]
-[INFO] [smoother_server-5]: process started with pid [<pid>]
-[INFO] [planner_server-6]: process started with pid [<pid>]
-[INFO] [behavior_server-7]: process started with pid [<pid>]
-[INFO] [bt_navigator-8]: process started with pid [<pid>]
-[INFO] [waypoint_follower-9]: process started with pid [<pid>]
-[INFO] [velocity_smoother-10]: process started with pid [<pid>]
-[INFO] [lifecycle_manager-11]: process started with pid [<pid>]
-[lifecycle_manager-11] [INFO] [...] [<robot>.lifecycle_manager_navigation]: Managed nodes are active
-...
-[lifecycle_manager-11] [INFO] [...] [<robot>.lifecycle_manager_navigation]: Managed nodes are active
-[lifecycle_manager-11] [INFO] [...] [<robot>.lifecycle_manager_navigation]: Creating bond timer...
+[INFO] [ultrasonic_triangulation_blob.py-2]: process started with pid [<pid>]
+[INFO] [scan_costmap_relay.py-3]: process started with pid [<pid>]
+[INFO] [startup_map_seeder.py-4]: process started with pid [<pid>]
+[INFO] [namespace_tf_to_global_tf_relay.py-5]: process started with pid [<pid>]
+[INFO] [map_wire_compressed_republisher.py-6]: process started with pid [<pid>]
+[INFO] [async_slam_toolbox_node-7]: process started with pid [<pid>]
+[INFO] [python3-8]: process started with pid [<pid>]
+[INFO] [orca_shadow_advisor.py-9]: process started with pid [<pid>]
+[async_slam_toolbox_node-7] [INFO] [...] [<robot>.slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[map_wire_compressed_republisher.py-6] [INFO] [...] [<robot>.map_wire_compressed_republisher]: Map wire: map -> map_wire_z (zlib OccupancyGrid, <= 1.00 Hz, compression=3)
+[namespace_tf_to_global_tf_relay.py-5] [INFO] [...] [namespace_tf_to_global_tf_relay]: Namespace TF relay: /<robot>/tf -> /tf, /<robot>/tf_static -> /tf_static
+[startup_map_seeder.py-4] [INFO] [...] [<robot>.startup_map_seeder]: Startup map seeder active (ns='/<robot>', cmd_topic=cmd_vel, controller_state_service=/<robot>/controller_server/get_state)
+[python3-8] [INFO] [...] [wait_for_tf]: Waiting for TF (odom only). Need <robot>/odom->(one of ['<robot>/base_footprint', '<robot>/base_link']). Timeout: 30.0s
+[python3-8] [INFO] [...] [wait_for_tf]: TF ready: <robot>/odom -> <robot>/base_footprint
+[python3-8] [INFO] [...] [wait_for_tf]: TF tree looks ready.
+[INFO] [python3-8]: process has finished cleanly [pid <pid>]
+[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Auto target warmup: collected 10/30 scan lengths; delaying publish until lock.
+[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Auto target warmup: collected 20/30 scan lengths; delaying publish until lock.
+[INFO] [controller_server-10]: process started with pid [<pid>]
+[INFO] [smoother_server-11]: process started with pid [<pid>]
+[INFO] [planner_server-12]: process started with pid [<pid>]
+[INFO] [behavior_server-13]: process started with pid [<pid>]
+[INFO] [bt_navigator-14]: process started with pid [<pid>]
+[INFO] [waypoint_follower-15]: process started with pid [<pid>]
+[INFO] [velocity_smoother-16]: process started with pid [<pid>]
+[INFO] [lifecycle_manager-17]: process started with pid [<pid>]
+[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Auto target lock complete: selected target_readings=<N_out> from 30/30 filtered samples (...)
+[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Scan 1: received <N_in> readings, normalizing to <N_out>
+[normalize_laser_scan.py-1] [INFO] [...] [<robot>.laser_scan_normalizer]: Scan 1: published <N_out> readings (target: <N_out>)
+[lifecycle_manager-17] [INFO] [...] [<robot>.lifecycle_manager_navigation]: Starting managed nodes bringup...
+[lifecycle_manager-17] [INFO] [...] [<robot>.lifecycle_manager_navigation]: Managed nodes are active
+[startup_map_seeder.py-4] [INFO] [...] [<robot>.startup_map_seeder]: Startup map seeding complete
 
 ```
 
@@ -484,22 +515,25 @@ With optional **`fleet_mode:=auto`**, the launch inserts another **`wait_for_tf`
 
 **What to look for:**
 
-- SLAM Toolbox and the laser scan normalizer both start without errors.
-- `wait_for_tf` finishes the odom→base check; with **`fleet_mode:=auto`**, a further wait on **`map` → `<robot>/odom`** may block until **`start_central.sh`** publishes the world/robot TF bridge—then Nav2 proceeds.
-- Nav2 lifecycle nodes reach the **Managed nodes are active** state.
+- SLAM Toolbox and helper nodes start without errors (`normalize_laser_scan`, map-wire republisher, TF relay, seeder).
+- `wait_for_tf` finishes the odom→base check; with **`fleet_mode:=auto`**, a further wait on **`map` → `<robot>/odom`** may block until central is up, then Nav2 proceeds.
+- Laser normalizer shows warmup and lock lines (`Auto target lock complete`), then publishes normalized scans.
+- Nav2 lifecycle reaches **Managed nodes are active** and seeder completes.
 - Namespaced SLAM + Nav2 topics publishing for your robot, for example:
-  - `/robot/scan_normalized`
-  - `/robot/map`, `/robot/map_metadata`, `/robot/map_updates`
-  - `/robot/global_costmap/*`, `/robot/local_costmap/*`
-  - `/robot/plan`, `/robot/plan_smoothed`, `/robot/local_plan`
-  - `/robot/cmd_vel_nav`
-  - `/robot/behavior_server/transition_event`, `/robot/bt_navigator/transition_event`, `/robot/waypoint_follower/transition_event`, `/robot/velocity_smoother/transition_event`, etc.
+  - `/<robot>/scan_normalized`
+  - `/<robot>/map`, `/<robot>/map_metadata`, `/<robot>/map_updates`
+  - `/<robot>/global_costmap/*`, `/<robot>/local_costmap/*`
+  - `/<robot>/plan`, `/<robot>/plan_smoothed`, `/<robot>/local_plan`
+  - `/<robot>/cmd_vel_nav`
+  - `/<robot>/behavior_server/transition_event`, `/<robot>/bt_navigator/transition_event`, `/<robot>/waypoint_follower/transition_event`, `/<robot>/velocity_smoother/transition_event`
 
 **Verification (from the central PC):**
 
 ```bash
 cd ~/central-computer
-ros2 topic list | grep "/<robot>/"
+source scripts/env/ros_domain_profile.bash
+source scripts/env/ros_robot_env.bash
+ros2 topic list | rg "/<robot>/"
 ros2 topic echo /<robot>/map --once           # Should show map data after SLAM initializes
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
 ```
@@ -508,77 +542,77 @@ With optional **`fleet_mode:=auto`**, Nav2 may still be starting **after** you o
 
 ---
 
-### Central Terminals: RViz + start_central.sh
+### Central Terminals: start_central.sh + RViz
 
-After at least one robot is running bringup and `navigation2_slam.launch.py` (SLAM running; Nav2 may still be waiting on global TF until the steps below), use two terminals on the **central PC**. **Start RViz in the first terminal** so you can watch `/map` and TF as they come up; **run `start_central.sh` in the second**.
+After at least one robot is running bringup and `navigation2_slam.launch.py`, use two terminals on the **central PC**. In the current flow, **start `start_central.sh` first** and then **start RViz**.
 
-- **Central Terminal 1 – RViz visualization**
-
-  ```bash
-  cd ~/central-computer
-  source /opt/ros/humble/setup.bash
-  source install/setup.bash
-
-  # Global merged map (default):
-  ./scripts/core/start_rviz_central.sh
-
-  # Or explicitly:
-  ./scripts/core/start_rviz_central.sh --global
-
-  # Per-robot local map view (namespaced topics):
-  ./scripts/core/start_rviz_central.sh --local <robot>
-  # or shorthand:
-  ./scripts/core/start_rviz_central.sh -r <robot>
-  ```
-
-  In **global mode**, RViz loads the workspace config `config/rviz/central_global_map.rviz` with the fixed frame set to `map` and the global `/map` topic (from map merge in multi-robot mode, or the single robot's relayed `/map` in single-robot mode). In **local mode**, it uses a per-robot template so you see that robot's namespaced map and navigation topics (for example `/<robot>/map`, `/<robot>/scan_normalized`, `/<robot>/plan`) while still using `map` as the fixed frame.
-
-- **Central Terminal 2 – coordinator stack**
+- **Central Terminal 1 – coordinator stack**
 
   ```bash
   cd ~/central-computer
+  source scripts/env/ros_domain_profile.bash
+  source scripts/env/ros_robot_env.bash
   ./scripts/core/start_central.sh
+
+  # Optional: select a robot subset by filter letters
+  ./scripts/core/start_central.sh -bpic
   ```
 
-  This script:
+  In filter flags such as `-bpic`, each letter corresponds to one configured robot namespace, so you can quickly run a selected subset.
 
-  - Detects available robot namespaces (e.g. `/blinky`, `/pinky`, `/inky`, `/clyde`)
-  - Starts TF relay (`prefix_frames:=true` for one or many robots)
-  - In **single-robot mode**: skips map merge; publishes static TF `map` → `<robot>/map` (identity) so SLAM frame `<robot>/map` aligns with world `map`; relays `/<robot>/map` → `/map` so fleet Nav2 and global RViz see a publisher on `/map`
-  - In **multi-robot mode**: starts multi-robot map merge (unknown initial poses) and merges all per-robot maps into a global `/map`
-  - Launches `multi_robot_explorer.py` to assign frontiers via `/<robot>/navigate_to_pose`
-
-  **Expected output (if working correctly):**
+  **Expected output (multi-robot mode):**
 
   ```text
+  ROS domain profile loaded: target='central', ROS_DOMAIN_ID=50
+  ROS 2 Humble and workspace environment loaded from:
+    Underlay: /opt/ros/humble
+    Overlay : /home/<central_user>/central-computer
   ==========================================
     Central Computer — Multi-Robot Exploration
   ==========================================
 
-    ROS_DOMAIN_ID = 50
+    Comms mode      = bridged_domains
+    ROS_DOMAIN_ID   = 50
+    Domain map      = /home/<central_user>/central-computer/config/fleet_domain_map.yaml
+    Domain source   = env(ROS_DOMAIN_ID)
     Robot filter    = (all detected robots)
+    ...
 
-    Explorer fallback = use_pose_goal_fallback=false
-    Explorer frequency override = (using YAML default)
+  Selecting robots from domain map (bridged mode)...
+  Detected robots: <robot1> <robot2> [...]
+  Using robots   : <robot1> <robot2> [...]
 
-  Detecting robots from ROS topics...
-  Detected robots: <robot1> [<robot2> ...]
-  Using robots   : <robot1> [<robot2> ...]
-
-    Mode          = single-robot (Nav2 on robot, no map_merge)
-    # or, when multiple robots are detected:
     Mode          = multi-robot (Nav2 on robots, map_merge enabled)
 
+  Generating domain bridge configs...
+  Generated /home/<central_user>/central-computer/config/generated_domain_bridge/<robot1>.domain_bridge.yaml
+  Generated /home/<central_user>/central-computer/config/generated_domain_bridge/<robot2>.domain_bridge.yaml
+  Starting domain_bridge processes...
+  Waiting up to 15s for bridge outputs...
+  Bridge ready.
+  [0c] Starting Nav2 action service relays (navigate_to_pose + compute_path_to_pose)...
   [1/3] Starting TF relay (prefix_frames=true)...
-  [INFO] [...] [tf_relay_multirobot]: TF relay started: merging ['<robot1>' ...] -> /tf (prefix_frames=True)
-  [1b/3] Single-robot mode — static TF map -> <robot1>/map (identity)
-  [INFO] [...] [single_robot_world_tf_bridge]: Published static TF map -> <robot1>/map (identity)
+  [INFO] [...] [tf_relay_multirobot]: TF relay started: merging ['<robot1>', '<robot2>' ...] -> /tf (prefix_frames=True)
+  [INFO] [...] [fleet_nav_action_relay_robot_<robot1>]: Nav2 action services reached on robot domain <domain_id>; forwarding to central.
+  [2/3] Starting map merge (unknown poses)...
+  [INFO] [...] [map_merge]: TF broadcasting enabled: map -> <robot>/map
+  [INFO] [...] [map_merge]: Map merging started.
+  [INFO] [...] [fleet_nav_action_relay_robot_<robot2>]: Nav2 action services reached on robot domain <domain_id>; forwarding to central.
+  [INFO] [...] [map_merge]: Robot discovery started.
+  [INFO] [...] [map_merge]: adding robot [<robot1>] to system
+  [INFO] [...] [map_merge]: Subscribing to MAP topic: <robot1>/map.
+  [INFO] [...] [map_merge]: Subscribing to MAP updates topic: <robot1>/map_updates.
+  [INFO] [...] [map_merge]: adding robot [<robot2>] to system
+  [INFO] [...] [map_merge]: Subscribing to MAP topic: <robot2>/map.
+  [INFO] [...] [map_merge]: Subscribing to MAP updates topic: <robot2>/map_updates.
+  [INFO] [...] [map_merge]: Grid pose estimation started.
+  [INFO] [...] [map_merge]: Publishing provisional map -> <robot>/map (identity) until a merged map is composed; Nav2 can register frame "map"
 
-  [2/3] Single-robot setup detected (<robot1>) — skipping map merge.
-  # or (multi-robot): [2/3] Starting map merge (unknown poses)...
+    map_merge recovery: if logs show 'Grid pose estimation disabled permanently'
+    after an OpenCV/FLANN (miniflann) exception, restart this script or the
+    map_merge process; relative pose refinement stays off until then.
 
-  [3/3] Starting single-robot explorer (Nav2 offloaded to robot)...
-  # or (multi-robot): [3/3] Starting multi-robot explorer...
+  [3/3] Starting multi-robot explorer...
 
   ==========================================
     All services running.  Press Ctrl+C to stop.
@@ -586,17 +620,73 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 
     To visualise: rviz2  (add /map display, set frame to 'map')
 
-  [INFO] [...] [multi_robot_explorer]: Multi-robot explorer started: robots=['<robot1>' ...], map_topic=/<robot_or_global_map>, world_frame=map, freq=<F> Hz, use_pose_goal_fallback=False, mode=<single_robot_offloaded_nav2|multi_robot>
-  [INFO] [...] [multi_robot_explorer]: Waiting for merged map on configured topic...
+  [INFO] [...] [multi_robot_explorer]: Multi-robot explorer started: robots=['<robot1>', '<robot2>' ...], map_topic=map, world_frame=map, ...
   ```
+
+- **Central Terminal 2 – RViz visualization**
+
+  ```bash
+  cd ~/central-computer
+  source scripts/env/ros_domain_profile.bash
+  source scripts/env/ros_robot_env.bash
+  ./scripts/core/start_rviz_central.sh
+
+  # Optional: force LOCAL map view for one robot
+  ./scripts/core/start_rviz_central.sh -r <robot>
+  ```
+
+  **Expected output (multi-robot mode):**
+
+  ```text
+  ROS domain profile loaded: target='central', ROS_DOMAIN_ID=50
+  ROS 2 Humble and workspace environment loaded from:
+    Underlay: /opt/ros/humble
+    Overlay : /home/<central_user>/central-computer
+  Starting RViz in GLOBAL mode using:
+    /home/<central_user>/central-computer/config/rviz/central_global_map.rviz
+  Detected active robots: <robot1>
+  <robot2>
+  Effective ROS_DOMAIN_ID: 50
+  Domain source: env(ROS_DOMAIN_ID)
+  Fixed frame: map, map topic: /map
+  [INFO] [...] [rviz2]: Stereo is NOT SUPPORTED
+  [INFO] [...] [rviz2]: OpenGl version: [...]
+  ```
+
+  You may also see:
+
+  ```text
+  [ERROR] [...] [rviz2]: Vertex Program:rviz/glsl120/indexed_8bit_image.vert Fragment Program:rviz/glsl120/indexed_8bit_image.frag GLSL link result :
+  active samplers with a different type refer to the same texture image unit
+  ```
+
+  This is typically a graphics-driver/OpenGL shader quirk, not a SLAM/Nav2 failure. If RViz opens and TF, `/map`, and overlays update normally, this message is usually safe to ignore.
 
   **What to look for:**
 
-  - `ROS_DOMAIN_ID` printed as `50` and the expected robot filter (e.g. `-bpi` or full fleet `-bpic` when you pass `./scripts/core/start_central.sh -bpic`).
-  - The **list of detected robots** matches the robots you actually have running.
-  - TF relay starts without errors (`tf_relay_multirobot` node up).
-  - In multi-robot mode, map merge starts and no errors are reported about missing input maps.
-  - `multi_robot_explorer` starts for the selected robots and logs that it is waiting for the (merged or single-robot) map until SLAM (and merge, if any) produce data; it will not command Nav2 until `/<robot>/navigate_to_pose` is available.
+  - `start_central.sh` shows `Mode = multi-robot (Nav2 on robots, map_merge enabled)` and the detected robots match active robots.
+  - Domain bridge reaches `Bridge ready`, TF relay starts, and `map_merge` startup lines appear.
+  - `multi_robot_explorer` starts without errors and includes all active robots.
+  - `start_rviz_central.sh` reports GLOBAL mode with fixed frame `map` and map topic `/map`.
+  - RViz opens without startup errors.
+
+  **Verification (from the central PC):**
+
+  ```bash
+  cd ~/central-computer
+  source scripts/env/ros_domain_profile.bash
+  source scripts/env/ros_robot_env.bash
+  ros2 topic echo /map --once
+  ros2 topic list | rg "^/(tf|tf_static|explore/frontiers)$"
+  ros2 action list | rg "/.*/navigate_to_pose$"
+  ```
+
+  **Single-robot differences (quick reference):**
+
+  - `start_central.sh` switches to `Mode = single-robot (Nav2 on robot, no map_merge)`.
+  - No map-merge startup block; instead you see static TF `map -> <robot>/map` and map-wire relay `/<robot>/map_wire_z -> /map`.
+  - Explorer mode line becomes `Starting single-robot explorer (Nav2 offloaded to robot)...`.
+  - `start_rviz_central.sh` auto-selects LOCAL mode for the active robot and uses fixed frame `<robot>/map` with map topic `/<robot>/map`.
 
   **Topics published from the central stack (examples):**
 
@@ -609,6 +699,19 @@ After at least one robot is running bringup and `navigation2_slam.launch.py` (SL
 ---
 
 ## Logging and Debugging
+
+- **Robot-side capture helpers** (run from the `turtlebot3` repository):
+  - `./scripts/monitor/pi_bottleneck_monitor.sh --iface wlan0 --interval 1.0`
+    - Samples runtime bottleneck metrics while SLAM/Nav2 is active.
+  - `./scripts/debug/start_ultrasonic_debug_capture.sh`
+    - Captures ultrasonic-related debug streams to investigate fusion/obstacle behavior.
+  - `./scripts/debug/start_nav2_debug_capture.sh`
+    - Captures Nav2 planner/controller/action debug context during runtime issues.
+  - Start captures before reproducing the issue and stop after to keep logs focused.
+
+- **Central-side plotting helper**:
+  - `./scripts/plotting/monitor/plot_bottleneck_metric.py pi_bottleneck_`
+  - Use after monitor capture to visualize trends from files matching the prefix.
 
 - `src/m-explore-ros2/explore/scripts/central_explorer_event_logger.py`:
   - Structured JSONL logger utility (`ExplorerEventLogger`) for `multi_robot_explorer.py`

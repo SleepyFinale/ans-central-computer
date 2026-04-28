@@ -118,23 +118,15 @@ detect_active_robots() {
     fi
 }
 
-generate_single_robot_global_cfg() {
+generate_local_cfg() {
     local robot="$1"
     local out_cfg="$2"
-    local fixed_frame="${robot}/map"
+    local local_fixed_frame="${robot}/map"
 
     if command -v perl >/dev/null 2>&1; then
-        perl \
-            -pe "s#Fixed Frame: map#Fixed Frame: ${fixed_frame}#g; s#Value: /map_updates#Value: /${robot}/map_updates#g; s#Value: /map#Value: /${robot}/map#g; s#Value: /goal_pose#Value: /${robot}/goal_pose#g; s#Value: /initialpose#Value: /${robot}/initialpose#g" \
-            "$GLOBAL_CFG" > "$out_cfg"
+        perl -pe "s/__ROBOT__/${robot}/g; s#Fixed Frame: map#Fixed Frame: ${local_fixed_frame}#g" "$LOCAL_TEMPLATE_CFG" > "$out_cfg"
     else
-        sed \
-            -e "s#Fixed Frame: map#Fixed Frame: ${fixed_frame}#g" \
-            -e "s#Value: /map_updates#Value: /${robot}/map_updates#g" \
-            -e "s#Value: /map#Value: /${robot}/map#g" \
-            -e "s#Value: /goal_pose#Value: /${robot}/goal_pose#g" \
-            -e "s#Value: /initialpose#Value: /${robot}/initialpose#g" \
-            "$GLOBAL_CFG" > "$out_cfg"
+        sed -e "s/__ROBOT__/${robot}/g" -e "s#Fixed Frame: map#Fixed Frame: ${local_fixed_frame}#g" "$LOCAL_TEMPLATE_CFG" > "$out_cfg"
     fi
 }
 
@@ -197,6 +189,7 @@ if [[ "$MODE" == "global" ]]; then
     EFFECTIVE_MAP_TOPIC="/map"
     EFFECTIVE_ROBOT=""
     EFFECTIVE_FIXED_FRAME="map"
+    EFFECTIVE_VIEW_MODE="global"
     ACTIVE_ROBOTS_RAW=""
 
     if [[ "$HAS_DOMAIN_MAP" == true ]]; then
@@ -208,17 +201,22 @@ if [[ "$MODE" == "global" ]]; then
                 if robot_domain="$(get_robot_domain "$EFFECTIVE_ROBOT" || true)" && [[ -n "$robot_domain" ]]; then
                     export ROS_DOMAIN_ID="$robot_domain"
                     EFFECTIVE_DOMAIN="$ROS_DOMAIN_ID"
-                    DOMAIN_SOURCE="auto(single_robot:${EFFECTIVE_ROBOT})"
+                    DOMAIN_SOURCE="auto(single_robot_local:${EFFECTIVE_ROBOT})"
                     EFFECTIVE_MAP_TOPIC="/${EFFECTIVE_ROBOT}/map"
                     EFFECTIVE_FIXED_FRAME="${EFFECTIVE_ROBOT}/map"
-                    EFFECTIVE_CFG="$(mktemp "/tmp/central_rviz_global_single_${EFFECTIVE_ROBOT}_XXXX.rviz")"
-                    generate_single_robot_global_cfg "$EFFECTIVE_ROBOT" "$EFFECTIVE_CFG"
+                    EFFECTIVE_VIEW_MODE="local"
+                    if [[ ! -f "$LOCAL_TEMPLATE_CFG" ]]; then
+                        echo "ERROR: Local RViz template config not found at: $LOCAL_TEMPLATE_CFG" >&2
+                        exit 1
+                    fi
+                    EFFECTIVE_CFG="$(mktemp "/tmp/central_rviz_auto_local_${EFFECTIVE_ROBOT}_XXXX.rviz")"
+                    generate_local_cfg "$EFFECTIVE_ROBOT" "$EFFECTIVE_CFG"
                 fi
             fi
         fi
     fi
 
-    echo "Starting RViz in GLOBAL mode using:"
+    echo "Starting RViz in ${EFFECTIVE_VIEW_MODE^^} mode using:"
     echo "  $EFFECTIVE_CFG"
     if [[ -n "$EFFECTIVE_ROBOT" ]]; then
         echo "Detected single active robot: ${EFFECTIVE_ROBOT}"
@@ -228,6 +226,9 @@ if [[ "$MODE" == "global" ]]; then
     echo "Effective ROS_DOMAIN_ID: ${EFFECTIVE_DOMAIN}"
     echo "Domain source: ${DOMAIN_SOURCE}"
     echo "Fixed frame: ${EFFECTIVE_FIXED_FRAME}, map topic: ${EFFECTIVE_MAP_TOPIC}"
+    if [[ "$EFFECTIVE_VIEW_MODE" == "local" ]]; then
+        echo "Costmap overlays: /${EFFECTIVE_ROBOT}/global_costmap/costmap and /${EFFECTIVE_ROBOT}/local_costmap/costmap"
+    fi
     exec rviz2 -d "$EFFECTIVE_CFG"
 else
     if [[ -z "$ROBOT_NAME" ]]; then
@@ -264,11 +265,7 @@ else
 
     # Substitute __ROBOT__ placeholder with the requested robot namespace.
     local_fixed_frame="${ROBOT_NAME}/map"
-    if command -v perl >/dev/null 2>&1; then
-        perl -pe "s/__ROBOT__/${ROBOT_NAME}/g; s#Fixed Frame: map#Fixed Frame: ${local_fixed_frame}#g" "$LOCAL_TEMPLATE_CFG" > "$TMP_CFG"
-    else
-        sed -e "s/__ROBOT__/${ROBOT_NAME}/g" -e "s#Fixed Frame: map#Fixed Frame: ${local_fixed_frame}#g" "$LOCAL_TEMPLATE_CFG" > "$TMP_CFG"
-    fi
+    generate_local_cfg "$ROBOT_NAME" "$TMP_CFG"
 
     echo "Starting RViz in LOCAL mode for robot '${ROBOT_NAME}' using:"
     echo "  $TMP_CFG"
