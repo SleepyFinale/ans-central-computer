@@ -1,6 +1,7 @@
 # Map merge params for the multi-robot fleet (unknown initial poses).
 # Expects /<robot>/map from each robot's SLAM (e.g. Blinky, Pinky, Inky, Clyde).
-# map_merge discovers inputs by topic; add/remove robots via running stacks, not this file.
+# map_merge discovers inputs by topic; add/remove robots via running stacks,
+# not by editing a static robot list in this file.
 #
 # How it works:
 #   - Pose estimation uses AKAZE feature matching to detect map overlap.
@@ -21,10 +22,10 @@
 
 map_merge:
   ros__parameters:
-    # Slightly faster merge/estimate cycles help recover alignment after weak matches;
-    # if FLANN/OpenCV disables pose estimation, restart map_merge (see start_central.sh).
-    # Slightly slower merge cadence + faster pose updates reduces TF quaternion
-    # invalid / weak-match flip-flop seen under two-robot load (tune after Nav2 stable).
+    # Tuned cadence:
+    # - merge updates stay responsive without overloading CPU on central.
+    # - pose estimation remains frequent enough for TF stability in weak overlap.
+    # If OpenCV/FLANN disables pose estimation, restart map_merge (see start_central.sh).
     merging_rate: 4.0
     discovery_rate: 0.08
     estimation_rate: 1.0

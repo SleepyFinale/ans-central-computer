@@ -1,5 +1,7 @@
 # Capstone architecture (nested “boxes in boxes” diagrams)
 
+> Status note: This document is a conceptual architecture reference. For current fleet operations in this repository, treat **bridged domains** as canonical and **shared-domain** descriptions as historical context only.
+
 These diagrams are meant to answer, at a glance:
 
 - **What** big functions exist (outer box)
@@ -48,15 +50,15 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-  subgraph Robots["Individual Robots (SBCs)"]
+  subgraph Robots["Individual Robots (SBCs, per-robot domain IDs in bridged mode)"]
     direction TB
-    r1["Robot: Blinky (ns=/blinky, ROS_DOMAIN_ID=50)"]
-    r2["Robot: Pinky (ns=/pinky, ROS_DOMAIN_ID=50)"]
-    r3["Robot: Inky (ns=/inky, ROS_DOMAIN_ID=50)"]
-    r4["Robot: Clyde (ns=/clyde, ROS_DOMAIN_ID=50)"]
+    r1["Robot: Blinky (ns=/blinky, per-robot ROS_DOMAIN_ID)"]
+    r2["Robot: Pinky (ns=/pinky, per-robot ROS_DOMAIN_ID)"]
+    r3["Robot: Inky (ns=/inky, per-robot ROS_DOMAIN_ID)"]
+    r4["Robot: Clyde (ns=/clyde, per-robot ROS_DOMAIN_ID)"]
   end
 
-  subgraph Central["Central Computer (Shared Domain: ROS_DOMAIN_ID=50)"]
+  subgraph Central["Central Computer (bridged domain profile from fleet_domain_map.yaml)"]
     direction TB
     centralMapping["Function: GlobalMapping"]
     centralTasking["Function: Frontier+TaskAllocation"]
@@ -71,7 +73,7 @@ flowchart TB
     guiStatus["Robot status panel"]
   end
 
-  Robots -->|"sensor+pose+maps (namespaced topics, shared domain)"| Central
+  Robots -->|"sensor+pose+maps via bridge contract"| Central
   Central -->|"waypoints / safety commands (capstone contract)"| Robots
   Central -->|"map+poses+events"| GUI
   Robots -->|"video + object detections"| GUI
@@ -81,7 +83,7 @@ flowchart TB
 
 ## Function: GlobalMapping (multi-robot SLAM + map merge) — matches current workspace
 
-This function already exists in your central workspace. The fleet (Blinky, Pinky, Inky, Clyde) runs **namespaced** Nav2 + SLAM stacks on a shared domain (e.g. `ROS_DOMAIN_ID=50`), and the central computer consumes their maps and TF directly without domain bridges.
+This function already exists in your central workspace. The fleet (Blinky, Pinky, Inky, Clyde) runs **namespaced** Nav2 + SLAM stacks with per-robot domains, and the central computer consumes contract topics/actions through configured domain bridges.
 
 - **TF stitching**: `src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
 - **Single-robot world link**: `src/m-explore-ros2/explore/scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
@@ -142,17 +144,18 @@ flowchart TB
 
 ### Note on laser scan normalization
 
-- Your bridged topic list currently includes **`/blinky/scan_normalized`** and **`/pinky/scan_normalized`** (see `config/domain_bridge/*_bridge.yaml`), and your SLAM params consume `scan_topic: /<robot>/scan_normalized`.
-- The `multirobot_slam.launch.py` file also starts a central normalizer that expects `/<robot>/scan`. If you keep using robot-side normalization (common), that central normalizer is effectively optional. If you want central-side normalization, ensure `/<robot>/scan` is bridged into domain 50.
+- In the current central workflow, scan topics are bridged from `fleet_bridge_contract.yaml` + `fleet_domain_map.yaml` via generated files under `config/generated_domain_bridge/`.
+- If robot-side SLAM already uses normalized scans (for example `/<robot>/scan_normalized`), keep that topic contract consistent between robot launch params and bridge contract entries.
+- If you switch to central-side normalization, ensure raw `/<robot>/scan` is present on the central graph and update robot SLAM params accordingly.
 
 ---
 
 ## Function: Frontier detection + waypoint assignment + navigation (capstone contract)
 
-Your current workspace includes per-robot **Nav2** and per-robot **Explore Lite** in the aggregation domain:
+Your current workspace includes per-robot **Nav2** on each robot and a central explorer started from:
 
-- Launch: `src/turtlebot3/turtlebot3_navigation2/launch/multirobot_nav2_explore.launch.py`
-- Starter: `scripts/start_multirobot_nav2_explore.sh`
+- `scripts/core/start_central.sh` (central orchestration: TF relay, map merge where applicable, explorer)
+- `scripts/core/start_rviz_central.sh` (central RViz helper)
 
 For the capstone requirement (“optimized waypoints”, “minimize overlap”), you typically add a **central TaskAllocator** that assigns frontiers/waypoints per robot (instead of each robot greedily exploring on its own).
 

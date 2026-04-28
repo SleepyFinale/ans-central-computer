@@ -1,5 +1,7 @@
 fleet_bridge_contract:
   version: 1
+  # Contract is documentation-first: generator uses topic/msg_type fields and
+  # ignores advisory keys like qos/max_hz/purpose.
   intent: "Local-first robot autonomy with low-rate central observability."
 
   robot_to_central:
@@ -31,6 +33,8 @@ fleet_bridge_contract:
       max_hz: 0.5
       purpose: "High-level mission goals only."
     - topic: "/{robot}/navigate_to_pose/_action/cancel_goal"
+      # Action services are relayed by fleet_navigate_to_pose_service_relay.py.
+      # This pseudo-type is kept for contract readability.
       msg_type: "action cancel service"
       qos: "service_qos"
       max_hz: 0.5

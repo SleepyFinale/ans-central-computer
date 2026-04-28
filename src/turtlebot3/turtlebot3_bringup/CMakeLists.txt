@@ -20,10 +20,15 @@ find_package(ament_cmake REQUIRED)
 ################################################################################
 # Install
 ################################################################################
-install(
-  DIRECTORY launch param script
-  DESTINATION share/${PROJECT_NAME}
-)
+set(_tb3_bringup_share_dirs launch param script)
+foreach(_dir IN LISTS _tb3_bringup_share_dirs)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}")
+    install(
+      DIRECTORY ${_dir}
+      DESTINATION share/${PROJECT_NAME}
+    )
+  endif()
+endforeach()
 
 ################################################################################
 # Macro for ament package

@@ -42,6 +42,10 @@
 
 #include <iostream>
 #include <cassert>
+#include <cerrno>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <opencv2/core/utility.hpp>
 #include <opencv2/core/version.hpp>
 #include <opencv2/features2d.hpp>
@@ -102,6 +106,17 @@ namespace combine_grids
       const std::vector < cv::detail::ImageFeatures > & image_features,
       const std::vector < cv::detail::MatchesInfo > & pairwise_matches)
     {
+      const std::string debug_root_dir = "debug";
+      const std::string debug_match_dir = "debug/matches";
+      if (mkdir(debug_root_dir.c_str(), 0755) != 0 && errno != EEXIST) {
+        std::cerr << "Warning: unable to create debug dir '" << debug_root_dir
+                  << "'. Writing match images to current directory." << std::endl;
+      }
+      if (mkdir(debug_match_dir.c_str(), 0755) != 0 && errno != EEXIST) {
+        std::cerr << "Warning: unable to create debug dir '" << debug_match_dir
+                  << "'. Writing match images to current directory." << std::endl;
+      }
+
       for (auto & match_info : pairwise_matches) {
         if (match_info.H.empty() ||
           match_info.src_img_idx >= match_info.dst_img_idx)
@@ -130,9 +145,11 @@ namespace combine_grids
           images[size_t(match_info.dst_img_idx)],
           image_features[size_t(match_info.dst_img_idx)].keypoints,
           match_info.matches, img);
-        cv::imwrite(
+        const std::string pair_prefix =
           std::to_string(match_info.src_img_idx) + "_" +
-          std::to_string(match_info.dst_img_idx) + "_matches.png",
+          std::to_string(match_info.dst_img_idx);
+        cv::imwrite(
+          debug_match_dir + "/" + pair_prefix + "_matches.png",
           img);
         // draw inliers only
         cv::drawMatches(
@@ -143,9 +160,7 @@ namespace combine_grids
           match_info.matches, img, cv::Scalar::all(-1), cv::Scalar::all(-1),
           *reinterpret_cast < const std::vector < char > * > (&match_info.inliers_mask));
         cv::imwrite(
-          std::to_string(match_info.src_img_idx) + "_" +
-          std::to_string(match_info.dst_img_idx) +
-          "_matches_inliers.png",
+          debug_match_dir + "/" + pair_prefix + "_matches_inliers.png",
           img);
       }
     }

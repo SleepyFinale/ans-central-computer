@@ -1,8 +1,12 @@
 fleet_domain_map:
   version: 1
-  # Central coordination domain. Keep this separated from all robot domains.
+  # Central coordination domain used by central-computer processes.
+  # Must not collide with any robot domain in robot_domain_ids.
   central_domain_id: 50
-  # Deterministic per-robot domain assignments.
+  # Deterministic per-robot domain assignments consumed by:
+  # - scripts/core/start_central.sh
+  # - scripts/bridging/generate_domain_bridge_configs.py
+  # - scripts/core/start_rviz_central.sh (local mode auto-domain switch)
   robot_domain_ids:
     blinky: 05
     pinky: 22
