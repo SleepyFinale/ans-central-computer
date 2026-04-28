@@ -1,7 +1,7 @@
 #!/bin/bash
 # Shared implementation for central workspace rebuild scripts.
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
@@ -15,172 +15,198 @@ fi
 if [[ "$MODE" == "clean" ]]; then
     BUILD_LABEL="Clean Rebuild"
     BUILD_CMD_HINT="./scripts/build/clean_rebuild.sh"
-    BUILD_STEP_MSG="Step 5: Building workspace (this may take a while)..."
-    BUILD_DESC_1="  - Using colcon build with symlink-install"
-    BUILD_DESC_2="  - This will build all packages in dependency order"
     PACKAGES_UP_TO=""
 else
     BUILD_LABEL="Minimal Rebuild"
     BUILD_CMD_HINT="./scripts/build/minimal_rebuild.sh"
-    BUILD_STEP_MSG="Step 5: Building minimal central package set..."
-    BUILD_DESC_1="  Building packages needed for:"
-    BUILD_DESC_2="    - ./scripts/core/start_central.sh (TF relay, map merge, explorer)"
-    BUILD_DESC_3="    - ./scripts/core/start_rviz_central.sh (RViz configs)"
     PACKAGES_UP_TO="multirobot_map_merge"
 fi
 
+REBUILD_LOG_PROFILE="${REBUILD_LOG_PROFILE:-clean}"
+if [[ "$REBUILD_LOG_PROFILE" != "clean" && "$REBUILD_LOG_PROFILE" != "verbose" ]]; then
+    echo "Invalid REBUILD_LOG_PROFILE='${REBUILD_LOG_PROFILE}'. Use clean or verbose."
+    exit 1
+fi
+
+log_info() {
+    echo "[INFO] $*"
+}
+
+log_warn() {
+    echo "[WARN] $*"
+}
+
+log_error() {
+    echo "[ERROR] $*" >&2
+}
+
+log_ok() {
+    echo "[OK] $*"
+}
+
+phase_start() {
+    local label="$1"
+    CURRENT_PHASE="$label"
+    CURRENT_PHASE_START="$(date +%s)"
+    log_info "${label}..."
+}
+
+phase_done() {
+    local now elapsed
+    now="$(date +%s)"
+    elapsed=$((now - CURRENT_PHASE_START))
+    log_ok "${CURRENT_PHASE} (${elapsed}s)"
+}
+
+print_build_failure_tail() {
+    local log_file="$1"
+    local tail_lines="${2:-50}"
+    log_error "Build failed. Showing last ${tail_lines} lines from ${log_file}:"
+    if [[ -f "$log_file" ]]; then
+        tail -n "$tail_lines" "$log_file"
+    else
+        log_error "Build log file not found."
+    fi
+}
+
+START_TS="$(date +%s)"
+CURRENT_PHASE=""
+CURRENT_PHASE_START="$START_TS"
+
 echo "=========================================="
-echo "${BUILD_LABEL} Script for central workspace"
+echo "${BUILD_LABEL} (profile: ${REBUILD_LOG_PROFILE})"
 echo "=========================================="
-echo ""
 
 cd "$WS_DIR"
-if [ ! -d "src" ]; then
-    echo "Error: Must run from workspace root (e.g. central-computer/)"
+if [[ ! -d "src" ]]; then
+    log_error "Must run from workspace root (e.g. central-computer/)"
     exit 1
 fi
 
 WORKSPACE_ROOT="$(pwd)"
-if [ -n "$AMENT_PREFIX_PATH" ]; then
-    export AMENT_PREFIX_PATH=$(echo "$AMENT_PREFIX_PATH" | tr ':' '\n' | grep -v "^${WORKSPACE_ROOT}/install" | tr '\n' ':' | sed 's/:$//')
+if [[ -n "${AMENT_PREFIX_PATH:-}" ]]; then
+    export AMENT_PREFIX_PATH
+    AMENT_PREFIX_PATH="$(echo "$AMENT_PREFIX_PATH" | tr ':' '\n' | sed "/^${WORKSPACE_ROOT//\//\\/}\/install/d" | tr '\n' ':' | sed 's/:$//')"
 fi
-if [ -n "$CMAKE_PREFIX_PATH" ]; then
-    export CMAKE_PREFIX_PATH=$(echo "$CMAKE_PREFIX_PATH" | tr ':' '\n' | grep -v "^${WORKSPACE_ROOT}/install" | tr '\n' ':' | sed 's/:$//')
+if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then
+    export CMAKE_PREFIX_PATH
+    CMAKE_PREFIX_PATH="$(echo "$CMAKE_PREFIX_PATH" | tr ':' '\n' | sed "/^${WORKSPACE_ROOT//\//\\/}\/install/d" | tr '\n' ':' | sed 's/:$//')"
 fi
 
-echo "Step 1: Sourcing base ROS Humble environment..."
+phase_start "Source ROS base environment"
 source /opt/ros/humble/setup.bash
+phase_done
 
-echo ""
-echo "Step 2: Cleaning build and install directories..."
-echo "  - Removing build/ directory..."
-rm -rf build/
-echo "  - Removing install/ directory..."
-rm -rf install/
-echo "  - Removing log/ directory..."
-rm -rf log/
-echo "  ✓ Cleanup complete"
+phase_start "Clean workspace artifacts"
+rm -rf build/ install/ log/
+mkdir -p log/
+phase_done
 
-echo ""
-echo "Step 3: Checking system dependencies..."
+phase_start "Check system dependencies"
 MISSING_DEPS=()
 REQUIRED_DEPS=()
 for dep_check in "${REQUIRED_DEPS[@]}"; do
     IFS=':' read -r pkg_name display_name <<< "$dep_check"
-    if ! dpkg -l | grep -q "$pkg_name"; then
+    if ! dpkg -l | awk '{print $2}' | grep -x "$pkg_name" >/dev/null 2>&1; then
         MISSING_DEPS+=("$pkg_name")
-        echo "  ✗ Missing: $display_name ($pkg_name)"
-    else
-        echo "  ✓ Found: $display_name"
+        [[ "$REBUILD_LOG_PROFILE" == "verbose" ]] && log_warn "Missing: ${display_name} (${pkg_name})"
+    elif [[ "$REBUILD_LOG_PROFILE" == "verbose" ]]; then
+        log_ok "Found: ${display_name}"
     fi
 done
-if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
-    echo ""
-    echo "  ⚠ Missing dependencies detected!"
-    echo ""
-    echo "  Please install them with:"
-    echo "    sudo apt install -y ${MISSING_DEPS[*]}"
-    echo ""
-    read -p "  Continue anyway? (build may fail) (y/n): " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "  Exiting. Please install dependencies first."
+if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    log_warn "Missing dependencies: ${MISSING_DEPS[*]}"
+    echo "Install with: sudo apt install -y ${MISSING_DEPS[*]}"
+    read -r -p "Continue anyway? (build may fail) (y/n): " -n 1
+    echo
+    if [[ ! "${REPLY:-}" =~ ^[Yy]$ ]]; then
+        log_error "Exiting. Please install dependencies first."
         exit 1
     fi
-    echo "  ⚠ Continuing without all dependencies (build may fail)"
-else
-    echo "  ✓ All listed dependencies found"
 fi
+phase_done
 
-echo ""
-echo "Step 4: Verifying Navigation2 system packages..."
-PKG_LIST_NAV2=$(ros2 pkg list 2>/dev/null || echo "")
-if ! echo "$PKG_LIST_NAV2" | grep -q "^nav2_msgs$"; then
-    echo "  ✗ Navigation2 packages not found!"
-    echo ""
-    echo "  This workspace uses system Navigation2 packages (installed via apt)"
-    echo "  so that the multi-robot explorer can use nav2_msgs NavigateToPose."
-    echo ""
-    echo "  Please install Navigation2 before building:"
-    echo ""
-    echo "    sudo apt update"
-    echo "    sudo apt install ros-humble-navigation2"
-    echo ""
-    echo "  After installing, source ROS again and retry:"
-    echo "    source /opt/ros/humble/setup.bash"
-    echo "    ${BUILD_CMD_HINT}"
-    echo ""
+phase_start "Verify Navigation2 packages"
+PKG_LIST_NAV2="$(ros2 pkg list 2>/dev/null || echo "")"
+if ! echo "$PKG_LIST_NAV2" | grep -x "nav2_msgs" >/dev/null 2>&1; then
+    log_error "Navigation2 packages not found."
+    echo "Install with:"
+    echo "  sudo apt update"
+    echo "  sudo apt install ros-humble-navigation2"
+    echo "Then retry:"
+    echo "  source /opt/ros/humble/setup.bash"
+    echo "  ${BUILD_CMD_HINT}"
     exit 1
-else
-    echo "  ✓ Navigation2 packages found (nav2_msgs present)"
 fi
+phase_done
 
-echo ""
-echo "${BUILD_STEP_MSG}"
-echo "${BUILD_DESC_1}"
-echo "${BUILD_DESC_2}"
-if [[ -n "${BUILD_DESC_3:-}" ]]; then
-    echo "${BUILD_DESC_3}"
-fi
-if [[ "$MODE" == "minimal" ]]; then
-    echo ""
-    echo "  Using --packages-up-to to include dependencies for multirobot_map_merge"
-fi
-echo ""
-
-if [ -z "$PARALLEL_JOBS" ]; then
-    NUM_CORES=$(nproc)
+if [[ -z "${PARALLEL_JOBS:-}" ]]; then
+    NUM_CORES="$(nproc)"
     PARALLEL_JOBS=$((NUM_CORES / 2))
-    if [ $PARALLEL_JOBS -lt 1 ]; then
+    if [[ $PARALLEL_JOBS -lt 1 ]]; then
         PARALLEL_JOBS=1
-    elif [ $PARALLEL_JOBS -gt 4 ]; then
+    elif [[ $PARALLEL_JOBS -gt 4 ]]; then
         PARALLEL_JOBS=4
     fi
 fi
 
 if command -v free >/dev/null 2>&1; then
-    AVAIL_MEM_GB=$(free -g | awk '/^Mem:/ {print $7}')
-    if [ "$AVAIL_MEM_GB" -lt 4 ]; then
-        echo "  ⚠ Warning: Only ${AVAIL_MEM_GB}GB free memory detected"
-        echo "  ⚠ Consider closing other applications or reducing parallel jobs"
-        echo "  ⚠ You can set PARALLEL_JOBS=2 to use fewer workers"
-        echo ""
+    AVAIL_MEM_GB="$(free -g | awk '/^Mem:/ {print $7}')"
+    if [[ "$AVAIL_MEM_GB" -lt 4 ]]; then
+        log_warn "Only ${AVAIL_MEM_GB}GB free memory detected. Consider PARALLEL_JOBS=2."
     fi
 fi
-
-echo "  - Building with $PARALLEL_JOBS parallel workers (to prevent memory issues)"
-echo "  - To override: PARALLEL_JOBS=N ${BUILD_CMD_HINT}"
-echo ""
 
 COLCON_ARGS=(build --symlink-install --parallel-workers "$PARALLEL_JOBS" --cmake-args -DBUILD_TESTING=OFF)
 if [[ -n "$PACKAGES_UP_TO" ]]; then
     COLCON_ARGS+=(--packages-up-to "$PACKAGES_UP_TO")
 fi
-colcon "${COLCON_ARGS[@]}"
 
-echo ""
-echo "=========================================="
-echo "✓ Build completed successfully!"
-echo "=========================================="
-echo ""
-echo "Step 6: Sourcing workspace..."
+BUILD_LOG_FILE="log/rebuild_colcon_$(date +%Y%m%d_%H%M%S).log"
+phase_start "Build workspace (mode=${MODE}, workers=${PARALLEL_JOBS})"
+if [[ "$REBUILD_LOG_PROFILE" == "verbose" ]]; then
+    log_info "Streaming build output to terminal and ${BUILD_LOG_FILE}"
+    if ! colcon "${COLCON_ARGS[@]}" 2>&1 | tee "$BUILD_LOG_FILE"; then
+        print_build_failure_tail "$BUILD_LOG_FILE" 80
+        exit 1
+    fi
+else
+    log_info "Detailed build log: ${BUILD_LOG_FILE}"
+    if ! colcon "${COLCON_ARGS[@]}" >"$BUILD_LOG_FILE" 2>&1; then
+        print_build_failure_tail "$BUILD_LOG_FILE" 80
+        exit 1
+    fi
+fi
+phase_done
+
+phase_start "Source workspace environment"
 WS_DIR="$WS_DIR" source "${WS_DIR}/scripts/env/ros_robot_env.bash"
-echo "  ✓ Workspace sourced via ros_robot_env.bash"
-echo ""
-echo "Verifying key packages are available..."
-PKG_LIST=$(ros2 pkg list 2>/dev/null || echo "")
-if echo "$PKG_LIST" | grep -q "^multirobot_map_merge$"; then
-    echo "  ✓ multirobot_map_merge is available"
+phase_done
+
+phase_start "Verify key packages"
+PKG_LIST="$(ros2 pkg list 2>/dev/null || echo "")"
+if echo "$PKG_LIST" | grep -x "multirobot_map_merge" >/dev/null 2>&1; then
+    log_ok "multirobot_map_merge is available"
 else
-    echo "  ✗ multirobot_map_merge not found"
+    log_warn "multirobot_map_merge not found"
 fi
-echo ""
+phase_done
+
+END_TS="$(date +%s)"
+TOTAL_SEC=$((END_TS - START_TS))
+
+echo
+echo "=========================================="
+log_ok "Rebuild complete (${TOTAL_SEC}s)"
+echo "Mode: ${MODE}"
+echo "Profile: ${REBUILD_LOG_PROFILE}"
+echo "Colcon log: ${WORKSPACE_ROOT}/${BUILD_LOG_FILE}"
 if [[ "$MODE" == "minimal" ]]; then
-    echo "Workspace is ready to use for central scripts!"
+    echo "Workspace is ready for central scripts."
 else
-    echo "Workspace is ready to use!"
+    echo "Workspace is ready."
 fi
-echo ""
-echo "You can now run:"
+echo "Next commands:"
 echo "  - ./scripts/core/start_central.sh"
 echo "  - ./scripts/core/start_rviz_central.sh"
+echo "=========================================="

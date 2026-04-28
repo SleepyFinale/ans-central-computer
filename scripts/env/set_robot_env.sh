@@ -7,8 +7,8 @@
 set_robot_usage() {
   echo "Usage: source scripts/env/set_robot_env.sh <robot> [ip]"
   echo ""
-  echo "  robot   One of: blinky, pinky, inky, clyde"
-  echo "  ip      Optional. Override auto-detected IP (e.g. non-standard network)."
+  echo "  robot   blinky|pinky|inky|clyde (auto-detected) OR custom robot name"
+  echo "  ip      Required for custom robot names; ignored for the original four."
   echo ""
   echo "  WiFi auto-detection: Script detects SNS (lab), GCRI_LAB (gcri), or RaspAP (rpi)."
   echo ""
@@ -46,6 +46,14 @@ get_network_from_ssid() {
 
 robot=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
 ip="${2:-}"
+
+case "$robot" in
+  blinky|pinky|inky|clyde)
+    if [ -n "$ip" ]; then
+      echo "Note: Ignoring manual IP override for original robot '$robot'; using WiFi auto-detection."
+    fi
+    ;;
+esac
 
 # Robot IPs by network. Matches ans-turtlebot3 scripts/wifi/switch_wifi.sh.
 BLINKY_LAB=192.168.0.158
@@ -102,22 +110,17 @@ case "$robot" in
     echo "Robot: Inky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     ;;
   clyde)
-    if [ -n "$ip" ]; then
-      export ROBOT_SSH="clyde@$ip"
-      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (manual IP override)"
-    else
-      ssid=$(get_wifi_ssid)
-      net=$(get_network_from_ssid "$ssid")
-      case "$net" in
-        lab)   export ROBOT_SSH="clyde@$CLYDE_LAB" ;;
-        gcri)  export ROBOT_SSH="clyde@$CLYDE_GCRI" ;;
-        rpi)   export ROBOT_SSH="clyde@$CLYDE_RPI" ;;
-        *)     export ROBOT_SSH="clyde@$CLYDE_LAB"
-               echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-               ;;
-      esac
-      echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
-    fi
+    ssid=$(get_wifi_ssid)
+    net=$(get_network_from_ssid "$ssid")
+    case "$net" in
+      lab)   export ROBOT_SSH="clyde@$CLYDE_LAB" ;;
+      gcri)  export ROBOT_SSH="clyde@$CLYDE_GCRI" ;;
+      rpi)   export ROBOT_SSH="clyde@$CLYDE_RPI" ;;
+      *)     export ROBOT_SSH="clyde@$CLYDE_LAB"
+             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
+             ;;
+    esac
+    echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
     ;;
   "")
     set_robot_usage
@@ -128,8 +131,14 @@ case "$robot" in
     return 0 2>/dev/null || exit 0
     ;;
   *)
-    echo "Unknown robot: $1"
-    set_robot_usage
-    return 1 2>/dev/null || exit 1
+    if [ -z "$ip" ]; then
+      echo "Unknown robot: $1"
+      echo "For non-original robots, provide an explicit IP override:"
+      echo "  source scripts/env/set_robot_env.sh <robot> <ip>"
+      set_robot_usage
+      return 1 2>/dev/null || exit 1
+    fi
+    export ROBOT_SSH="${robot}@${ip}"
+    echo "Robot: ${robot}  ROBOT_SSH=$ROBOT_SSH  (manual IP override for non-original robot)"
     ;;
 esac

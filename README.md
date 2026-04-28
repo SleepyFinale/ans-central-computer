@@ -15,10 +15,13 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
    - [Robot Terminal 1: Robot Bringup](#robot-terminal-1-robot-bringup)
    - [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)
    - [Central Terminals: start_central.sh + RViz](#central-terminals-start_centralsh--rviz)
-5. [Troubleshooting](#troubleshooting)
-6. [Diagnostic Commands](#diagnostic-commands)
-7. [Additional Resources](#additional-resources)
-8. [Workspace Structure](#workspace-structure)
+5. [System architecture (how it works)](#system-architecture-how-it-works)
+6. [Troubleshooting](#troubleshooting)
+7. [Diagnostic Commands](#diagnostic-commands)
+8. [Additional Resources](#additional-resources)
+9. [Workspace Structure](#workspace-structure)
+10. [Compatibility Matrix](#compatibility-matrix)
+11. [Contributing and Validation Workflow](#contributing-and-validation-workflow)
 
 ---
 
@@ -65,35 +68,59 @@ The installation process includes:
 3. Setting up the environment
 4. Installing additional tools (colcon, argcomplete, etc.)
 
-**Quick summary:**
+**Central install checklist (required for `start_central.sh` + `start_rviz_central.sh`):**
 
 ```bash
-# Set locale
+# 1) Set locale
 sudo apt update && sudo apt install locales
 sudo locale-gen en_US en_US.UTF-8
 sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 export LANG=en_US.UTF-8
 
-# Add ROS 2 apt repository
+# 2) Add ROS 2 apt repository (keyring-based; Ubuntu 22.04)
 sudo apt install software-properties-common
 sudo add-apt-repository universe
-sudo apt update && sudo apt install curl -y
-sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
-sudo add-apt-repository "deb [arch=$(dpkg --print-architecture)] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main"
+sudo apt update && sudo apt install curl gnupg lsb-release -y
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | \
+  sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
 
-# Install ROS 2 Humble
+# 3) Install ROS 2 Humble base
 sudo apt update
 sudo apt install ros-humble-desktop
 
-# Install Navigation2 and SLAM Toolbox packages (required - workspace uses system packages)
-sudo apt install ros-humble-navigation2 ros-humble-slam-toolbox
+# 4) Install central-required ROS packages
+# - navigation2/nav2_msgs used by central exploration packages
+# - slam-toolbox used by map/SLAM workflow
+# - domain-bridge required by bridged_domains mode in start_central.sh
+sudo apt install ros-humble-navigation2 ros-humble-slam-toolbox ros-humble-domain-bridge
 
-# Install development tools
-sudo apt install python3-colcon-common-extensions python3-argcomplete
+# 5) Install central-required Python/system tools
+# - yaml is required by central startup/config scripts
+# - numpy is required by multi_robot_explorer.py
+sudo apt install python3-colcon-common-extensions python3-argcomplete python3-yaml python3-numpy python3-rosdep
 
-# Source ROS 2 setup
+# 6) Source ROS and resolve workspace package dependencies
 source /opt/ros/humble/setup.bash
+sudo rosdep init 2>/dev/null || true
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+
+# 7) Build central workspace
+bash scripts/build/rebuild_common.sh clean
+
+# 8) Optional preflight checks
+python3 -c "import yaml, numpy; print('python deps ok')"
+ros2 pkg list | grep -E 'nav2_msgs|domain_bridge'
+command -v rviz2
 ```
+
+After this checklist completes, continue to the run section and start:
+
+- `./scripts/core/start_central.sh`
+- `./scripts/core/start_rviz_central.sh`
 
 **Note:** This workspace uses system Navigation2 packages (installed via apt) for faster builds. The workspace contains:
 
@@ -131,53 +158,43 @@ You can now branch, push, and pull changes as needed for your development workfl
 
 ### Building the Workspace
 
-The workspace includes two build scripts in the `scripts/` folder to help you build and source everything:
+The workspace build entrypoint is:
 
-#### `scripts/build/clean_rebuild.sh`
+#### `scripts/build/rebuild_common.sh <clean|minimal>`
 
-Performs a complete clean rebuild of the entire workspace:
+It supports two modes:
+
+- `clean`: complete clean rebuild of the workspace.
+- `minimal`: rebuild only central-PC essentials (`multirobot_map_merge` and dependencies).
+
+In both modes, it:
 
 - Removes all build artifacts (`build/`, `install/`, `log/` directories)
 - Checks for system dependencies
-- Builds all packages from scratch
+- Verifies Navigation2 packages are installed
+- Builds with `colcon` and saves a build log under `log/`
 - Sources the workspace automatically after build
 
 **Usage:**
 
 ```bash
 cd ~/central-computer
-./scripts/build/clean_rebuild.sh
+bash scripts/build/rebuild_common.sh clean
+# or
+bash scripts/build/rebuild_common.sh minimal
 ```
 
 **When to use:**
 
 - First-time setup
-- After major changes to multiple packages
+- `clean` after major changes across multiple packages
 - When experiencing build issues that require a clean slate
 - After pulling significant changes from the repository
-
-#### `scripts/build/minimal_rebuild.sh`
-
-Performs a minimal rebuild of only the central-PC essentials:
-
-- Removes build artifacts
-- Builds only packages needed to run:
+- `minimal` for faster central-only iteration when you mostly need:
   - `./scripts/core/start_central.sh`
   - `./scripts/core/start_rviz_central.sh`
 
-**Usage:**
-
-```bash
-cd ~/central-computer
-./scripts/build/minimal_rebuild.sh
-```
-
-**When to use:**
-
-- After making small changes that only affect the central PC
-- Faster rebuild times during development when you just need the central explorer / map merge / RViz pieces
-
-**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot> [ip]`. If you need to manually source the workspace:
+**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot>` (manual IP override is only for robots outside the original four). If you need to manually source the workspace:
 
 ```bash
 cd ~/central-computer
@@ -197,6 +214,50 @@ The `scripts/` folder is organized by purpose:
 - `scripts/diagnostics/`: TF/map/debug tools and bag capture
 - `scripts/validation/`: KPI and log validation utilities
 - `scripts/plotting/`: plotting helpers
+
+## 10-Minute Operator Quickstart
+
+Use this when you need a clean fleet bring-up without reading the full runbook first.
+
+- **[CENTRAL-PC] Build and source**
+
+  ```bash
+  cd ~/central-computer
+  bash scripts/build/rebuild_common.sh minimal
+  source scripts/env/ros_domain_profile.bash
+  source scripts/env/ros_robot_env.bash
+  ```
+
+- **[ROBOT-SBC] On each robot terminal 1**
+
+  ```bash
+  source scripts/env/ros_robot_env.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_bringup robot.launch.py
+  ```
+
+- **[ROBOT-SBC] On each robot terminal 2**
+
+  ```bash
+  source scripts/env/ros_robot_env.bash
+  export TURTLEBOT3_MODEL=burger
+  ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
+    use_sim_time:=false use_rviz:=false fleet_mode:=true nav2_use_local_slam_map:=true
+  ```
+
+- **[CENTRAL-PC] Start central stack, then RViz**
+
+  ```bash
+  ./scripts/core/start_central.sh
+  ./scripts/core/start_rviz_central.sh
+  ```
+
+- **[CENTRAL-PC] Confirm merged map and robot actions**
+
+  ```bash
+  ros2 topic echo /map --once
+  ros2 action list | rg navigate_to_pose
+  ```
 
 ## Robot Configuration and ROS Domain
 
@@ -221,7 +282,7 @@ The table below lists the SSH targets for each robot on the supported WiFi netwo
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
-`scripts/env/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, GCRI_LAB, or RaspAP) and picks the correct IP. Pass an optional **second argument** to override the IP (e.g. non-standard subnet); on **Clyde** this bypasses auto-detection entirely.
+`scripts/env/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, GCRI_LAB, or RaspAP) and picks the correct IP. For robots outside the original four, provide a second-argument IP override.
 
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
@@ -237,8 +298,8 @@ source scripts/env/set_robot_env.sh inky
 # or
 source scripts/env/set_robot_env.sh clyde
 
-# Optional: force SSH target (overrides auto-detection), e.g.
-# source scripts/env/set_robot_env.sh clyde 192.168.0.236
+# Optional for non-original robots: force SSH target, e.g.
+# source scripts/env/set_robot_env.sh donatello 192.168.0.250
 ```
 
 Then SSH into the robot:
@@ -249,7 +310,7 @@ ssh $ROBOT_SSH
 
 **Script output:** The script prints the detected network (`lab`, `gcri`, or `rpi`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@192.168.50.158  (network: gcri)`.
 
-When switching between robots, run `source scripts/env/set_robot_env.sh <robot> [ip]` again in each terminal (or open new terminals and source once).
+When switching between robots, run `source scripts/env/set_robot_env.sh <robot>` again in each terminal (or open new terminals and source once).
 
 ### ROS domain (ROS_DOMAIN_ID)
 
@@ -288,6 +349,8 @@ Bridge/domain sources used by startup:
 
 ## Multi-Robot SLAM
 
+For a conceptual walkthrough of responsibilities, data flow, mapping, goal selection, and path planning, see [System architecture (how it works)](#system-architecture-how-it-works) below (after this runbook section).
+
 This repository is the **central computer** side of a multi-robot SLAM system. Each TurtleBot3 robot runs **bringup + SLAM + Nav2 on the robot SBC**, and the central PC handles coordination (`start_central.sh`) and visualization (RViz).
 
 **Canonical robot software** (namespaced `navigation2_slam.launch.py`, SLAM YAML, Nav2 relays) lives in the separate **`ans-turtlebot3`** workspace (often sshfs-mounted from each Pi). A TurtleBot3 tree under `src/turtlebot3/` here may be stale; edit and build the robot workspace on the Pi when deploying launch changes.
@@ -302,15 +365,15 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
 - Robot environment is set (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)): `source scripts/env/set_robot_env.sh <robot>` — this sets `ROBOT_SSH` appropriately.
 
-**Startup order is critical:** For each robot, use **two SSH terminals** to the robot SBC, then run the central scripts on the central PC. Default assumption here is **multi-robot** (two or more active robots). Start robot bringup, then robot SLAM/Nav2, then central coordination (`start_central.sh`), then visualization (`start_rviz_central.sh`). The robot and central stacks still depend on each other when `fleet_mode:=auto`: robot launch can defer parts of Nav2 until global TF is ready, while the central explorer waits for map and Nav2 actions to be available.
+**Canonical startup sequence (multi-robot default):**
 
-**Recommended order (multi-robot default):**
-
-1. On each robot: run bringup (`robot.launch.py`) in terminal 1.
-2. On each robot: run SLAM + Nav2 (`navigation2_slam.launch.py`) in terminal 2.
-3. On central PC: run `./scripts/core/start_central.sh`.
-4. On central PC: run `./scripts/core/start_rviz_central.sh`.
+1. **[ROBOT-SBC]** On each robot: run bringup (`robot.launch.py`) in terminal 1.
+2. **[ROBOT-SBC]** On each robot: run SLAM + Nav2 (`navigation2_slam.launch.py`) in terminal 2.
+3. **[CENTRAL-PC]** Run `./scripts/core/start_central.sh`.
+4. **[CENTRAL-PC]** Run `./scripts/core/start_rviz_central.sh`.
 5. In this default flow, central runs `map_merge` and RViz opens in **GLOBAL** mode with `/map`.
+
+If you use `fleet_mode:=auto`, robots may delay Nav2 activation until the central stack publishes required global TF/map links. That delay is expected in auto mode.
 
 **Faster robot Nav2 startup (optional):**
 
@@ -334,7 +397,7 @@ Single-robot + central is unchanged: `start_central.sh` still uses the static `m
 
 **Purpose:** On the **robot SBC** (after SSH from the central PC), launch the core TurtleBot3 bringup (sensors, base, TF).
 
-**Commands (on the robot SBC):**
+**Commands ([ROBOT-SBC]):**
 
 ```bash
 source scripts/env/ros_robot_env.bash
@@ -411,7 +474,7 @@ urdf_file_name : turtlebot3_burger.urdf
   - `/<robot>/ultrasonic`
 - Robot should respond to velocity commands
 
-**Verification (from the central PC):**
+**Verification ([CENTRAL-PC]):**
 
 ```bash
 cd ~/central-computer
@@ -538,13 +601,13 @@ ros2 topic echo /<robot>/map --once           # Should show map data after SLAM 
 ros2 action list | grep navigate_to_pose      # Should show /<robot>/navigate_to_pose
 ```
 
-With optional **`fleet_mode:=auto`**, Nav2 may still be starting **after** you open the central terminals; SLAM should already be publishing `/<robot>/map`. Repeat Robot Terminal 1 and 2 for each robot, then use two terminals on the **central PC** as follows.
+With optional **`fleet_mode:=auto`**, Nav2 may still be starting **after** you open the central terminals; SLAM should already be publishing `/<robot>/map`. Repeat Robot Terminal 1 and 2 for each robot, then use two terminals on the **central PC** as follows (same canonical sequence above).
 
 ---
 
 ### Central Terminals: start_central.sh + RViz
 
-After at least one robot is running bringup and `navigation2_slam.launch.py`, use two terminals on the **central PC**. In the current flow, **start `start_central.sh` first** and then **start RViz**.
+After at least one robot is running bringup and `navigation2_slam.launch.py`, use two terminals on the **central PC**. In the canonical flow, **start `start_central.sh` first** and then **start RViz**.
 
 - **Central Terminal 1 – coordinator stack**
 
@@ -731,6 +794,110 @@ After at least one robot is running bringup and `navigation2_slam.launch.py`, us
 
 ---
 
+## System architecture (how it works)
+
+This section explains **what runs where**, how **sensor data becomes maps**, how the **central computer** plans exploration, and how each **TurtleBot3** turns goals into motion. It matches the code and launch layout in this repo and in **`ans-turtlebot3`** (the canonical robot-side workspace; often mounted over SSH from each Pi). For step-by-step startup, see [Multi-Robot SLAM](#multi-robot-slam) above.
+
+### Where software runs
+
+| Location | Main responsibilities |
+| -------- | -------------------- |
+| **Robot SBC** (per vehicle) | Hardware bringup, lidar, odometry, and namespaced TF (`/<robot>/tf`, `/<robot>/tf_static`); **SLAM Toolbox** publishing `/<robot>/map`; **Nav2** (planner, controller, behavior tree, costmaps) consuming local topics and emitting `/<robot>/cmd_vel` (or the launch-wired equivalent such as `/<robot>/cmd_vel_nav`). |
+| **Central PC** | [scripts/core/start_central.sh](scripts/core/start_central.sh): merges namespaced TFs into a single **`/tf`** / **`/tf_static`** graph, builds or relays a **global `map`** for RViz and the explorer, runs **`map_merge_state_monitor`**, and runs **`multi_robot_explorer`**. In **`bridged_domains`** mode, generated domain bridges (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)) connect each robot’s ROS domain to the central domain so the same logical topics and actions are visible on the central graph. |
+
+Robot launch entry points (on the Pi) are typically:
+
+- `ros2 launch turtlebot3_bringup robot.launch.py`
+- `ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py`
+
+Central entry points:
+
+- `./scripts/core/start_central.sh`
+- `./scripts/core/start_rviz_central.sh`
+
+### Communications (one paragraph)
+
+Fleet runs should use **`bridged_domains`**: the central computer uses a configured domain ID (e.g. from [config/fleet_domain_map.yaml](config/fleet_domain_map.yaml)), each robot uses a distinct domain from that file, and bridges defined from [config/fleet_bridge_contract.yaml](config/fleet_bridge_contract.yaml) (generated under `config/generated_domain_bridge/`) expose robot topics to the central process. **`shared_domain`** (everyone on one `ROS_DOMAIN_ID`) is kept only for legacy compatibility; this project’s multi-robot SLAM stack expects bridged mode for reliable discovery and load. See [ROS domain (ROS_DOMAIN_ID)](#ros-domain-ros_domain_id) for how to start central with `--comms-mode bridged_domains`.
+
+### End-to-end data flow
+
+1. **Sensors to local map (on the robot):** The lidar stream feeds **SLAM Toolbox** (`async_slam_toolbox_node` in the robot launch), which maintains an occupancy grid **`/<robot>/map`** and the robot-local map chain: **`<robot>/map` → `<robot>/odom` → … → base**. Wheel odometry and the laser drive SLAM; scan normalization and optional relays (see the robot `navigation2_slam.launch.py`) keep Nav2 and SLAM on consistent scan topics.
+2. **From robot namespaces to a single global graph (on the central PC):** Each robot also publishes odom and base state under its namespace. [tf_relay_multirobot.py](src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py) (started by `start_central.sh` with `prefix_frames:=true`) merges **`/<robot>/tf`** and **`/<robot>/tf_static`** from all selected robots into the global **`/tf`** and **`/tf_static`** so RViz, `map_merge`, and the explorer see one world frame tree.
+3. **Global map (multi-robot):** [multirobot_map_merge](src/m-explore-ros2/map_merge) **`map_merge`** (params: [multirobot_params_unknown_poses.yaml](src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml)) subscribes to each **`/<robot>/map`**, estimates relative poses when initial positions are unknown, and publishes a merged **OccupancyGrid** on **`/map`** with **`map`** as world frame, plus (when enabled) **TF** from **`map`** to **`<robot>/map`**. This aligns separate SLAM maps into one grid for **global** frontier planning and visualization.
+4. **Global map (single-robot with central):** If only one robot is selected, `start_central` skips `map_merge` and instead uses [single_robot_world_tf_bridge.py](src/m-explore-ros2/explore/scripts/single_robot_world_tf_bridge.py) (static **`map` → `<robot>/map`**) and [single_robot_map_relay.py](src/m-explore-ros2/explore/scripts/single_robot_map_relay.py) to republish the robot’s map to **`/map`**. The explorer then plans against the same world frame the robot’s Nav2 can use, depending on costmap settings (see [Path 2 below](#path-2-global-frontiers-robot-nav2-maps)).
+5. **Exploration goals:** The central node [multi_robot_explorer.py](src/m-explore-ros2/explore/scripts/multi_robot_explorer.py) subscribes to the configured map source(s), finds **frontiers** (see below), and sends **`nav2_msgs/action/NavigateToPose`** goals. In **`bridged_domains`** mode, `start_central.sh` starts **action relays** so those goals reach each robot’s Nav2 action server from the central graph; the logical action name remains per robot, e.g. **`/<robot>/navigate_to_pose`**.
+6. **Execution:** **Nav2 runs on the robot**, not on the central PC. It plans and tracks paths using its global and local costmaps, the behavior tree navigator, and outputs velocity commands to the base.
+
+```mermaid
+flowchart LR
+  subgraph bot ["Each robot SBC"]
+    lds["Lidar + base"]
+    slam["SLAM Toolbox"]
+    nav2["Nav2 stack"]
+    lds --> slam
+    slam --> nav2
+  end
+  subgraph centralNode ["Central PC start_central.sh"]
+    tfR["tf_relay_multirobot"]
+    mm["map_merge or single_robot map relay"]
+    ex["multi_robot_explorer"]
+    tfR --> mm
+    mm --> ex
+  end
+  slam -->|"tf map topics"| tfR
+  slam -->|"occupancyGrid"| mm
+  ex -->|"NavigateToPose"| nav2
+```
+
+### How a joint map is built
+
+- **Per-robot layer:** Each robot runs **online async SLAM** (parameters live in the robot repo, e.g. `param/humble/mapper_params_online_async_fast.yaml` under `turtlebot3_navigation2`). The map is continuously updated as the robot drives; there is no separate “mapping-only” pass unless you change the launch.
+- **Multi-robot merge layer:** `map_merge` fuses the incoming **`/<robot>/map`** grids. With **unknown initial poses** it uses feature-based alignment (OpenCV / FLANN pipeline in the node) to estimate how each local map sits in a common world frame. Early in a run, estimates can jitter or overlap can be partial—see merge state below.
+- **Stability signal:** [map_merge_state_monitor.py](scripts/diagnostics/map_merge_state_monitor.py) watches TF between **`map`** and each **`<robot>/map`**, optional health topics from `map_merge`, and minimum “known” area per local map, then publishes a string on **`map_merge/merge_state`**: **`NO_OVERLAP`**, **`PARTIAL`**, or **`MERGED`**. The **multi_robot_explorer** uses this in **`mode: auto`** (default in [multi_robot_explorer.yaml](src/m-explore-ros2/explore/config/multi_robot_explorer.yaml)) to decide when to switch from per-robot exploration to **global** merged-map exploration, with hysteresis (`merge_stable_hold_sec`, etc.) to avoid flapping when feature matches are weak.
+
+### How exploration goals are chosen (central frontier planner)
+
+1. **Frontier detection:** A **frontier** is a *free* grid cell (occupancy 0) with at least one *unknown* neighbor (4-connected unknown). Contiguous frontier cells (8-connected) are clustered into **regions** with a size measure used as **information gain**.
+2. **Assignment:** On each planning cycle, for **idle** robots, the node assigns **unclaimed** frontiers using a **utility** that balances **distance to the frontier** (from the robot pose in the planning frame) and **frontier size** (larger frontiers are more valuable). The implementation keeps multiple robots from grabbing the same frontier and rotates priority among robots that recently completed goals (see `assign_frontiers` in `multi_robot_explorer.py`).
+3. **Dispatch:** The chosen point is sent as a **`NavigateToPose`** goal. Failures, blacklists, retargets, and cooldowns (stall watchdog, homing, etc.) are handled in the same node so a long run does not get stuck on unreachable frontiers.
+
+### Path 2: global frontiers, robot Nav2 maps
+
+This stack’s recommended configuration keeps Nav2’s costmaps tied to **each robot’s own SLAM map** while the central planner reasons about **global** space:
+
+- In [multi_robot_explorer.yaml](src/m-explore-ros2/explore/config/multi_robot_explorer.yaml), **`dispatch_nav_goals_in_robot_map_frame: true`** and **`nav_goal_frame_pattern: "{robot}/map"`** mean: frontiers are **computed in the merged `map` / `world_frame`**, then each goal **PoseStamped** is **TF-transformed** into **`<robot>/map`** before calling **`NavigateToPose`**. That matches Nav2 on the robot using **`/<robot>/map`** for its **global costmap** (`nav2_use_local_slam_map` / fleet launch options described in [Multi-Robot SLAM](#multi-robot-slam)).
+
+If you instead point Nav2’s costmaps at the **merged `/map`**, the same central goals can be expressed in the merged frame; the project documents **Path 2** as the default to keep planning consistent with per-robot SLAM drift and bandwidth.
+
+### Explorer `mode` and merge state
+
+| `mode` | Behavior |
+| ------ | -------- |
+| **`auto`** | Start from **per-robot** local maps for frontier detection; when **`map_merge/merge_state`** has indicated **`MERGED`** stably for `merge_stable_hold_sec`, switch to the **global merged** `map` topic. Falls back to local if merge degrades for long enough. |
+| **`local_only`** | Always plan frontiers on each robot’s local map (no global merged exploration). |
+| **`global_only`** | Always use the central **`map_topic`** (merged **`/map`** in multi-robot). |
+
+Tunable parameters (blacklists, separation between assigned goals, terminal summaries) live in the same YAML.
+
+### How paths are made and executed (Nav2 on the robot)
+
+The **central explorer does not** run DWB, RPP, or MPPI. After **`NavigateToPose`** is accepted:
+
+- **bt_navigator** (on the robot) runs the **behavior tree** (recoveries, follow path, etc.).
+- **planner_server** / **smoother_server** compute a path on the **global costmap** (usually fed from the SLAM map and inflated obstacles).
+- **controller_server** tracks the path using the **local costmap** and current scans.
+- A **velocity_smoother** (if enabled) and hardware path finally publish **`/<robot>/cmd_vel`-style** commands to the diff-drive node.
+
+So: **goals and frontier logic = central**; **collision checking, path feasibility, and low-level control = per-robot Nav2**.
+
+### Further reading in this repository
+
+- [docs/architecture.md](docs/architecture.md) — bridged-domains-first architecture notes and diagrams (legacy shared-domain context is explicitly marked historical).
+- [scripts/core/start_central.sh](scripts/core/start_central.sh) — exact startup order: TF relay → single-robot helpers or `map_merge` → `map_merge_state_monitor` → `multi_robot_explorer` (+ domain bridges and action relays in bridged mode).
+- Robot fleet launch: **`ans-turtlebot3`** on each Pi, package `turtlebot3_navigation2` — e.g. `launch/navigation2_slam.launch.py` (local clone path: `~/turtlebot3/src/...` on the robot; not guaranteed to match a stale `src/turtlebot3` tree under this central workspace).
+
+---
+
 ## Logging and Debugging
 
 - **Robot-side capture helpers** (run from the `turtlebot3` repository):
@@ -788,6 +955,14 @@ event_logger.log_goal_sent(
 
 ## Troubleshooting
 
+Quick index:
+
+- Bring-up/build dependency issues: [1. Build error: missing `nav2_msgs` / Navigation2 packages](#1-build-error-missing-nav2_msgs--navigation2-packages)
+- Stale central process detection: [1b. `start_central.sh` reports an existing central stack that you don't see](#1b-start_centralsh-reports-an-existing-central-stack-that-you-dont-see)
+- Robot SSH/network access: [3. SSH connection fails or times out (wrong WiFi network)](#3-ssh-connection-fails-or-times-out-wrong-wifi-network)
+- Fleet TF/map chain health: [4. TF errors: `base_link` / `base_footprint` / `odom` frame does not exist](#4-tf-errors-base_link--base_footprint--odom-frame-does-not-exist)
+- Planner/path mismatch behavior: [16. Multi-robot: TF wait timeout / "Can't update static costmap layer"](#16-multi-robot-tf-wait-timeout--cant-update-static-costmap-layer)
+
 ### Common Issues and Solutions
 
 #### 1. Build error: missing `nav2_msgs` / Navigation2 packages
@@ -803,7 +978,7 @@ CMake Error at CMakeLists.txt:40 (find_package):
 
 **Cause:** Navigation2 system packages are not installed. The workspace is configured to use system Navigation2 packages (installed via apt) rather than building them from source.
 
-**Fix:**
+**Fix (if not already installed via the central install checklist above):**
 
 ```bash
 sudo apt update
@@ -824,7 +999,7 @@ ros2 pkg list | grep nav2_msgs
 You should see `nav2_msgs` in the list. Then try building again:
 
 ```bash
-./scripts/build/clean_rebuild.sh
+bash scripts/build/rebuild_common.sh clean
 ```
 
 **Note:** The build scripts now automatically check for Navigation2 packages and will provide a helpful error message if they're missing.
@@ -850,7 +1025,11 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 - It looks only for **central-side** processes launched by `start_central.sh`:
   - `python3 ... src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py`
+  - `python3 ... src/m-explore-ros2/explore/scripts/single_robot_world_tf_bridge.py`
+  - `python3 ... src/m-explore-ros2/explore/scripts/single_robot_map_relay.py`
   - `python3 ... src/m-explore-ros2/explore/scripts/multi_robot_explorer.py --ros-args --params-file src/m-explore-ros2/explore/config/multi_robot_explorer.yaml ...`
+  - `domain_bridge ... <robot>.domain_bridge.yaml` (bridged-domains mode)
+  - `python3 ... scripts/bridging/fleet_navigate_to_pose_service_relay.py` (bridged-domains mode)
 - Robot-side SLAM/Nav2 on the SBC is **not** matched by this check.
 
 **Interactive cleanup (recommended):**
@@ -883,7 +1062,7 @@ You should see `nav2_msgs` in the list. Then try building again:
 
 ---
 
-#### 2. `ROS_DOMAIN_ID` mismatch (topics not visible)
+#### 2. Domain/comms mismatch (topics not visible)
 
 **Symptoms:**
 
@@ -891,28 +1070,30 @@ You should see `nav2_msgs` in the list. Then try building again:
 - `ros2 topic list` shows different topics on robot vs Remote PC
 - Nodes can't see each other
 
-**Fix:**
+**Fix (bridged-domains, default):**
 
-- **Step 1**: Check `ROS_DOMAIN_ID` on robot (SSH terminal).
+- **Step 1**: Confirm central is running in `bridged_domains` mode (default in `start_central.sh`) and that `config/fleet_domain_map.yaml` has expected central/robot IDs.
+- **Step 2**: On central, verify robot discovery works per robot domain from `fleet_domain_map.yaml`:
+
+  ```bash
+  ROS_DOMAIN_ID=<robot_domain_id> ros2 topic list | grep -E '^/<robot>/(tf|map|map_wire_z)$'
+  ```
+
+- **Step 3**: Start/restart central normally so bridges and relays are created:
+
+  ```bash
+  ./scripts/core/start_central.sh
+  ```
+
+**Fix (shared-domain fallback/legacy):**
+
+- **Step 1**: Check `ROS_DOMAIN_ID` on robot and central terminals:
 
   ```bash
   echo $ROS_DOMAIN_ID
   ```
 
-- **Step 2**: Check `ROS_DOMAIN_ID` on Remote PC (each terminal you launched nodes from).
-
-  ```bash
-  echo $ROS_DOMAIN_ID
-  ```
-
-- **Step 3**: Set the same value everywhere. Easiest: use the setup script for your robot (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)).
-
-  ```bash
-  cd ~/central-computer
-  source scripts/env/set_robot_env.sh <robot>
-  ```
-
-- **Step 4**: Restart terminals (or `source ~/.bashrc`) so every process uses the same domain.
+- **Step 2**: Set the same value everywhere, then restart terminals (or `source ~/.bashrc`) so every process uses that same domain.
 
 ---
 
@@ -1025,7 +1206,7 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 - The workspace configures **map_merge** with `origin_margin: 0.05` (in `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning.
 - Rebuild and restart with the current startup flow so map_merge picks up updated params:
-  - `./scripts/build/minimal_rebuild.sh` (or `./scripts/build/clean_rebuild.sh`)
+  - `bash scripts/build/rebuild_common.sh minimal` (or `bash scripts/build/rebuild_common.sh clean`)
   - Start robots (bringup + `navigation2_slam.launch.py` on each robot)
   - On central: `./scripts/core/start_central.sh`
   - Optional RViz on central: `./scripts/core/start_rviz_central.sh`
@@ -1174,12 +1355,18 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 ### Central parameter files
 
-When running the RViz helper (`./scripts/core/start_rviz_central.sh`) and the central stack (`./scripts/core/start_central.sh`), the central computer uses just two ROS 2 parameter files from this repo:
+When running the RViz helper (`./scripts/core/start_rviz_central.sh`) and the central stack (`./scripts/core/start_central.sh`), the central computer always uses two core ROS 2 parameter files from this repo:
 
 - `src/m-explore-ros2/explore/config/multi_robot_explorer.yaml` — **multi-robot explorer** node parameters (robot names, map topic, world frame, frontier size, cost weights, frequency, progress watchdogs, optional return-to-origin, and status/control topics).
 - `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml` — **multirobot_map_merge** parameters for unknown initial robot poses (input map topics, `origin_margin`, frame IDs, and TF publishing options).
 
-All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `ans-turtlebot3` workspace; this central repository keeps only the configuration needed for coordination and visualization.
+In `bridged_domains` mode, startup also uses:
+
+- `config/fleet_domain_map.yaml` — central/robot ROS domain assignments.
+- `config/fleet_bridge_contract.yaml` — bridge topic contract used to generate per-robot bridge configs.
+- `config/generated_domain_bridge/*.domain_bridge.yaml` — generated bridge configs created at startup.
+
+All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs live on the robots in the TurtleBot3 workspace (`/home/schen08/turtlebot3`), while this central repository keeps coordination/bridge/visualization configuration.
 
 ---
 
@@ -1229,7 +1416,7 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
 1. **TF wait timeout:** Ensure your robots are running bringup + SLAM + Nav2 and that `./scripts/core/start_central.sh` is active on the central PC. Run diagnostics:
 
    ```bash
-   ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py   # e.g. 50
+   ROS_DOMAIN_ID=<your_central_domain_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py
    ```
 
    If Nav2 reports **`map` missing from TF**, confirm `map_merge` has `publish_tf` and `publish_provisional_tf` enabled (see **Troubleshooting** item **19**).
@@ -1247,7 +1434,7 @@ All TurtleBot3 bringup/Nav2/SLAM parameter YAMLs now live on the robots in the `
    ros2 run tf2_ros tf2_echo map clyde/map
    ```
 
-   and run `ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py`. If lookups fail or `/tf` shows double-slash frame ids, rebuild the central workspace so `map_merge` matches the fleet. If TF is correct but placement is still wrong, verify each Pi’s `hostname` (or explicit `robot_name:=...`) matches the physical robot.
+   and run `ROS_DOMAIN_ID=<your_central_domain_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py`. If lookups fail or `/tf` shows double-slash frame ids, rebuild the central workspace so `map_merge` matches the fleet. If TF is correct but placement is still wrong, verify each Pi’s `hostname` (or explicit `robot_name:=...`) matches the physical robot.
 
 6. **Explorer: `NavigateToPose` unavailable, path precheck ABORTED, or TF “stale”:** Often a **startup order** issue: Nav2’s action server is not ready when the first goal arrives, or global costmaps log **`Invalid frame ID "map"`** until `map_merge` publishes `map` → `<robot>/map`. Run **`start_rviz_central.sh`** and **`start_central.sh`** on the central PC **before or together with** fleet Nav2 (see [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)); wait until SLAM has produced an initial map and `ros2 action list` shows **`/<robot>/navigate_to_pose`**. Path precheck failures in open-looking space usually mean **wrong or missing fleet TF**—re-check item **5** and run `diagnose_multirobot_tf.py`. If logs mention **extrapolation** or timestamps **in the future**, see item **7**.
 
@@ -1339,7 +1526,8 @@ For each run, compare:
   ```
 
   If this hangs, the robot-side SLAM node is not publishing a map yet; troubleshoot on the robot first.
-- Ensure the **same** `ROS_DOMAIN_ID` on both the robot and the central PC (e.g. `50`).
+- Shared-domain mode: ensure the **same** `ROS_DOMAIN_ID` on both robot and central.
+- Bridged-domains mode: keep separate central/robot domain IDs from `config/fleet_domain_map.yaml` and verify `start_central.sh` launched bridges/action relays.
 - Make sure you are not also running multi-robot `map_merge` manually in single-robot mode; `./scripts/core/start_central.sh` will skip `map_merge` automatically when only one robot is detected.
 - With **fleet mode** and a single robot, the central script republishes `/<robot>/map` to **`/map`** (`single_robot_map_relay.py`). Verify on the PC: `ros2 topic info /map` should list a publisher after SLAM starts.
 
@@ -1368,7 +1556,7 @@ Use the helper script `scripts/diagnostics/pose_jump_monitor.py` to quantify how
 cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-source scripts/env/set_robot_env.sh blinky   # or pinky, inky, clyde [optional IP override]
+source scripts/env/set_robot_env.sh blinky   # or pinky, inky, clyde
 
 python3 scripts/diagnostics/pose_jump_monitor.py
 ```
@@ -1446,17 +1634,20 @@ Stop with Ctrl+C to close the node and plot cleanly.
 
 **Cause:** Fleet Nav2 uses `global_frame: map` and listens on global `/tf` (see `navigation_launch_multirobot.py` on the robot). The frame **`map` is registered in tf2 only when a transform involving it is received on `/tf` or `/tf_static`**—typically **`map` → `<robot>/map`** from **`map_merge`** on the central PC (or the single-robot static bridge). The merged **`/map` OccupancyGrid** message’s `header.frame_id` is **not** enough: it does not add `map` to the TF buffer.
 
-**Verify (same `ROS_DOMAIN_ID` on central and robot):**
+**Verify:**
+
+- Shared-domain mode: central and robot should use the same `ROS_DOMAIN_ID`.
+- Bridged-domains mode: central uses its configured central domain and bridges to each robot domain from `config/fleet_domain_map.yaml`.
 
 ```bash
 cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
+export ROS_DOMAIN_ID=<your_central_domain_id>
 
 ros2 run tf2_ros tf2_echo map pinky/map          # replace pinky
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
-ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py
+ROS_DOMAIN_ID=<your_central_domain_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py
 ```
 
 **Fixes:**
@@ -1476,8 +1667,8 @@ ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf
 
 | Visual | Meaning | Typical cause |
 | ------ | ------- | ------------- |
-| Path crosses **gray / dark** cells | **Unknown** space (`track_unknown_space`) | Normal for exploration: frontiers sit on the free/unknown border and Nav2 is configured with **`allow_unknown: true`** in robot [`burger.yaml`](src/turtlebot3/turtlebot3_navigation2/param/humble/burger.yaml) (`GridBased`). Paths may legitimately traverse unknown until the map grows. |
-| Path hugs **yellow gradient** next to walls | **Inflation** (high cost, not lethal) | Global/local **inflation** was too small or DWB **path-hugging** critics dominated **BaseObstacle**. Widen `inflation_radius` on both costmaps, raise `cost_travel_multiplier`, and favour obstacle avoidance in DWB (see robot `burger.yaml` and **Stability tuning profile** in the `ans-turtlebot3` README). |
+| Path crosses **gray / dark** cells | **Unknown** space (`track_unknown_space`) | Normal for exploration: frontiers sit on the free/unknown border and Nav2 is configured with **`allow_unknown: true`** in robot-side `burger.yaml` (in `/home/schen08/turtlebot3`, `GridBased`). Paths may legitimately traverse unknown until the map grows. |
+| Path hugs **yellow gradient** next to walls | **Inflation** (high cost, not lethal) | Global/local **inflation** was too small or DWB **path-hugging** critics dominated **BaseObstacle**. Widen `inflation_radius` on both costmaps, raise `cost_travel_multiplier`, and favour obstacle avoidance in DWB (see robot-side `burger.yaml` and TurtleBot3 README stability profile). |
 | Path crosses **black / deep red** | **Occupied / lethal** | Abnormal: check **fleet TF** (`map` → `<robot>/map`), `fleet_mode:=true` with `start_central.sh`, and SLAM **map→odom** jumps (see **§13**, **§16**, **§19**). |
 
 **Reduce unknown-skimming without breaking exploration (central PC):**
@@ -1486,21 +1677,21 @@ ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf
 
 **Reduce unknown routing in Nav2 (robot, trade-off):**
 
-- In [`burger.yaml`](src/turtlebot3/turtlebot3_navigation2/param/humble/burger.yaml), set `GridBased.allow_unknown: false` only if you accept more **“no valid path”** failures near map edges.
+- In robot-side `burger.yaml` (TurtleBot3 workspace), set `GridBased.allow_unknown: false` only if you accept more **“no valid path”** failures near map edges.
 
 **Other notes:**
 
-- After planner/controller failures, the behavior tree may **clear the entire global costmap** and replan; odd motion **immediately after** recovery can correlate with that (see `navigate_to_pose_w_replanning_and_recovery_with_lethal_escape.xml` in `turtlebot3_navigation2`).
+- After planner/controller failures, the behavior tree may **clear the entire global costmap** and replan; odd motion **immediately after** recovery can correlate with that (behavior tree is configured on the robot-side TurtleBot3 workspace).
 - `ros2 topic echo /<robot>/nav2_lethal_inflation` — see **§11**.
 - Structured robot-side logs: **Nav2 motion debug capture** in the `ans-turtlebot3` README.
 
-**Verify fleet TF (central PC, same `ROS_DOMAIN_ID` as robots):**
+**Verify fleet TF (central PC):**
 
 ```bash
 cd ~/central-computer
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-export ROS_DOMAIN_ID=<your_fleet_id>   # e.g. 50
+export ROS_DOMAIN_ID=<your_central_domain_id>
 python3 scripts/diagnostics/diagnose_multirobot_tf.py
 ```
 
@@ -1538,7 +1729,7 @@ ros2 run tf2_ros tf2_echo map pinky/map
 ros2 run tf2_ros tf2_echo map pinky/base_footprint
 ```
 
-For a scripted pass/fail report over all fleet names, run `ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py` (see **Troubleshooting** item **19** if `map` is missing from TF).
+For a scripted pass/fail report over all fleet names, run `ROS_DOMAIN_ID=<your_central_domain_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py` (see **Troubleshooting** item **19** if `map` is missing from TF).
 
 **Standalone robot (no central stack, no `fleet_mode`):** Use the robot’s map frame and base frame, for example:
 
@@ -1601,7 +1792,7 @@ echo $ROS_DOMAIN_ID
 
 ```bash
 cd ~/central-computer
-ROS_DOMAIN_ID=<your_fleet_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py   # e.g. 50
+ROS_DOMAIN_ID=<your_central_domain_id> python3 scripts/diagnostics/diagnose_multirobot_tf.py
 ```
 
 Reports topic publishers, TF chain connectivity, and identifies missing transforms. Run when TF wait times out or Nav2 fails to receive the map.
@@ -1631,3 +1822,52 @@ This workspace includes:
 - **SLAM Toolbox**: For mapping (installed via apt)
 - **Explore Lite**: Autonomous exploration package (in `src/m-explore-ros2/`)
 - **Custom launch files**: Modified launch files for SLAM-based navigation
+
+---
+
+## Compatibility Matrix
+
+| Component | Expected baseline |
+| --- | --- |
+| Ubuntu (central) | 22.04 LTS |
+| ROS distro | ROS 2 Humble |
+| Central comms mode | `bridged_domains` (fleet default) |
+| Robot-side repo | `ans-turtlebot3` deployed consistently across all robots |
+| Domain mapping source | `config/fleet_domain_map.yaml` in this repository |
+
+Revision policy for fleet testing:
+
+- Ensure all robots run the same `ans-turtlebot3` revision before multi-robot validation.
+- Treat central README/script updates as paired with robot launch assumptions; update both READMEs when interface contracts change.
+
+## Contributing and Validation Workflow
+
+Before opening a PR to this repository:
+
+- **Build and source**
+
+  ```bash
+  cd ~/central-computer
+  bash scripts/build/rebuild_common.sh minimal
+  source scripts/env/ros_domain_profile.bash
+  source scripts/env/ros_robot_env.bash
+  ```
+
+- **Validate core entry points**
+
+  ```bash
+  test -x ./scripts/core/start_central.sh
+  test -x ./scripts/core/start_rviz_central.sh
+  ```
+
+- **Run quick diagnostics**
+
+  ```bash
+  ros2 pkg list | rg "domain_bridge|nav2_msgs"
+  python3 scripts/diagnostics/diagnose_multirobot_tf.py --help
+  ```
+
+- **If your change modifies robot-facing behavior, include in PR notes**
+  - Startup order tested (single-robot and/or multi-robot)
+  - `fleet_mode` and `comms_mode` used
+  - Any required paired change in `ans-turtlebot3`
