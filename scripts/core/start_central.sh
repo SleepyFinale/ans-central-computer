@@ -5,11 +5,12 @@
 #   - shared-domain mode (legacy)
 #   - bridged multi-domain mode (per-robot domains + central domain)
 # It starts:
-#   1. TF relay        (/<robot>/tf → /tf with consistent frame prefixing)
-#   1b. Single-robot only: static TF map → <robot>/map (identity bridge)
-#   1c. Single-robot only: relay /<robot>/map → /map (fleet Nav2 + global RViz)
-#   2. Map merge       (multi-robot: merge maps; skipped when one robot)
-#   3. Explorer        (detect frontiers, send Nav2 action goals)
+#   1. TF relay        (/<robot>/tf -> /tf with consistent frame prefixing)
+#   2. Single-robot helpers (only when one robot is selected):
+#      - static TF map -> <robot>/map (identity bridge)
+#      - relay /<robot>/map(_wire_z) -> /map for central consumers
+#   3. Map merge       (multi-robot only; skipped when one robot)
+#   4. Explorer        (detect frontiers, send Nav2 action goals)
 #
 # Prerequisites:
 #   - shared_domain mode:
@@ -93,6 +94,8 @@ except Exception:
 PY
 )"
 COMMS_MODE="${CENTRAL_COMMS_MODE:-bridged_domains}"
+CENTRAL_TERMINAL_PROFILE="${CENTRAL_TERMINAL_PROFILE:-clean}"
+CENTRAL_MAP_MERGE_RAW_STDOUT="${CENTRAL_MAP_MERGE_RAW_STDOUT:-false}"
 USER_DOMAIN_ARG=""
 DOMAIN_SOURCE=""
 SELECTION=""
@@ -170,6 +173,10 @@ if [[ -n "$USER_DOMAIN_ARG" && ! "$USER_DOMAIN_ARG" =~ ^[0-9]+$ ]]; then
 fi
 parse_selection_letters "$SELECTION"
 
+is_clean_profile() {
+    [[ "$CENTRAL_TERMINAL_PROFILE" != "verbose" ]]
+}
+
 # Domain precedence (both comms modes):
 #   1) --domain-id
 #   2) existing ROS_DOMAIN_ID in shell
@@ -215,17 +222,35 @@ echo ""
 # before running this script if you need the legacy behaviour.
 EXPLORER_USE_GOAL_POSE_FALLBACK="${EXPLORER_USE_GOAL_POSE_FALLBACK:-false}"
 EXPLORER_FREQUENCY_HZ="${EXPLORER_FREQUENCY_HZ:-}"
-echo "  Explorer fallback = use_pose_goal_fallback=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
-if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
-    echo "  Explorer frequency override = ${EXPLORER_FREQUENCY_HZ} Hz"
+EXPLORER_TERMINAL_SUMMARY_ENABLE="${EXPLORER_TERMINAL_SUMMARY_ENABLE:-}"
+EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC="${EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC:-}"
+EXPLORER_TERMINAL_EVENT_LOG_MODE="${EXPLORER_TERMINAL_EVENT_LOG_MODE:-}"
+if is_clean_profile; then
+    echo "  Explorer fallback = ${EXPLORER_USE_GOAL_POSE_FALLBACK}"
 else
+    echo "  Explorer fallback = use_pose_goal_fallback=${EXPLORER_USE_GOAL_POSE_FALLBACK}"
+fi
+if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
+    echo "  Explorer frequency = ${EXPLORER_FREQUENCY_HZ} Hz (override)"
+elif ! is_clean_profile; then
     echo "  Explorer frequency override = (using YAML default)"
 fi
 if [[ -f "$BRIDGE_CONTRACT_FILE" ]]; then
     echo "  Bridge contract   = ${BRIDGE_CONTRACT_FILE}"
 fi
-echo "  Recommended robot mode for stability: fleet_mode:=false (local-first)"
-echo "  Use fleet_mode:=true only when central-coupled global /tf + /map is needed."
+if is_clean_profile; then
+    echo "  Robot mode hint   = prefer fleet_mode:=false unless global /tf + /map is required"
+else
+    echo "  Recommended robot mode for stability: fleet_mode:=false (local-first)"
+    echo "  Use fleet_mode:=true only when central-coupled global /tf + /map is needed."
+fi
+if [[ -n "$EXPLORER_TERMINAL_SUMMARY_ENABLE" || -n "$EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC" || -n "$EXPLORER_TERMINAL_EVENT_LOG_MODE" || "$CENTRAL_MAP_MERGE_RAW_STDOUT" == "true" ]]; then
+    echo "  Runtime knobs:"
+    [[ -n "$EXPLORER_TERMINAL_SUMMARY_ENABLE" ]] && echo "    summary_enable=${EXPLORER_TERMINAL_SUMMARY_ENABLE}"
+    [[ -n "$EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC" ]] && echo "    summary_period_sec=${EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC}"
+    [[ -n "$EXPLORER_TERMINAL_EVENT_LOG_MODE" ]] && echo "    event_log_mode=${EXPLORER_TERMINAL_EVENT_LOG_MODE}"
+    [[ "$CENTRAL_MAP_MERGE_RAW_STDOUT" == "true" ]] && echo "    map_merge_raw_stdout=true"
+fi
 echo ""
 
 # Prevent multiple central stacks from running at once. If you start this
@@ -565,7 +590,7 @@ if ((${#DETECTED_ROBOTS[@]} == 0)); then
     exit 1
 fi
 
-# Apply selection filter (map letters to robot name first char).
+# Apply selection filter from selector letters to full robot names.
 SELECTED_ROBOTS=()
 for r in "${DETECTED_ROBOTS[@]}"; do
     [[ -n "$r" ]] || continue
@@ -597,6 +622,7 @@ echo "  Mode          = ${MODE_DESC}"
 echo ""
 
 # Build a ROS 2 list parameter value like "[blinky,pinky]".
+# This is passed via --ros-args -p to Python nodes that expect string arrays.
 ROBOT_LIST_PARAM=""
 for r in "${SELECTED_ROBOTS[@]}"; do
     if [[ -n "$ROBOT_LIST_PARAM" ]]; then
@@ -739,6 +765,54 @@ print(int(rid))
 
 start_nav_action_relays
 
+append_explorer_log_args() {
+    # Keep logging overrides centralized so both single-robot and multi-robot
+    # explorer launches share exactly the same env-driven behavior.
+    if [[ -n "$EXPLORER_TERMINAL_SUMMARY_ENABLE" ]]; then
+        EXPLORER_ARGS+=(-p "terminal_summary_enable:=${EXPLORER_TERMINAL_SUMMARY_ENABLE}")
+    fi
+    if [[ -n "$EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC" ]]; then
+        EXPLORER_ARGS+=(-p "terminal_summary_period_sec:=${EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC}")
+    fi
+    if [[ -n "$EXPLORER_TERMINAL_EVENT_LOG_MODE" ]]; then
+        EXPLORER_ARGS+=(-p "terminal_event_log_mode:=${EXPLORER_TERMINAL_EVENT_LOG_MODE}")
+    fi
+}
+
+start_map_merge_filtered() {
+    if [[ "$CENTRAL_MAP_MERGE_RAW_STDOUT" == "true" ]]; then
+        ros2 run multirobot_map_merge map_merge --ros-args \
+            --params-file "${MAP_MERGE_CONFIG_FILE}" &
+        PIDS+=($!)
+        return
+    fi
+
+    # Suppress non-ROS matrix/feature dumps emitted on stdout by OpenCV stages
+    # in map_merge while retaining regular ROS logger lines.
+    ros2 run multirobot_map_merge map_merge --ros-args \
+        --params-file "${MAP_MERGE_CONFIG_FILE}" 2>&1 | \
+        python3 -u -c '
+import re, sys
+drop = [
+    re.compile(r"^[0-9]+\s+[0-9]+$"),
+    re.compile(r"^features:\s"),
+    re.compile(r"^matches:\s"),
+    re.compile(r"^inliers:\s"),
+    re.compile(r"^inliers/matches ratio:\s"),
+    re.compile(r"^confidence:\s"),
+    re.compile(r"^\[\s*[-0-9.]"),
+    re.compile(r"^\s*[-0-9.]+,\s*[-0-9.]+,\s*[-0-9.]+;?$"),
+    re.compile(r"^\s*0,\s*0,\s*1\]$"),
+]
+for line in sys.stdin:
+    txt = line.rstrip("\n")
+    if any(p.search(txt) for p in drop):
+        continue
+    print(txt, flush=True)
+' &
+    PIDS+=($!)
+}
+
 # ---- 1. TF relay (same policy for 1 or N robots) ----
 echo "[1/3] Starting TF relay (prefix_frames=true)..."
 python3 "${TF_RELAY_SCRIPT}" --ros-args \
@@ -785,14 +859,13 @@ if ((${#SELECTED_ROBOTS[@]} == 1)); then
     if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
         EXPLORER_ARGS+=(-p "explore_frequency:=${EXPLORER_FREQUENCY_HZ}")
     fi
+    append_explorer_log_args
     python3 "${EXPLORER_ARGS[@]}" &
     PIDS+=($!)
 else
     # ---- 2. Map merge ----
     echo "[2/3] Starting map merge (unknown poses)..."
-    ros2 run multirobot_map_merge map_merge --ros-args \
-        --params-file "${MAP_MERGE_CONFIG_FILE}" &
-    PIDS+=($!)
+    start_map_merge_filtered
     sleep 2
     echo ""
     echo "  map_merge recovery: if logs show 'Grid pose estimation disabled permanently'"
@@ -826,6 +899,7 @@ else
     if [[ -n "$EXPLORER_FREQUENCY_HZ" ]]; then
         EXPLORER_ARGS+=(-p "explore_frequency:=${EXPLORER_FREQUENCY_HZ}")
     fi
+    append_explorer_log_args
     python3 "${EXPLORER_ARGS[@]}" &
     PIDS+=($!)
 fi

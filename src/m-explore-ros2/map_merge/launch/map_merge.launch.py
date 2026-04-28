@@ -8,6 +8,13 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 
 
+"""Legacy launch entry for multirobot_map_merge.
+
+Primary central startup uses `scripts/core/start_central.sh`, but this file
+remains useful for focused map_merge bring-up and parameter debugging.
+"""
+
+
 def generate_launch_description():
     ld = LaunchDescription()
     config = os.path.join(
@@ -23,7 +30,7 @@ def generate_launch_description():
     declare_namespace_argument = DeclareLaunchArgument(
         "namespace",
         default_value="/",
-        description="Namespace for the explore node",
+        description="Namespace for the map_merge node",
     )
     declare_known_init_poses_argument = DeclareLaunchArgument(
         "known_init_poses",

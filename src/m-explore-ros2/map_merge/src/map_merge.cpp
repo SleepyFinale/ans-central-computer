@@ -144,8 +144,9 @@ MapMerge::MapMerge()
   this->get_parameter("publish_robot_tf_estimate_health", publish_robot_tf_health_);
 
 
-  /* publishing */
-  // Create a publisher using the QoS settings to emulate a ROS1 latched topic
+  /* Publishing */
+  // Use transient-local reliable QoS so late subscribers still receive
+  // the latest merged map snapshot (ROS1 latched-topic equivalent).
   merged_map_publisher_ =
     this->create_publisher<nav_msgs::msg::OccupancyGrid>(
     merged_map_topic,
@@ -162,7 +163,7 @@ MapMerge::MapMerge()
       "robot_tf_estimate_health", 10);
   }
 
-  // Timers
+  // Timers for discovery, map composition, and (optionally) pose estimation.
   map_merging_timer_ = this->create_wall_timer(
     std::chrono::milliseconds((uint16_t)(1000.0 / merging_rate_)),
     [this]() {mapMerging();});
@@ -173,7 +174,7 @@ MapMerge::MapMerge()
     std::chrono::milliseconds((uint16_t)(1000.0 / discovery_rate_)),
     [this]() {topicSubscribing();});
 
-  // For topicSubscribing() we need to spin briefly for the discovery to happen
+  // Spin briefly so DDS discovery populates the graph before first discovery pass.
   rclcpp::Rate r(100);
   int i = 0;
   while (rclcpp::ok() && i < 100) {
@@ -187,7 +188,7 @@ MapMerge::MapMerge()
     pose_estimation_timer_ = this->create_wall_timer(
       std::chrono::milliseconds((uint16_t)(1000.0 / estimation_rate_)),
       [this]() {poseEstimation();});
-    // execute right away to simulate the ros1 first while loop on a thread
+    // Execute immediately once so first transform estimates are not delayed.
     poseEstimation();
   }
 }
@@ -629,7 +630,8 @@ void MapMerge::mapMerging()
   RCLCPP_INFO_ONCE(logger_, "Map merging started.");
 
   if (have_initial_poses_) {
-    // TODO: attempt fix for SLAM toolbox: add method for padding grids to same size
+    // Known-pose mode bypasses visual pose estimation and composes maps using
+    // user-provided initial transforms from parameters.
 
     std::vector<nav_msgs::msg::OccupancyGrid::ConstSharedPtr> grids;
     std::vector<geometry_msgs::msg::Transform> transforms;
@@ -646,8 +648,7 @@ void MapMerge::mapMerging()
     }
 
 
-    // we don't need to lock here, because when have_initial_poses_ is true we
-    // will not run concurrently on the pipeline
+    // No pipeline mutex here: poseEstimation() timer is disabled in known-pose mode.
     pipeline_.feed(grids.begin(), grids.end());
     pipeline_.setTransforms(transforms.begin(), transforms.end());
   }

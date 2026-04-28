@@ -142,17 +142,18 @@ flowchart TB
 
 ### Note on laser scan normalization
 
-- Your bridged topic list currently includes **`/blinky/scan_normalized`** and **`/pinky/scan_normalized`** (see `config/domain_bridge/*_bridge.yaml`), and your SLAM params consume `scan_topic: /<robot>/scan_normalized`.
-- The `multirobot_slam.launch.py` file also starts a central normalizer that expects `/<robot>/scan`. If you keep using robot-side normalization (common), that central normalizer is effectively optional. If you want central-side normalization, ensure `/<robot>/scan` is bridged into domain 50.
+- In the current central workflow, scan topics are bridged from `fleet_bridge_contract.yaml` + `fleet_domain_map.yaml` via generated files under `config/generated_domain_bridge/`.
+- If robot-side SLAM already uses normalized scans (for example `/<robot>/scan_normalized`), keep that topic contract consistent between robot launch params and bridge contract entries.
+- If you switch to central-side normalization, ensure raw `/<robot>/scan` is present on the central graph and update robot SLAM params accordingly.
 
 ---
 
 ## Function: Frontier detection + waypoint assignment + navigation (capstone contract)
 
-Your current workspace includes per-robot **Nav2** and per-robot **Explore Lite** in the aggregation domain:
+Your current workspace includes per-robot **Nav2** on each robot and a central explorer started from:
 
-- Launch: `src/turtlebot3/turtlebot3_navigation2/launch/multirobot_nav2_explore.launch.py`
-- Starter: `scripts/start_multirobot_nav2_explore.sh`
+- `scripts/core/start_central.sh` (central orchestration: TF relay, map merge where applicable, explorer)
+- `scripts/core/start_rviz_central.sh` (central RViz helper)
 
 For the capstone requirement (“optimized waypoints”, “minimize overlap”), you typically add a **central TaskAllocator** that assigns frontiers/waypoints per robot (instead of each robot greedily exploring on its own).
 

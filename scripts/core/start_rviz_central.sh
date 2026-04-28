@@ -56,6 +56,8 @@ EOF
 }
 
 load_domain_map() {
+    # Parse the fleet domain map once and cache it into bash arrays so mode
+    # selection and diagnostics can reuse the same robot->domain lookup.
     if [[ ! -f "$DOMAIN_MAP_FILE" ]]; then
         return 1
     fi
@@ -98,6 +100,8 @@ get_robot_domain() {
 }
 
 detect_active_robots() {
+    # Active means the robot domain currently exposes /<robot>/map.
+    # We probe each domain directly rather than relying on central graph relay.
     if ! command -v ros2 >/dev/null 2>&1; then
         return 0
     fi
@@ -119,6 +123,8 @@ detect_active_robots() {
 }
 
 generate_local_cfg() {
+    # Render a robot-specific RViz config from the template by swapping
+    # namespace placeholders and fixed frame (map -> <robot>/map).
     local robot="$1"
     local out_cfg="$2"
     local local_fixed_frame="${robot}/map"
@@ -196,6 +202,9 @@ if [[ "$MODE" == "global" ]]; then
         ACTIVE_ROBOTS_RAW="$(detect_active_robots || true)"
         if [[ -n "$ACTIVE_ROBOTS_RAW" ]]; then
             mapfile -t ACTIVE_ROBOTS <<<"$ACTIVE_ROBOTS_RAW"
+            # Convenience behavior: in nominal "global" mode, when exactly one
+            # robot is active we auto-switch to that robot's local map view to
+            # avoid empty global map sessions during single-robot runs.
             if [[ ${#ACTIVE_ROBOTS[@]} -eq 1 ]]; then
                 EFFECTIVE_ROBOT="${ACTIVE_ROBOTS[0]}"
                 if robot_domain="$(get_robot_domain "$EFFECTIVE_ROBOT" || true)" && [[ -n "$robot_domain" ]]; then

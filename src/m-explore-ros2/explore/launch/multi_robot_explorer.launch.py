@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Launch wrapper for the central multi_robot_explorer node.
+
+This launch file intentionally stays minimal: it only wires a params file into
+the Python node so operators can swap tuning YAMLs without touching code.
+"""
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
@@ -26,6 +31,8 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     start_explorer = ExecuteProcess(
+        # Run the script directly so this launch remains compatible with
+        # editable workspaces where the package may not be reinstalled yet.
         cmd=[
             "python3",
             PathJoinSubstitution([ThisLaunchFileDir(), "..", "scripts", "multi_robot_explorer.py"]),

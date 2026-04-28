@@ -111,6 +111,7 @@ def _robot_worker(
     robot_domain: int,
     wait_sec: float,
 ) -> None:
+    """Owns robot-domain clients and executes forwarded action service calls."""
     os.environ['ROS_DOMAIN_ID'] = str(int(robot_domain))
     rclpy.init()
     node = rclpy.create_node(f'fleet_nav_action_relay_robot_{robot}')
@@ -203,6 +204,7 @@ def _robot_worker(
 
 
 class _RelayNode(Node):
+    """Central-domain façade that exposes Nav2 action services to the explorer."""
     def __init__(
         self,
         robot: str,
@@ -276,8 +278,8 @@ class _RelayNode(Node):
         if self._shutdown.is_set() or not rclpy.ok():
             raise RelayShuttingDown()
         payload = serialize_message(request)
-        # SingleThreadedExecutor: one callback at a time → FIFO on mp.Queue matches
-        # worker order; no global lock around get (a lock here serialized *all* actions).
+        # SingleThreadedExecutor processes callbacks serially, so FIFO queue
+        # ordering is sufficient for request/response pairing here.
         self._c2r.put((action_key, kind, payload))
         deadline = time.monotonic() + 120.0
         while time.monotonic() < deadline:
@@ -309,6 +311,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Parent process stays on the central domain; child worker process switches
+    # to the robot domain to issue real Nav2 service calls.
     os.environ['ROS_DOMAIN_ID'] = str(int(args.central_domain))
 
     ctx = multiprocessing.get_context('spawn')

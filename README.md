@@ -560,7 +560,31 @@ After at least one robot is running bringup and `navigation2_slam.launch.py`, us
 
   In filter flags such as `-bpic`, each letter corresponds to one configured robot namespace, so you can quickly run a selected subset.
 
-  **Expected output (multi-robot mode):**
+  **Clean terminal mode (default):**
+
+  `start_central.sh` now defaults to a cleaner terminal profile that reduces startup clutter and suppresses repetitive map-merge debug dumps. Runtime explorer updates are summarized periodically instead of printing every precheck/dispatch event.
+
+  ```bash
+  # Keep clean profile (default) and tune summary cadence
+  EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC=12 \
+    ./scripts/core/start_central.sh
+
+  # Force full verbose output (legacy behavior)
+  CENTRAL_TERMINAL_PROFILE=verbose \
+  EXPLORER_TERMINAL_EVENT_LOG_MODE=verbose \
+  CENTRAL_MAP_MERGE_RAW_STDOUT=true \
+    ./scripts/core/start_central.sh
+  ```
+
+  Useful terminal/output knobs:
+
+  - `CENTRAL_TERMINAL_PROFILE=clean|verbose` (default: `clean`)
+  - `EXPLORER_TERMINAL_EVENT_LOG_MODE=summary|verbose` (default: `summary`)
+  - `EXPLORER_TERMINAL_SUMMARY_ENABLE=true|false` (default: `true`)
+  - `EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC=<seconds>` (default: `10.0`)
+  - `CENTRAL_MAP_MERGE_RAW_STDOUT=true|false` (default: `false`; `true` restores raw map_merge stdout)
+
+  **Expected output (multi-robot mode, clean profile default):**
 
   ```text
   ROS domain profile loaded: target='central', ROS_DOMAIN_ID=50
@@ -576,7 +600,8 @@ After at least one robot is running bringup and `navigation2_slam.launch.py`, us
     Domain map      = /home/<central_user>/central-computer/config/fleet_domain_map.yaml
     Domain source   = env(ROS_DOMAIN_ID)
     Robot filter    = (all detected robots)
-    ...
+    Explorer fallback = false
+    Robot mode hint   = prefer fleet_mode:=false unless global /tf + /map is required
 
   Selecting robots from domain map (bridged mode)...
   Detected robots: <robot1> <robot2> [...]
@@ -600,13 +625,7 @@ After at least one robot is running bringup and `navigation2_slam.launch.py`, us
   [INFO] [...] [fleet_nav_action_relay_robot_<robot2>]: Nav2 action services reached on robot domain <domain_id>; forwarding to central.
   [INFO] [...] [map_merge]: Robot discovery started.
   [INFO] [...] [map_merge]: adding robot [<robot1>] to system
-  [INFO] [...] [map_merge]: Subscribing to MAP topic: <robot1>/map.
-  [INFO] [...] [map_merge]: Subscribing to MAP updates topic: <robot1>/map_updates.
   [INFO] [...] [map_merge]: adding robot [<robot2>] to system
-  [INFO] [...] [map_merge]: Subscribing to MAP topic: <robot2>/map.
-  [INFO] [...] [map_merge]: Subscribing to MAP updates topic: <robot2>/map_updates.
-  [INFO] [...] [map_merge]: Grid pose estimation started.
-  [INFO] [...] [map_merge]: Publishing provisional map -> <robot>/map (identity) until a merged map is composed; Nav2 can register frame "map"
 
     map_merge recovery: if logs show 'Grid pose estimation disabled permanently'
     after an OpenCV/FLANN (miniflann) exception, restart this script or the
@@ -621,7 +640,21 @@ After at least one robot is running bringup and `navigation2_slam.launch.py`, us
     To visualise: rviz2  (add /map display, set frame to 'map')
 
   [INFO] [...] [multi_robot_explorer]: Multi-robot explorer started: robots=['<robot1>', '<robot2>' ...], map_topic=map, world_frame=map, ...
+  [INFO] [...] [multi_robot_explorer]: Summary: <robot1>[goal_active] reached=2(+1) failed=0(+0) status=executing cancel=- pos=(1.32,-0.44) | <robot2>[idle] reached=1(+0) failed=1(+0) status=failed cancel=stall_watchdog pos=(-0.62,2.11)
   ```
+
+  In clean mode, raw map_merge feature-matching spam lines like `features:`, `matches:`, `inliers:`, and matrix dumps are suppressed by default. Set `CENTRAL_MAP_MERGE_RAW_STDOUT=true` if you need those raw diagnostics.
+
+  **Expected output when forcing verbose mode:**
+
+  ```bash
+  CENTRAL_TERMINAL_PROFILE=verbose \
+  EXPLORER_TERMINAL_EVENT_LOG_MODE=verbose \
+  CENTRAL_MAP_MERGE_RAW_STDOUT=true \
+    ./scripts/core/start_central.sh
+  ```
+
+  This restores the legacy high-volume output style (full startup detail plus per-event explorer logs and raw map_merge debug dumps).
 
 - **Central Terminal 2 – RViz visualization**
 
@@ -990,10 +1023,12 @@ LIBGL_ALWAYS_SOFTWARE=1 rviz2
 
 **Fix (multi-robot / map_merge):**
 
-- The workspace configures **map_merge** with `origin_margin: 0.05` (in `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning. Rebuild and restart multi-robot SLAM so map_merge uses the updated params:
-  - `./scripts/build/minimal_rebuild.sh` (or `clean_rebuild.sh`), then
-  - `./scripts/start_multirobot_slam.sh`, then
-  - `./scripts/start_multirobot_nav2_explore.sh`
+- The workspace configures **map_merge** with `origin_margin: 0.05` (in `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`). That adds a small padding around the merged map so the map bounds extend beyond (0, 0), which removes this warning.
+- Rebuild and restart with the current startup flow so map_merge picks up updated params:
+  - `./scripts/build/minimal_rebuild.sh` (or `./scripts/build/clean_rebuild.sh`)
+  - Start robots (bringup + `navigation2_slam.launch.py` on each robot)
+  - On central: `./scripts/core/start_central.sh`
+  - Optional RViz on central: `./scripts/core/start_rviz_central.sh`
 - You can increase the margin if needed (e.g. `origin_margin: 0.1`).
 
 **Fix (single-robot):**

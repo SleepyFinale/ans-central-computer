@@ -56,6 +56,7 @@ _TF_LOOKBACK_SEC = (
 
 
 def qos_transient():
+    """QoS profile matching latched-like map topics on ROS 2."""
     return QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
 
@@ -270,7 +271,7 @@ class TFDiagnostics(Node):
 
         self.create_subscription(OccupancyGrid, '/map', on_map, qos_transient())
 
-        # 1. Check topics (what should exist given the domain bridges)
+        # 1) Check topic visibility expected from central-side startup.
         time.sleep(0.5)
         rclpy.spin_once(self, timeout_sec=0.5)
 
@@ -331,7 +332,7 @@ class TFDiagnostics(Node):
             except Exception as e:
                 self.log(f'Topic {topic}: error - {e}', ok=None)
 
-        # 2. Let TF buffer fill
+        # 2) Let TF buffer fill before transform checks.
         self.log('Waiting 3s for TF buffer...', ok=None)
         for _ in range(30):
             rclpy.spin_once(self, timeout_sec=0.1)
@@ -346,7 +347,7 @@ class TFDiagnostics(Node):
                     ok=None,
                 )
 
-        # 3. Check specific transforms
+        # 3) Check specific transforms used by explorer and Nav2.
         #
         # Critical checks are things that must exist for Nav2 and the
         # central multi_robot_explorer to work:
@@ -384,7 +385,7 @@ class TFDiagnostics(Node):
                 ok=None,
             )
 
-        # 4. Sample /tf and /tf_static content
+        # 4) Sample /tf and /tf_static contents for quick operator inspection.
         from tf2_msgs.msg import TFMessage
         self.tf_samples = []
         self.tf_static_samples = []

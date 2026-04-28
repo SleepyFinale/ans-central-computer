@@ -1,5 +1,5 @@
-# Multi-robot frontier explorer parameters
-# Runs on the central computer alongside map_merge and multi-robot SLAM.
+# Multi-robot frontier explorer parameters (central-computer side).
+# Runs alongside map_merge while each robot runs its own bringup + SLAM/Nav2.
 # Detects frontiers on the merged global map and assigns waypoints to
 # each robot's Nav2 instance.
 
@@ -31,7 +31,7 @@ multi_robot_explorer:
     #   - global_only : always use the merged global map (legacy behaviour).
     mode: auto
 
-    # Topic on which a helper node can publish a simple merge state string
+    # Topic where map_merge_state_monitor publishes merge state
     # (NO_OVERLAP, PARTIAL, MERGED). In auto mode this controls when the
     # explorer switches from local to global exploration.
     merge_state_topic: map_merge/merge_state
@@ -48,7 +48,7 @@ multi_robot_explorer:
     # Pattern for per-robot local map topics, filled with each robot name.
     # In the standard TurtleBot3 namespaced SLAM setup this is '/<robot>/map'.
     local_map_topic_pattern: "/{robot}/map"
-    # Bridge contract: disable per-robot local-map subscriptions only when
+    # Bridge contract tuning: disable per-robot local-map subscriptions only when
     # central runs strict global-only planning to cut DDS traffic.
     local_map_subscriptions_enable: true
 
@@ -56,6 +56,12 @@ multi_robot_explorer:
     # Matches m-explore-ros2's planner_frequency semantics.
     # Slightly below 1.0 Hz eases central load once merge/pose health is stable.
     explore_frequency: 0.70
+    # Central terminal logging profile:
+    # - summary mode emits concise per-robot status every N seconds
+    # - verbose mode keeps high-frequency per-event INFO lines
+    terminal_summary_enable: true
+    terminal_summary_period_sec: 10.0
+    terminal_event_log_mode: summary
 
     # Call /<robot>/compute_path_to_pose (same Nav2 planner + global costmap as
     # navigation) before each NavigateToPose. Failed or empty plans skip the

@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--topic",
         default="/blinky/fix",
-        help="Odometry topic to subscribe to (default: /blinky/odometry/gps)",
+        help="Odometry topic to subscribe to (default: /blinky/fix)",
     )
     parser.add_argument(
         "--history",

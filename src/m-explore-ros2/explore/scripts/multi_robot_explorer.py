@@ -452,6 +452,12 @@ def assign_frontiers(
 # ---------------------------------------------------------------------------
 
 class MultiRobotExplorer(Node):
+    """Central coordinator for frontier detection, assignment, and Nav2 dispatch.
+
+    The node can operate in local, global, or auto-switch mode. In auto mode it
+    starts from per-robot local maps and switches to merged global planning when
+    map_merge state is sufficiently stable.
+    """
 
     def __init__(self):
         super().__init__('multi_robot_explorer')
@@ -465,7 +471,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('dispatch_nav_goals_in_robot_map_frame', True)
         self.declare_parameter('nav_goal_frame_pattern', '{robot}/map')
         self.declare_parameter('nav_goal_tf_transform_timeout_sec', 0.5)
-        # New parameters to control local-vs-global behaviour.
+        # Parameters controlling local-vs-global planning behavior.
         # mode:
         #   - 'auto'        : start in local-per-robot mode and switch to global
         #                     once the merge_state reports MERGED.
@@ -475,6 +481,10 @@ class MultiRobotExplorer(Node):
         # Topic where a helper node (or map_merge) can publish a simple
         # merge state string: NO_OVERLAP, PARTIAL, MERGED.
         self.declare_parameter('merge_state_topic', 'map_merge/merge_state')
+        # Terminal-noise controls for long fleet runs.
+        self.declare_parameter('terminal_summary_enable', True)
+        self.declare_parameter('terminal_summary_period_sec', 10.0)
+        self.declare_parameter('terminal_event_log_mode', 'summary')
         # Match m-explore-ros2 planner_frequency semantics; default tuned in YAML.
         self.declare_parameter('explore_frequency', 1.0)
         self.declare_parameter('min_frontier_size', 0.15)
@@ -544,7 +554,7 @@ class MultiRobotExplorer(Node):
         # configurable size.
         self.declare_parameter('strict_success_min_map_size', 3.0)
         self.declare_parameter('robot_base_frame', 'base_footprint')
-        # Status + control topics (multi-robot aware counterpart of explore/status, explore/resume).
+        # Status + control topics (multi-robot counterpart of explore/status and explore/resume).
         self.declare_parameter('status_topic', 'explore_multi/status')
         self.declare_parameter('control_topic', 'explore_multi/resume')
         self.declare_parameter('return_to_start_enable', True)
@@ -708,6 +718,18 @@ class MultiRobotExplorer(Node):
         self.merge_state_topic: str = (
             self.get_parameter('merge_state_topic').value
         )
+        self.terminal_summary_enable: bool = bool(
+            self.get_parameter('terminal_summary_enable').value
+        )
+        self.terminal_summary_period_sec: float = max(
+            2.0, float(self.get_parameter('terminal_summary_period_sec').value)
+        )
+        self.terminal_event_log_mode: str = str(
+            self.get_parameter('terminal_event_log_mode').value or 'summary'
+        ).strip().lower()
+        if self.terminal_event_log_mode not in ('summary', 'verbose'):
+            self.terminal_event_log_mode = 'summary'
+        self._last_summary_counts: Dict[str, Tuple[int, int]] = {}
         freq = self.get_parameter('explore_frequency').value
         self.min_frontier_size = self.get_parameter('min_frontier_size').value
         self.min_frontier_cells_for_goal = int(
@@ -1188,6 +1210,12 @@ class MultiRobotExplorer(Node):
         # -- planning timer --
         period = 1.0 / freq if freq > 0 else 3.0
         self.plan_timer = self.create_timer(period, self._plan_tick)
+        if self.terminal_summary_enable:
+            self.summary_timer = self.create_timer(
+                self.terminal_summary_period_sec, self._emit_terminal_summary
+            )
+        else:
+            self.summary_timer = None
 
         mode = 'single_robot_offloaded_nav2' if self.single_robot_offloaded_nav2 else 'multi_robot'
         self.get_logger().info(
@@ -1411,6 +1439,44 @@ class MultiRobotExplorer(Node):
                         self._cancel_goal(rs, reason='pause')
             self.paused = True
             self._publish_status('PAUSED')
+
+    def _event_info(self, message: str) -> None:
+        if self.terminal_event_log_mode == 'verbose':
+            self.get_logger().info(message)
+
+    def _emit_terminal_summary(self) -> None:
+        if not self.terminal_summary_enable:
+            return
+        parts: List[str] = []
+        for rs in self.robots.values():
+            prev_reached, prev_failed = self._last_summary_counts.get(
+                rs.name, (rs.goals_reached, rs.goals_failed)
+            )
+            d_reached = rs.goals_reached - prev_reached
+            d_failed = rs.goals_failed - prev_failed
+            self._last_summary_counts[rs.name] = (rs.goals_reached, rs.goals_failed)
+
+            state = 'idle'
+            if rs.degraded_active:
+                state = f'degraded:{rs.degraded_reason or "unknown"}'
+            elif rs.path_precheck_in_progress:
+                state = 'precheck'
+            elif rs.goal_active:
+                state = 'goal_active'
+            elif rs.goal_pending:
+                state = 'goal_pending'
+
+            pos = 'na'
+            if rs.position is not None:
+                pos = f'({rs.position[0]:.2f},{rs.position[1]:.2f})'
+
+            parts.append(
+                f'{rs.name}[{state}] reached={rs.goals_reached}(+{d_reached}) '
+                f'failed={rs.goals_failed}(+{d_failed}) status={rs.goal_status} '
+                f'cancel={rs.last_cancel_reason or "-"} pos={pos}'
+            )
+        if parts:
+            self.get_logger().info('Summary: ' + ' | '.join(parts))
 
     # -----------------------------------------------------------------------
     # Main planning loop
@@ -3198,7 +3264,7 @@ class MultiRobotExplorer(Node):
             rs.next_assign_allowed_time, now + retry_s)
         if count_for_degraded:
             rs.precheck_fail_events += 1
-        self.get_logger().info(
+        self._event_info(
             f'[{rs.name}] Path precheck {detail}; '
             f'retry in {retry_s:.1f}s (planner may still be activating)'
         )
@@ -3329,7 +3395,7 @@ class MultiRobotExplorer(Node):
         send_future = rs.path_precheck_client.send_goal_async(cp_goal)
         send_future.add_done_callback(
             lambda f, r=rs: self._path_precheck_goal_response_callback(f, r))
-        self.get_logger().info(
+        self._event_info(
             f'[{rs.name}] Nav2 path precheck '
             f'{nav_goal.header.frame_id} '
             f'({nav_goal.pose.position.x:.2f}, {nav_goal.pose.position.y:.2f}) '
@@ -3391,7 +3457,7 @@ class MultiRobotExplorer(Node):
                 GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
             }
             st = labels.get(int(status), f'status_{int(status)}')
-            self.get_logger().info(
+            self._event_info(
                 f'[{rs.name}] Path precheck failed ({st}); skipping NavigateToPose'
             )
             now_ts = self.get_clock().now().nanoseconds / 1e9
@@ -3696,7 +3762,7 @@ class MultiRobotExplorer(Node):
         send_future = rs.path_precheck_client.send_goal_async(cp_goal)
         send_future.add_done_callback(
             lambda f, r=rs: self._arrival_probe_goal_response_callback(f, r))
-        self.get_logger().info(
+        self._event_info(
             f'[{rs.name}] Arrival path probe (tacit_followup={tacit_followup}) '
             f'start={start_pose.header.frame_id} '
             f'({start_pose.pose.position.x:.2f},{start_pose.pose.position.y:.2f}) '
@@ -3902,7 +3968,7 @@ class MultiRobotExplorer(Node):
             pass
         send_future.add_done_callback(
             lambda f, r=rs, seq=goal_seq: self._goal_response_callback(f, r, seq))
-        self.get_logger().info(
+        self._event_info(
             f'[{rs.name}] Sending NavigateToPose '
             f'{nav_pose.header.frame_id} '
             f'({nav_pose.pose.position.x:.2f}, {nav_pose.pose.position.y:.2f}) '

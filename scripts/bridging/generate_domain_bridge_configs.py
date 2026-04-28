@@ -37,6 +37,11 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 def _resolve_topic_specs(
     contract: dict[str, Any], key: str
 ) -> list[dict[str, Any]]:
+    """Extract topic bridges from fleet contract for one direction.
+
+    The contract also documents action/service concepts in human-readable form.
+    This helper only returns concrete topic bridges that domain_bridge can load.
+    """
     root = contract.get("fleet_bridge_contract", {})
     items = root.get(key, [])
     if not isinstance(items, list):
@@ -64,6 +69,7 @@ def _build_bridge_doc(
     robot_to_central: list[dict[str, Any]],
     central_to_robot: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    """Build one domain_bridge YAML payload for a robot namespace."""
     topics: dict[str, Any] = {}
 
     # Explicit topic contract.
@@ -177,6 +183,8 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Resolve central/robot ROS domains first so generated YAML pins explicit
+    # from_domain/to_domain links for every declared bridge topic.
     domain_map = _load_yaml(args.domain_map).get("fleet_domain_map", {})
     robot_domain_ids = domain_map.get("robot_domain_ids", {})
     if args.central_domain is not None:

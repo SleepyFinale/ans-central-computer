@@ -104,11 +104,13 @@ class MapMergeStateMonitor(Node):
             0.0, float(self.get_parameter('min_known_area_m2_per_robot').value)
         )
 
+        # TF lookup source for world_frame -> <robot>/map stability checks.
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.state_pub = self.create_publisher(String, 'map_merge/merge_state', 10)
 
+        # robot_tf_estimate_health cache from map_merge ("robot:0|1" payload).
         self._health_by_robot: Dict[str, bool] = {}
         self._health_rx_wall_time: float = 0.0
         self.create_subscription(
@@ -128,8 +130,7 @@ class MapMergeStateMonitor(Node):
                 10,
             )
 
-        # Track last seen positions and timestamps per robot map frame so we
-        # can reason about motion over time.
+        # Track per-robot map-frame motion across ticks for MERGED debouncing.
         self._last_positions: Dict[str, Tuple[float, float]] = {}
         self._last_stable_time: float = 0.0
         self._current_state: str = 'NO_OVERLAP'
@@ -189,6 +190,10 @@ class MapMergeStateMonitor(Node):
         return True
 
     def _tick(self) -> None:
+        # State transition order:
+        # 1) Require all map TFs present.
+        # 2) Apply motion threshold + debounce.
+        # 3) Enforce health/map-maturity gates before emitting MERGED.
         now = self.get_clock().now().nanoseconds / 1e9
         all_present = True
         motion_within_thresh = True

@@ -1,40 +1,14 @@
 #!/bin/bash
-# Start the multi-robot frontier explorer on the central PC.
-#
-# Prerequisites (single-domain, namespaced setup):
-#   - All robots and the central PC use the same ROS_DOMAIN_ID (typically 50)
-#   - Each robot is running Nav2 + SLAM in its own namespace
-#     (e.g. navigation2_slam_namespaced.launch.py robot_name:=blinky ...)
-#   - TF relay and map_merge are running on the central PC
-#     (for example via ./scripts/core/start_central.sh)
-#
-# Usage:
-#   ROS_DOMAIN_ID=50 ./scripts/start_multirobot_explorer.sh
+# Compatibility shim for a legacy launcher path.
+# The canonical central startup command is scripts/core/start_central.sh.
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
-cd "$WORKSPACE_DIR"
-source /opt/ros/humble/setup.bash
-source install/setup.bash 2>/dev/null
-
-CONFIG_FILE="${WORKSPACE_DIR}/src/m-explore-ros2/explore/config/multi_robot_explorer.yaml"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "ERROR: Config file not found: $CONFIG_FILE"
-    exit 1
-fi
-
-echo "=========================================="
-echo "Starting Multi-Robot Explorer"
-echo "=========================================="
-echo ""
-echo "  Config: $CONFIG_FILE"
-echo "  ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}"
-echo ""
-echo "  Robots will explore autonomously."
-echo "  Press Ctrl+C to stop."
+echo "DEPRECATED: start_multirobot_explorer.sh is now a compatibility shim."
+echo "Use './scripts/core/start_central.sh' for normal central startup."
 echo ""
 
-python3 "${SCRIPT_DIR}/multi_robot_explorer.py" --ros-args \
-    --params-file "$CONFIG_FILE"
+exec "${WORKSPACE_DIR}/scripts/core/start_central.sh" "$@"
