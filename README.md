@@ -194,7 +194,7 @@ bash scripts/build/rebuild_common.sh minimal
   - `./scripts/core/start_central.sh`
   - `./scripts/core/start_rviz_central.sh`
 
-**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot>` (manual IP override is only for robots outside the original four). If you need to manually source the workspace:
+**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot>`. On `TAMU_WiFi` (DHCP), use `source scripts/env/set_robot_env.sh <robot> <current_ip>` for the original four robots. If you need to manually source the workspace:
 
 ```bash
 cd ~/central-computer
@@ -280,16 +280,25 @@ The table below lists the SSH targets for each robot on the supported WiFi netwo
 | Inky   | inky@192.168.0.139    | inky@192.168.50.139   | inky@10.3.141.139   |
 | Clyde  | clyde@192.168.0.236   | clyde@192.168.50.236  | clyde@10.3.141.236  |
 
+`TAMU_WiFi` is also supported on the robot side, but it uses DHCP (no fixed per-robot IP table). On TAMU, discover the current robot IP and pass it explicitly to `set_robot_env.sh`.
+
 ### Using `set_robot_env.sh` to SSH into a robot
 
-`scripts/env/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it **auto-detects** which WiFi your PC is on (SNS, GCRI_LAB, or RaspAP) and picks the correct IP. For robots outside the original four, provide a second-argument IP override.
+`scripts/env/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it auto-detects your PC WiFi:
+
+- `SNS` -> `lab` (fixed fleet IPs)
+- `GCRI_LAB` -> `gcri` (fixed fleet IPs)
+- `RaspAP` -> `rpi` (fixed fleet IPs)
+- `TAMU_WiFi` -> `tamu` (**manual IP required** for original robots, because TAMU is DHCP)
+
+For robots outside the original four, provide a second-argument IP override on any network.
 
 From the workspace root on the **central PC**, source the script so variables apply to your current shell:
 
 ```bash
 cd ~/central-computer
 
-# Any robot: fixed fleet IPs – script auto-detects SNS vs GCRI_LAB vs RaspAP
+# Any original fleet robot: fixed IPs on SNS/GCRI_LAB/RaspAP
 source scripts/env/set_robot_env.sh blinky
 # or
 source scripts/env/set_robot_env.sh pinky
@@ -297,6 +306,9 @@ source scripts/env/set_robot_env.sh pinky
 source scripts/env/set_robot_env.sh inky
 # or
 source scripts/env/set_robot_env.sh clyde
+
+# TAMU_WiFi (DHCP): pass current robot IP explicitly
+# source scripts/env/set_robot_env.sh blinky 10.42.0.123
 
 # Optional for non-original robots: force SSH target, e.g.
 # source scripts/env/set_robot_env.sh donatello 192.168.0.250
@@ -308,9 +320,22 @@ Then SSH into the robot:
 ssh $ROBOT_SSH
 ```
 
-**Script output:** The script prints the detected network (`lab`, `gcri`, or `rpi`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@192.168.50.158  (network: gcri)`.
+**Script output:** The script prints the detected network (`lab`, `gcri`, `rpi`, or `tamu`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@192.168.50.158  (network: gcri)`.
 
 When switching between robots, run `source scripts/env/set_robot_env.sh <robot>` again in each terminal (or open new terminals and source once).
+
+### Robot-side WiFi automation caveats
+
+Robot WiFi switching/boot logic lives in the robot repository (`~/turtlebot3`) under:
+
+- `scripts/network/switch_wifi.sh`
+- `scripts/network/boot_wifi.sh`
+- `scripts/network/install_boot_wifi.sh`
+
+Important caveats when coordinating from central:
+
+- Boot auto-connect service (`boot-wifi.service`) tries `lab -> gcri -> rpi` by default; it does not auto-prioritize TAMU.
+- Ensure only one netplan file configures `wlan0` on the robot. If `99-wifi-switch.yaml` is used, remove/comment `wifis.wlan0` in `/etc/netplan/50-cloud-init.yaml` to avoid duplicate access-point errors.
 
 ### ROS domain (ROS_DOMAIN_ID)
 
@@ -359,11 +384,11 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 **Prerequisites:**
 
-- Robot is powered on and connected to the network (SNS, GCRI_LAB, or RaspAP)
+- Robot is powered on and connected to the network (SNS, GCRI_LAB, RaspAP, or TAMU_WiFi)
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
-- Robot environment is set (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)): `source scripts/env/set_robot_env.sh <robot>` — this sets `ROBOT_SSH` appropriately.
+- Robot environment is set (see [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)): `source scripts/env/set_robot_env.sh <robot>` (or `source scripts/env/set_robot_env.sh <robot> <ip>` on TAMU_WiFi) — this sets `ROBOT_SSH` appropriately.
 
 **Canonical startup sequence (multi-robot default):**
 
@@ -505,10 +530,10 @@ ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py \
   debug_log_dir:=/home/<robot_user>/turtlebot3_ws/logs
 ```
 
-If you want a wrapper that launches robot Nav2 with optional monitor behavior, use this robot-side script in the `turtlebot3` repository:
+If you want a wrapper that launches robot bringup/Nav2 with optional monitor behavior, use this robot-side script in the `turtlebot3` repository:
 
 ```bash
-./scripts/monitor/launch_robot_with_optional_monitor.sh
+./scripts/monitor/robot_program_monitor.sh --with-monitor --launch-package turtlebot3_navigation2 --launch-file navigation2_slam.launch.py
 ```
 
 **Namespace vs physical robot:** On each Pi, the default ROS namespace is the **machine hostname** when it is a meaningful name (not a stock image default such as **`ubuntu`** or **`raspberrypi`**); otherwise it falls back to **`USER`/`LOGNAME`** (see `navigation2_slam.launch.py` in [`ans-turtlebot3`](https://github.com/SleepyFinale/ans-turtlebot3)). **Definitive check:** from the **central PC**, publish a small twist to **one** namespace at a time and see which **physical** robot moves:
@@ -1104,14 +1129,15 @@ bash scripts/build/rebuild_common.sh clean
 - `ssh $ROBOT_SSH` hangs, times out, or "Connection refused"
 - Robot is powered on but unreachable
 
-**Cause:** Your Remote PC and the robot are on different WiFi networks. The robot uses different IPs on Lab (SNS), GCRI (`GCRI_LAB`), and RaspAP (rpi)—if the robot is on one network but your PC is on another, you will connect to the wrong IP.
+**Cause:** Your Remote PC and the robot are on different WiFi networks, or you're on a DHCP network (for example `TAMU_WiFi`) without a current manual IP. The robot uses fixed IPs on Lab (SNS), GCRI (`GCRI_LAB`), and RaspAP (rpi); TAMU is DHCP.
 
 **Fix:**
 
 - **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available).
-- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for lab, GCRI_LAB for gcri, RaspAP for rpi).
-- **Step 3**: Run `source scripts/env/set_robot_env.sh <robot>` again. The script auto-detects your PC's WiFi and sets the correct IP. Check the output—it should show `(network: lab)`, `(network: gcri)`, or `(network: rpi)`.
-- **Step 4**: If you see "Unknown WiFi" or "defaulting to Lab", your PC's WiFi may not be SNS, GCRI_LAB, or RaspAP. Connect to the correct network and source the script again.
+- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for lab, GCRI_LAB for gcri, RaspAP for rpi, or TAMU_WiFi for tamu).
+- **Step 3**: Run `source scripts/env/set_robot_env.sh <robot>` again for fixed-IP networks, or `source scripts/env/set_robot_env.sh <robot> <current_robot_ip>` on TAMU_WiFi.
+- **Step 4**: Check script output for detected network: `(network: lab)`, `(network: gcri)`, `(network: rpi)`, or `(network: tamu)`.
+- **Step 5**: If you see "Unknown WiFi", either connect to SNS/GCRI_LAB/RaspAP or provide an explicit IP override.
 
 ---
 

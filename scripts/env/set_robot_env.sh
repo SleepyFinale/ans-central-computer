@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Set ROBOT_SSH for the selected robot.
-# Auto-detects WiFi (SNS, GCRI_LAB, or RaspAP) to pick the correct IP for Blinky, Pinky, Inky, and Clyde.
+# Auto-detects WiFi (SNS, GCRI_LAB, RaspAP, or TAMU_WiFi) to pick the correct SSH target.
+# TAMU_WiFi uses DHCP, so built-in robots require a manual IP override on TAMU.
 # Must be sourced so variables apply to the current shell:
 #   source scripts/env/set_robot_env.sh blinky
 
@@ -8,9 +9,10 @@ set_robot_usage() {
   echo "Usage: source scripts/env/set_robot_env.sh <robot> [ip]"
   echo ""
   echo "  robot   blinky|pinky|inky|clyde (auto-detected) OR custom robot name"
-  echo "  ip      Required for custom robot names; ignored for the original four."
+  echo "  ip      Required for custom robot names; also required on TAMU_WiFi for original robots."
   echo ""
-  echo "  WiFi auto-detection: Script detects SNS (lab), GCRI_LAB (gcri), or RaspAP (rpi)."
+  echo "  WiFi auto-detection: Script detects SNS (lab), GCRI_LAB (gcri), RaspAP (rpi), or TAMU_WiFi (tamu)."
+  echo "  Note: TAMU_WiFi is DHCP. For blinky/pinky/inky/clyde on TAMU, pass [ip] explicitly."
   echo ""
   echo "  Robot   SNS (lab)              GCRI_LAB (gcri)       RaspAP (rpi)"
   echo "  ------  ---------------------  ---------------------  -------------------"
@@ -20,7 +22,7 @@ set_robot_usage() {
   echo "  Clyde   clyde@192.168.0.236    clyde@192.168.50.236   clyde@10.3.141.236"
 }
 
-# Detect current WiFi SSID. Returns "SNS", "GCRI_LAB", "RaspAP", or empty if unknown/not connected.
+# Detect current WiFi SSID. Returns current SSID or empty if unknown/not connected.
 get_wifi_ssid() {
   local ssid
   if command -v nmcli >/dev/null 2>&1; then
@@ -34,26 +36,19 @@ get_wifi_ssid() {
   echo "${ssid:-}"
 }
 
-# Resolve network name from SSID: SNS -> lab, GCRI_LAB -> gcri, RaspAP -> rpi
+# Resolve network name from SSID.
 get_network_from_ssid() {
   case "$1" in
     SNS)           echo "lab" ;;
     GCRI_LAB)      echo "gcri" ;;
     RaspAP)        echo "rpi" ;;
+    TAMU_WiFi)     echo "tamu" ;;
     *)             echo "unknown" ;;
   esac
 }
 
 robot=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
 ip="${2:-}"
-
-case "$robot" in
-  blinky|pinky|inky|clyde)
-    if [ -n "$ip" ]; then
-      echo "Note: Ignoring manual IP override for original robot '$robot'; using WiFi auto-detection."
-    fi
-    ;;
-esac
 
 # Robot IPs by network. Matches ans-turtlebot3 scripts/wifi/switch_wifi.sh.
 BLINKY_LAB=192.168.0.158
@@ -77,6 +72,14 @@ case "$robot" in
       lab)   export ROBOT_SSH="blinky@$BLINKY_LAB" ;;
       gcri)  export ROBOT_SSH="blinky@$BLINKY_GCRI" ;;
       rpi)   export ROBOT_SSH="blinky@$BLINKY_RPI" ;;
+      tamu)
+             if [ -z "$ip" ]; then
+               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
+               echo "Example: source scripts/env/set_robot_env.sh blinky 10.42.0.123"
+               return 1 2>/dev/null || exit 1
+             fi
+             export ROBOT_SSH="blinky@$ip"
+             ;;
       *)     export ROBOT_SSH="blinky@$BLINKY_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
@@ -90,6 +93,14 @@ case "$robot" in
       lab)   export ROBOT_SSH="pinky@$PINKY_LAB" ;;
       gcri)  export ROBOT_SSH="pinky@$PINKY_GCRI" ;;
       rpi)   export ROBOT_SSH="pinky@$PINKY_RPI" ;;
+      tamu)
+             if [ -z "$ip" ]; then
+               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
+               echo "Example: source scripts/env/set_robot_env.sh pinky 10.42.0.123"
+               return 1 2>/dev/null || exit 1
+             fi
+             export ROBOT_SSH="pinky@$ip"
+             ;;
       *)     export ROBOT_SSH="pinky@$PINKY_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
@@ -103,6 +114,14 @@ case "$robot" in
       lab)   export ROBOT_SSH="inky@$INKY_LAB" ;;
       gcri)  export ROBOT_SSH="inky@$INKY_GCRI" ;;
       rpi)   export ROBOT_SSH="inky@$INKY_RPI" ;;
+      tamu)
+             if [ -z "$ip" ]; then
+               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
+               echo "Example: source scripts/env/set_robot_env.sh inky 10.42.0.123"
+               return 1 2>/dev/null || exit 1
+             fi
+             export ROBOT_SSH="inky@$ip"
+             ;;
       *)     export ROBOT_SSH="inky@$INKY_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
@@ -116,6 +135,14 @@ case "$robot" in
       lab)   export ROBOT_SSH="clyde@$CLYDE_LAB" ;;
       gcri)  export ROBOT_SSH="clyde@$CLYDE_GCRI" ;;
       rpi)   export ROBOT_SSH="clyde@$CLYDE_RPI" ;;
+      tamu)
+             if [ -z "$ip" ]; then
+               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
+               echo "Example: source scripts/env/set_robot_env.sh clyde 10.42.0.123"
+               return 1 2>/dev/null || exit 1
+             fi
+             export ROBOT_SSH="clyde@$ip"
+             ;;
       *)     export ROBOT_SSH="clyde@$CLYDE_LAB"
              echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
              ;;
