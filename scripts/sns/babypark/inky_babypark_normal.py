@@ -23,8 +23,8 @@ class BabyParkOval(Node):
         self.straight_distance = 0.8  
         # ==========================
 
-        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel', 10)
-        self.subscription = self.create_subscription(Odometry, '/inky/odom', self.odom_callback, 10)
+        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel', 10)  //CHANGE THESE TOPIC NAMES WHEN USING DIFFERENT ROBOTS
+        self.subscription = self.create_subscription(Odometry, '/inky/odom', self.odom_callback, 10) //CHANGE THESE TOPIC NAMES WHEN USING DIFFERENT ROBOTS
         self.timer = self.create_timer(0.05, self.control_loop)
 
 # 1. Start at Phase 0
