@@ -1,0 +1,1 @@
+when running these on your ubuntu VM, we've had different versions of these babypark scripts running on the same ubuntu VMs. so try both of these scripts to see if any of these work on your own VM. you will have to edit the topic names if you're using a different robot 
