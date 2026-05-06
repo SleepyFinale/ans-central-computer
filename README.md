@@ -214,6 +214,17 @@ The `scripts/` folder is organized by purpose:
 - `scripts/diagnostics/`: TF/map/debug tools and bag capture
 - `scripts/validation/`: KPI and log validation utilities
 - `scripts/plotting/`: plotting helpers
+- `scripts/security/`: watermark experiment scripts and preserved security test datasets
+
+### Security Scripts
+
+The `scripts/security/` subtree is organized as:
+
+- `scripts/security/motion_patterns/`: motion generators used to produce `cmd_vel` or `cmd_vel_raw`.
+- `scripts/security/watermark_pipeline/`: watermark and passthrough processors that publish delay telemetry.
+- `scripts/security/test_data/battery_csv_logs/`: retained CSV logs from battery/watermark test runs.
+
+For combined runs, start one motion script and one watermark script in separate terminals. See `scripts/security/README.md` for the current entry points.
 
 ## 10-Minute Operator Quickstart
 

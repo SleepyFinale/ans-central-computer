@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import ExternalShutdownException # <--- IMPORTANT
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 import math
-import time
-import subprocess # Add this at the top of your file
+import subprocess
 
 def quaternion_to_yaw(x, y, z, w):
     siny_cosp = 2.0 * (w * z + x * y)
@@ -18,12 +16,13 @@ class BabyParkOval(Node):
         super().__init__('baby_park_oval')
 
         # ======= PARAMETERS =======
-        self.linear_speed = 0.2 #0.2       
-        self.angular_speed = 0.65 #0.65      
+        self.linear_speed = 0.2       
+        self.angular_speed = 0.65      
         self.straight_distance = 0.8  
         # ==========================
 
-        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel_raw', 10)
+        # Update topic names when using a different robot namespace.
+        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel', 10)
         self.subscription = self.create_subscription(Odometry, '/inky/odom', self.odom_callback, 10)
         self.timer = self.create_timer(0.05, self.control_loop)
 
@@ -101,7 +100,7 @@ class BabyParkOval(Node):
         try:
             # This runs the EXACT command you gave me in the terminal
             cmd = [
-                'ros2', 'topic', 'pub', '--once', '/inky/cmd_vel_raw', 
+                'ros2', 'topic', 'pub', '--once', '/inky/cmd_vel', 
                 'geometry_msgs/msg/Twist', '{linear: {x: 0.0}, angular: {z: 0.0}}'
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)

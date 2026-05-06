@@ -45,7 +45,7 @@ class PureTSharkWatermark(Node):
         ]
         while rclpy.ok():
             try:
-                proc = subprocess.Popen(tshark_cmd, stdout=subprocess.PIPE, text=True) # , stderr=subprocess.DEVNULL)
+                proc = subprocess.Popen(tshark_cmd, stdout=subprocess.PIPE, text=True)
                 for line in iter(proc.stdout.readline, ''):
                     val = line.strip()
                     if val:

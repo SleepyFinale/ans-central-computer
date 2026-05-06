@@ -27,7 +27,8 @@ class PreciseUPattern(Node):
         self.straight_distance = 0.75
         # ==========================
 
-        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel', 10) //CHANGE THIS TOPIC NAME WHEN USING DIFFERENT ROBOTS
+        # Update topic names when using a different robot namespace.
+        self.publisher_ = self.create_publisher(Twist, '/inky/cmd_vel', 10)
         self.subscription = self.create_subscription(
             Odometry,
             '/inky/odom',
