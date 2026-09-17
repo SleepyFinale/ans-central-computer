@@ -194,7 +194,7 @@ bash scripts/build/rebuild_common.sh minimal
   - `./scripts/core/start_central.sh`
   - `./scripts/core/start_rviz_central.sh`
 
-**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot>`. On `TAMU_WiFi` (DHCP), use `source scripts/env/set_robot_env.sh <robot> <current_ip>` for the original four robots. If you need to manually source the workspace:
+**Note:** Both scripts automatically source the workspace after building. All helper scripts (robot setup, build, SLAM, explorer) are located in the `scripts/` folder. To set the robot environment before connecting: `source scripts/env/set_robot_env.sh <robot>` (Azure static IPs). On `TAMU_WiFi` (DHCP), use `source scripts/env/set_robot_env.sh <robot> <current_ip>` for the original four robots. If you need to manually source the workspace:
 
 ```bash
 cd ~/central-computer
@@ -282,24 +282,24 @@ To connect this central computer to the TurtleBot3 robots you need:
 
 ### Robot SSH targets
 
-The table below lists the SSH targets for each robot on the supported WiFi networks.
+The table below lists the SSH targets for each robot on the Azure hotspot (static IPs).
 
-| Robot  | SNS (lab)             | GCRI_LAB (gcri)       | RaspAP (rpi)        |
-| ------ | --------------------- | --------------------- | ------------------- |
-| Blinky | blinky@192.168.0.158  | blinky@192.168.50.158 | blinky@10.3.141.158 |
-| Pinky  | pinky@192.168.0.194   | pinky@192.168.50.194  | pinky@10.3.141.194  |
-| Inky   | inky@192.168.0.139    | inky@192.168.50.139   | inky@10.3.141.139   |
-| Clyde  | clyde@192.168.0.236   | clyde@192.168.50.236  | clyde@10.3.141.236  |
+| Robot  | Azure (`Azure` SSID)  |
+| ------ | --------------------- |
+| Blinky | blinky@172.20.10.13   |
+| Pinky  | pinky@172.20.10.14    |
+| Inky   | inky@172.20.10.15     |
+| Clyde  | clyde@172.20.10.16    |
 
-`TAMU_WiFi` is also supported on the robot side, but it uses DHCP (no fixed per-robot IP table). On TAMU, discover the current robot IP and pass it explicitly to `set_robot_env.sh`.
+**Azure hotspot (central PC join info):** SSID `Azure`, password `howdoyouwanttodothis`, gateway `172.20.10.1`, prefix `28`.
+
+`TAMU_WiFi` is also supported on the robot side (auto-login), but it uses DHCP (no fixed per-robot IP table). On TAMU, discover the current robot IP and pass it explicitly to `set_robot_env.sh`.
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
 `scripts/env/set_robot_env.sh` sets `ROBOT_SSH` for the selected robot. For **Blinky**, **Pinky**, **Inky**, and **Clyde**, it auto-detects your PC WiFi:
 
-- `SNS` -> `lab` (fixed fleet IPs)
-- `GCRI_LAB` -> `gcri` (fixed fleet IPs)
-- `RaspAP` -> `rpi` (fixed fleet IPs)
+- `Azure` -> `azure` (fixed fleet IPs)
 - `TAMU_WiFi` -> `tamu` (**manual IP required** for original robots, because TAMU is DHCP)
 
 For robots outside the original four, provide a second-argument IP override on any network.
@@ -309,7 +309,7 @@ From the workspace root on the **central PC**, source the script so variables ap
 ```bash
 cd ~/central-computer
 
-# Any original fleet robot: fixed IPs on SNS/GCRI_LAB/RaspAP
+# Any original fleet robot: fixed IPs on Azure
 source scripts/env/set_robot_env.sh blinky
 # or
 source scripts/env/set_robot_env.sh pinky
@@ -322,7 +322,7 @@ source scripts/env/set_robot_env.sh clyde
 # source scripts/env/set_robot_env.sh blinky 10.42.0.123
 
 # Optional for non-original robots: force SSH target, e.g.
-# source scripts/env/set_robot_env.sh donatello 192.168.0.250
+# source scripts/env/set_robot_env.sh donatello 172.20.10.20
 ```
 
 Then SSH into the robot:
@@ -331,7 +331,7 @@ Then SSH into the robot:
 ssh $ROBOT_SSH
 ```
 
-**Script output:** The script prints the detected network (`lab`, `gcri`, `rpi`, or `tamu`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@192.168.50.158  (network: gcri)`.
+**Script output:** The script prints the detected network (`azure` or `tamu`) so you can confirm it picked the right one. Example: `Robot: Blinky  ROBOT_SSH=blinky@172.20.10.13  (network: azure)`.
 
 When switching between robots, run `source scripts/env/set_robot_env.sh <robot>` again in each terminal (or open new terminals and source once).
 
@@ -345,7 +345,7 @@ Robot WiFi switching/boot logic lives in the robot repository (`~/turtlebot3`) u
 
 Important caveats when coordinating from central:
 
-- Boot auto-connect service (`boot-wifi.service`) tries `lab -> gcri -> rpi` by default; it does not auto-prioritize TAMU.
+- Boot auto-connect service (`boot-wifi.service`) tries **`azure -> tamu`** by default (Azure first; TAMU if Azure is unavailable).
 - Ensure only one netplan file configures `wlan0` on the robot. If `99-wifi-switch.yaml` is used, remove/comment `wifis.wlan0` in `/etc/netplan/50-cloud-init.yaml` to avoid duplicate access-point errors.
 
 ### ROS domain (ROS_DOMAIN_ID)
@@ -395,7 +395,7 @@ You can connect to **Blinky**, **Pinky**, **Inky**, or **Clyde**—use the [robo
 
 **Prerequisites:**
 
-- Robot is powered on and connected to the network (SNS, GCRI_LAB, RaspAP, or TAMU_WiFi)
+- Robot is powered on and connected to the network (`Azure` or `TAMU_WiFi`)
 - Remote PC is on the **same** WiFi network as the robot
 - Remote PC has ROS 2 Humble installed
 - Workspace is built (see [Building the Workspace](#building-the-workspace))
@@ -1140,15 +1140,15 @@ bash scripts/build/rebuild_common.sh clean
 - `ssh $ROBOT_SSH` hangs, times out, or "Connection refused"
 - Robot is powered on but unreachable
 
-**Cause:** Your Remote PC and the robot are on different WiFi networks, or you're on a DHCP network (for example `TAMU_WiFi`) without a current manual IP. The robot uses fixed IPs on Lab (SNS), GCRI (`GCRI_LAB`), and RaspAP (rpi); TAMU is DHCP.
+**Cause:** Your Remote PC and the robot are on different WiFi networks, or you're on a DHCP network (for example `TAMU_WiFi`) without a current manual IP. The robot uses fixed IPs on Azure (`Azure`); TAMU is DHCP.
 
 **Fix:**
 
-- **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available).
-- **Step 2**: Connect your Remote PC to the **same** WiFi (SNS for lab, GCRI_LAB for gcri, RaspAP for rpi, or TAMU_WiFi for tamu).
-- **Step 3**: Run `source scripts/env/set_robot_env.sh <robot>` again for fixed-IP networks, or `source scripts/env/set_robot_env.sh <robot> <current_robot_ip>` on TAMU_WiFi.
-- **Step 4**: Check script output for detected network: `(network: lab)`, `(network: gcri)`, `(network: rpi)`, or `(network: tamu)`.
-- **Step 5**: If you see "Unknown WiFi", either connect to SNS/GCRI_LAB/RaspAP or provide an explicit IP override.
+- **Step 1**: Confirm which WiFi the robot is connected to (check the robot or its display, if available). Robots try Azure first, then TAMU.
+- **Step 2**: Connect your Remote PC to the **same** WiFi (`Azure` or `TAMU_WiFi`).
+- **Step 3**: Run `source scripts/env/set_robot_env.sh <robot>` again on Azure, or `source scripts/env/set_robot_env.sh <robot> <current_robot_ip>` on TAMU_WiFi.
+- **Step 4**: Check script output for detected network: `(network: azure)` or `(network: tamu)`.
+- **Step 5**: If you see "Unknown WiFi", either connect to `Azure` / `TAMU_WiFi` or provide an explicit IP override.
 
 ---
 

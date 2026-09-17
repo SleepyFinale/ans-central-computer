@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Set ROBOT_SSH for the selected robot.
-# Auto-detects WiFi (SNS, GCRI_LAB, RaspAP, or TAMU_WiFi) to pick the correct SSH target.
-# TAMU_WiFi uses DHCP, so built-in robots require a manual IP override on TAMU.
+# Auto-detects WiFi (Azure or TAMU_WiFi) to pick the correct SSH target.
+# Azure uses static fleet IPs; TAMU_WiFi uses DHCP (manual IP required).
 # Must be sourced so variables apply to the current shell:
 #   source scripts/env/set_robot_env.sh blinky
 
@@ -11,15 +11,15 @@ set_robot_usage() {
   echo "  robot   blinky|pinky|inky|clyde (auto-detected) OR custom robot name"
   echo "  ip      Required for custom robot names; also required on TAMU_WiFi for original robots."
   echo ""
-  echo "  WiFi auto-detection: Script detects SNS (lab), GCRI_LAB (gcri), RaspAP (rpi), or TAMU_WiFi (tamu)."
+  echo "  WiFi auto-detection: Script detects Azure (azure) or TAMU_WiFi (tamu)."
   echo "  Note: TAMU_WiFi is DHCP. For blinky/pinky/inky/clyde on TAMU, pass [ip] explicitly."
   echo ""
-  echo "  Robot   SNS (lab)              GCRI_LAB (gcri)       RaspAP (rpi)"
-  echo "  ------  ---------------------  ---------------------  -------------------"
-  echo "  Blinky  blinky@192.168.0.158   blinky@192.168.50.158  blinky@10.3.141.158"
-  echo "  Pinky   pinky@192.168.0.194    pinky@192.168.50.194   pinky@10.3.141.194"
-  echo "  Inky    inky@192.168.0.139     inky@192.168.50.139    inky@10.3.141.139"
-  echo "  Clyde   clyde@192.168.0.236    clyde@192.168.50.236   clyde@10.3.141.236"
+  echo "  Robot   Azure (azure)"
+  echo "  ------  ---------------------"
+  echo "  Blinky  blinky@172.20.10.13"
+  echo "  Pinky   pinky@172.20.10.14"
+  echo "  Inky    inky@172.20.10.15"
+  echo "  Clyde   clyde@172.20.10.16"
 }
 
 # Detect current WiFi SSID. Returns current SSID or empty if unknown/not connected.
@@ -39,115 +39,67 @@ get_wifi_ssid() {
 # Resolve network name from SSID.
 get_network_from_ssid() {
   case "$1" in
-    SNS)           echo "lab" ;;
-    GCRI_LAB)      echo "gcri" ;;
-    RaspAP)        echo "rpi" ;;
+    Azure)         echo "azure" ;;
     TAMU_WiFi)     echo "tamu" ;;
     *)             echo "unknown" ;;
   esac
 }
 
+# Azure hotspot static IPs. Matches ans-turtlebot3 scripts/network/ AZURE_* layout
+# (gateway 172.20.10.1, prefix 28).
+get_azure_ip() {
+  case "$1" in
+    blinky) echo "172.20.10.13" ;;
+    pinky)  echo "172.20.10.14" ;;
+    inky)   echo "172.20.10.15" ;;
+    clyde)  echo "172.20.10.16" ;;
+    *)      echo "" ;;
+  esac
+}
+
+robot_display_name() {
+  case "$1" in
+    blinky) echo "Blinky" ;;
+    pinky)  echo "Pinky" ;;
+    inky)   echo "Inky" ;;
+    clyde)  echo "Clyde" ;;
+    *)      echo "$1" ;;
+  esac
+}
+
+# Set ROBOT_SSH for an original fleet robot from detected WiFi.
+set_fleet_robot_ssh() {
+  local name="$1"
+  local azure_ip
+  azure_ip=$(get_azure_ip "$name")
+  ssid=$(get_wifi_ssid)
+  net=$(get_network_from_ssid "$ssid")
+  case "$net" in
+    azure)
+      export ROBOT_SSH="${name}@${azure_ip}"
+      ;;
+    tamu)
+      if [ -z "$ip" ]; then
+        echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$name'."
+        echo "Example: source scripts/env/set_robot_env.sh ${name} 10.42.0.123"
+        return 1 2>/dev/null || exit 1
+      fi
+      export ROBOT_SSH="${name}@${ip}"
+      ;;
+    *)
+      export ROBOT_SSH="${name}@${azure_ip}"
+      echo "Warning: Unknown WiFi '$ssid', defaulting to Azure IP"
+      ;;
+  esac
+  echo "Robot: $(robot_display_name "$name")  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
+}
+
 robot=$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')
 ip="${2:-}"
 
-# Robot IPs by network. Matches ans-turtlebot3 scripts/wifi/switch_wifi.sh.
-BLINKY_LAB=192.168.0.158
-BLINKY_GCRI=192.168.50.158
-BLINKY_RPI=10.3.141.158
-PINKY_LAB=192.168.0.194
-PINKY_GCRI=192.168.50.194
-PINKY_RPI=10.3.141.194
-INKY_LAB=192.168.0.139
-INKY_GCRI=192.168.50.139
-INKY_RPI=10.3.141.139
-CLYDE_LAB=192.168.0.236
-CLYDE_GCRI=192.168.50.236
-CLYDE_RPI=10.3.141.236
-
 case "$robot" in
-  blinky)
-    ssid=$(get_wifi_ssid)
-    net=$(get_network_from_ssid "$ssid")
-    case "$net" in
-      lab)   export ROBOT_SSH="blinky@$BLINKY_LAB" ;;
-      gcri)  export ROBOT_SSH="blinky@$BLINKY_GCRI" ;;
-      rpi)   export ROBOT_SSH="blinky@$BLINKY_RPI" ;;
-      tamu)
-             if [ -z "$ip" ]; then
-               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
-               echo "Example: source scripts/env/set_robot_env.sh blinky 10.42.0.123"
-               return 1 2>/dev/null || exit 1
-             fi
-             export ROBOT_SSH="blinky@$ip"
-             ;;
-      *)     export ROBOT_SSH="blinky@$BLINKY_LAB"
-             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-             ;;
-    esac
-    echo "Robot: Blinky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
-    ;;
-  pinky)
-    ssid=$(get_wifi_ssid)
-    net=$(get_network_from_ssid "$ssid")
-    case "$net" in
-      lab)   export ROBOT_SSH="pinky@$PINKY_LAB" ;;
-      gcri)  export ROBOT_SSH="pinky@$PINKY_GCRI" ;;
-      rpi)   export ROBOT_SSH="pinky@$PINKY_RPI" ;;
-      tamu)
-             if [ -z "$ip" ]; then
-               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
-               echo "Example: source scripts/env/set_robot_env.sh pinky 10.42.0.123"
-               return 1 2>/dev/null || exit 1
-             fi
-             export ROBOT_SSH="pinky@$ip"
-             ;;
-      *)     export ROBOT_SSH="pinky@$PINKY_LAB"
-             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-             ;;
-    esac
-    echo "Robot: Pinky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
-    ;;
-  inky)
-    ssid=$(get_wifi_ssid)
-    net=$(get_network_from_ssid "$ssid")
-    case "$net" in
-      lab)   export ROBOT_SSH="inky@$INKY_LAB" ;;
-      gcri)  export ROBOT_SSH="inky@$INKY_GCRI" ;;
-      rpi)   export ROBOT_SSH="inky@$INKY_RPI" ;;
-      tamu)
-             if [ -z "$ip" ]; then
-               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
-               echo "Example: source scripts/env/set_robot_env.sh inky 10.42.0.123"
-               return 1 2>/dev/null || exit 1
-             fi
-             export ROBOT_SSH="inky@$ip"
-             ;;
-      *)     export ROBOT_SSH="inky@$INKY_LAB"
-             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-             ;;
-    esac
-    echo "Robot: Inky  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
-    ;;
-  clyde)
-    ssid=$(get_wifi_ssid)
-    net=$(get_network_from_ssid "$ssid")
-    case "$net" in
-      lab)   export ROBOT_SSH="clyde@$CLYDE_LAB" ;;
-      gcri)  export ROBOT_SSH="clyde@$CLYDE_GCRI" ;;
-      rpi)   export ROBOT_SSH="clyde@$CLYDE_RPI" ;;
-      tamu)
-             if [ -z "$ip" ]; then
-               echo "Error: WiFi '$ssid' uses DHCP; provide current robot IP for '$robot'."
-               echo "Example: source scripts/env/set_robot_env.sh clyde 10.42.0.123"
-               return 1 2>/dev/null || exit 1
-             fi
-             export ROBOT_SSH="clyde@$ip"
-             ;;
-      *)     export ROBOT_SSH="clyde@$CLYDE_LAB"
-             echo "Warning: Unknown WiFi '$ssid', defaulting to Lab (SNS) IP"
-             ;;
-    esac
-    echo "Robot: Clyde  ROBOT_SSH=$ROBOT_SSH  (network: $net)"
+  blinky|pinky|inky|clyde)
+    set_fleet_robot_ssh "$robot" || return 1 2>/dev/null || exit 1
     ;;
   "")
     set_robot_usage
