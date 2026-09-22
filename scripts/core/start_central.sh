@@ -21,7 +21,7 @@
 #   - Each robot is powered on and running:
 #       * bringup       (robot.launch.py)
 #       * SLAM + Nav2   (navigation2_slam.launch.py fleet_mode:=True with this script)
-#   - Central PC and robots are on the same WiFi network
+#   - Central PC can reach robots (same Azure LAN, or Tailscale+Zenoh on TAMU_WiFi)
 #
 # Usage:
 #   Default comms mode is bridged_domains (override: --comms-mode shared_domain or CENTRAL_COMMS_MODE).
@@ -31,7 +31,7 @@
 #   ./scripts/core/start_central.sh -b      # only Blinky
 #   ./scripts/core/start_central.sh -pi     # only Pinky + Inky
 #   ./scripts/core/start_central.sh -bpic   # Blinky, Pinky, Inky, Clyde (subset must appear on the graph)
-
+#   # TAMU + Zenoh: start ./scripts/comms/start_zenoh_central.sh first, then this script.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,6 +54,22 @@ ACTION_RELAY_SCRIPT="${WORKSPACE_DIR}/scripts/bridging/fleet_navigate_to_pose_se
 cd "$WORKSPACE_DIR"
 source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null
+
+# Zenoh bridges publish robot-domain traffic onto localhost only. When a local
+# zenoh-bridge-ros2dds is running (or CENTRAL_ZENOH=1), force Cyclone + localhost
+# discovery so start_central / domain_bridge can see those topics.
+zenoh_transport_active() {
+    [[ "${CENTRAL_ZENOH:-}" == "1" || "${CENTRAL_ZENOH:-}" == "true" ]] && return 0
+    pgrep -f 'zenoh-bridge-ros2dds' >/dev/null 2>&1
+}
+
+USING_ZENOH_TRANSPORT=0
+if zenoh_transport_active; then
+    USING_ZENOH_TRANSPORT=1
+    export ROS_DISTRO="${ROS_DISTRO:-humble}"
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    export ROS_LOCALHOST_ONLY=1
+fi
 
 if [[ ! -f "$TF_RELAY_SCRIPT" ]]; then
     echo "ERROR: TF relay script not found: $TF_RELAY_SCRIPT"
@@ -206,6 +222,9 @@ else
     fi
     echo "  ROS_DOMAIN_ID   = ${ROS_DOMAIN_ID}"
     echo "  Domain map      = ${DOMAIN_MAP_FILE}"
+    if (( USING_ZENOH_TRANSPORT == 1 )); then
+        echo "  Zenoh transport = yes (RMW=rmw_cyclonedds_cpp, ROS_LOCALHOST_ONLY=1)"
+    fi
 fi
 echo "  Domain source   = ${DOMAIN_SOURCE}"
 if [[ -n "$SELECTION" ]]; then
@@ -495,7 +514,13 @@ PY
             local name="${entry%%:*}"
             local domain="${entry##*:}"
             local topics_raw
-            topics_raw="$(ROS_DOMAIN_ID="$domain" ros2 topic list 2>/dev/null || true)"
+            # Keep discovery env explicit so Zenoh localhost injection is visible.
+            topics_raw="$(
+                ROS_DOMAIN_ID="$domain" \
+                RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-}" \
+                ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-}" \
+                ros2 topic list 2>/dev/null || true
+            )"
             # tf/map are canonical; map_wire_z is the fleet bridge side channel and
             # appears as soon as SLAM+map_wire republisher are up on the robot.
             if echo "$topics_raw" | grep -Eq "^/${name}/(tf|map|map_wire_z)$"; then
@@ -581,10 +606,19 @@ if ((${#DETECTED_ROBOTS[@]} == 0)); then
         echo ""
         echo "Bridged mode: the central PC runs \`ros2 topic list\` on each robot's ROS_DOMAIN_ID"
         echo "from ${DOMAIN_MAP_FILE} and looks for /<robot>/(tf|map|map_wire_z)."
-        echo "If robots are up but this fails, DDS on the central machine cannot see those domains"
-        echo "(Wi‑Fi client isolation, VLANs, firewall, or ROS_LOCALHOST_ONLY=1)."
-        echo "Quick check from central (example pinky on domain 22):"
-        echo "  ROS_DOMAIN_ID=22 ros2 topic list | grep -E '^/pinky/(tf|map|map_wire_z)\$'"
+        if (( USING_ZENOH_TRANSPORT == 1 )); then
+            echo "Zenoh transport detected: discovery uses RMW=rmw_cyclonedds_cpp and ROS_LOCALHOST_ONLY=1."
+            echo "Quick check (Clyde domain 80 via Zenoh):"
+            echo "  ROS_DOMAIN_ID=80 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ROS_LOCALHOST_ONLY=1 ros2 topic list | grep clyde"
+            echo "If that is empty: start bringup+SLAM on Clyde, keep both zenoh bridges running,"
+            echo "then re-check. Zenoh peer link alone does not create /clyde/map."
+        else
+            echo "If robots are up but this fails, DDS on the central machine cannot see those domains"
+            echo "(Wi‑Fi client isolation, VLANs, firewall, or mismatched ROS_LOCALHOST_ONLY)."
+            echo "On TAMU_WiFi start Zenoh first: ./scripts/comms/start_zenoh_central.sh clyde"
+            echo "Quick check from central (example pinky on domain 22):"
+            echo "  ROS_DOMAIN_ID=22 ros2 topic list | grep -E '^/pinky/(tf|map|map_wire_z)\$'"
+        fi
         echo "Increase wait: CENTRAL_DISCOVERY_TIMEOUT_SEC=60 ./scripts/core/start_central.sh --comms-mode bridged_domains"
     fi
     exit 1
