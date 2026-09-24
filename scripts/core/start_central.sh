@@ -608,14 +608,14 @@ if ((${#DETECTED_ROBOTS[@]} == 0)); then
         echo "from ${DOMAIN_MAP_FILE} and looks for /<robot>/(tf|map|map_wire_z)."
         if (( USING_ZENOH_TRANSPORT == 1 )); then
             echo "Zenoh transport detected: discovery uses RMW=rmw_cyclonedds_cpp and ROS_LOCALHOST_ONLY=1."
-            echo "Quick check (Clyde domain 80 via Zenoh):"
+            echo "Quick check (example Clyde domain 80 via Zenoh):"
             echo "  ROS_DOMAIN_ID=80 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ROS_LOCALHOST_ONLY=1 ros2 topic list | grep clyde"
-            echo "If that is empty: start bringup+SLAM on Clyde, keep both zenoh bridges running,"
-            echo "then re-check. Zenoh peer link alone does not create /clyde/map."
+            echo "If empty: start bringup+SLAM on the robot, keep Zenoh central + robot bridges running,"
+            echo "then re-check. Zenoh peer link alone does not create /<robot>/map."
         else
             echo "If robots are up but this fails, DDS on the central machine cannot see those domains"
             echo "(Wi‑Fi client isolation, VLANs, firewall, or mismatched ROS_LOCALHOST_ONLY)."
-            echo "On TAMU_WiFi start Zenoh first: ./scripts/comms/start_zenoh_central.sh clyde"
+            echo "On TAMU_WiFi start Zenoh first: ./scripts/comms/start_zenoh_central.sh"
             echo "Quick check from central (example pinky on domain 22):"
             echo "  ROS_DOMAIN_ID=22 ros2 topic list | grep -E '^/pinky/(tf|map|map_wire_z)\$'"
         fi

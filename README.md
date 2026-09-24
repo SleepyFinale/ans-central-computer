@@ -386,18 +386,21 @@ Campus `TAMU_WiFi` has building-wide coverage but typically **blocks ROS 2 DDS**
 1. **Tailscale** for reachability and SSH (MagicDNS names)
 2. `**zenoh-bridge-ros2dds**` to tunnel ROS over Tailscale (local Fast DDS/Cyclone stays on each machine; DDS does not cross the Wi‑Fi)
 
-**Clyde-only bring-up (current focus):**
+**Fleet bring-up (all robots share one Zenoh router on central `:7447`):**
 
 
-| Role       | Tailscale name | ROS domain                                       | Zenoh role                                       |
-| ---------- | -------------- | ------------------------------------------------ | ------------------------------------------------ |
-| Central PC | `reverie`      | central `50` + sees Clyde domain `80` via bridge | Zenoh **router** + ros2dds bridge on domain `80` |
-| Clyde      | `clyde`        | `80`                                             | Zenoh **client** → `tcp/reverie:7447`            |
+| Role       | Tailscale name | ROS domain                         | Zenoh role                                                      |
+| ---------- | -------------- | ---------------------------------- | --------------------------------------------------------------- |
+| Central PC | `reverie`      | central `50` + each robot domain   | One **router** + optional local **client** bridges per robot    |
+| Blinky     | `blinky`       | `5`                                | Zenoh **client** → `tcp/reverie:7447` (auto-detect on robot)    |
+| Pinky      | `pinky`        | `22`                               | same                                                            |
+| Inky       | `inky`         | `19`                               | same                                                            |
+| Clyde      | `clyde`        | `80`                               | same                                                            |
 
 
-#### Install (central and Clyde)
+#### Install (central and each robot)
 
-Ubuntu 22.04 / Jammy: **do not** use `apt install zenoh-bridge-ros2dds` — that package needs glibc ≥ 2.38 (24.04). Use the musl standalone installer (pinned version, same on central and Clyde):
+Ubuntu 22.04 / Jammy: **do not** use `apt install zenoh-bridge-ros2dds` — that package needs glibc ≥ 2.38 (24.04). Use the standalone installer (pinned version, same on central and robots):
 
 ```bash
 # Once per machine (no sudo required for the bridge binary)
@@ -407,55 +410,47 @@ Ubuntu 22.04 / Jammy: **do not** use `apt install zenoh-bridge-ros2dds` — that
 sudo apt install -y ros-humble-rmw-cyclonedds-cpp
 ```
 
-On Clyde, copy helpers first if needed: `scp -r scripts/comms config/zenoh $ROBOT_SSH:~/turtlebot3/` then run the same install script there.
+On a robot, run the same install from the turtlebot3 workspace (`~/turtlebot3/scripts/comms/install_zenoh_bridge.sh`). Robot scripts are edited in that repo directly (no sync step).
+
 
 #### Run order (TAMU)
 
-**Central terminal A — Zenoh router/bridge (Clyde domain):**
+**Central terminal A — Zenoh router (+ per-robot domain injectors):**
 
 ```bash
 cd ~/central-computer
-./scripts/comms/start_zenoh_central.sh clyde
-# Listens on tcp/0.0.0.0:7447; injects /clyde/* into ROS_DOMAIN_ID=80 on localhost
+./scripts/comms/start_zenoh_central.sh              # all four robots
+# or: ./scripts/comms/start_zenoh_central.sh -c     # Clyde only
+# Listens on tcp/0.0.0.0:7447; injects /<robot>/* into each robot ROS_DOMAIN_ID on localhost
 ```
 
-**Clyde — bringup + SLAM/Nav2, then Zenoh client:**
+**Each robot — bringup + SLAM/Nav2, then Zenoh client:**
 
-Do **not** set `ROS_LOCALHOST_ONLY=1` on Clyde for Nav2/SLAM (CycloneDDS will run out of participant indices). Use Cyclone without localhost-only; Zenoh still tunnels over Tailscale.
+On the robot, `source scripts/env/ros_robot_env.bash` already sets `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and clears `ROS_LOCALHOST_ONLY` (needed so Nav2/SLAM do not exhaust Cyclone participant indices). Zenoh still tunnels over Tailscale.
+
+Identity for Zenoh matches `ros_domain_profile.bash`: `ROBOT_NAME` → `TURTLEBOT3_ROBOT_NAME` → `USER` → hostname (prefer logging in as `blinky`/`pinky`/`inky`/`clyde` — stock hostnames like `ubuntu` are not enough).
 
 ```bash
-# On Clyde — Terminal 1/2 (bringup + navigation2_slam) use:
-#   source scripts/env/ros_domain_profile.bash clyde
-#   export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-#   unset ROS_LOCALHOST_ONLY
-
-# Terminal 3 — Zenoh client (after bringup/SLAM are up):
-./scripts/comms/start_zenoh_robot.sh clyde reverie
+# Terminal 3 — Zenoh client (after bringup/SLAM are up), from turtlebot3:
+./scripts/comms/start_zenoh_robot.sh                # auto-detects robot + domain
+# or: ./scripts/comms/start_zenoh_robot.sh reverie  # override central Tailscale name
 ```
 
-Full checklist: [scripts/comms/CLYDE_SETUP.md](scripts/comms/CLYDE_SETUP.md).
 
-If the robot repo does not yet contain `scripts/comms/`, from central:
-
-```bash
-source scripts/env/set_robot_env.sh clyde
-./scripts/comms/sync_zenoh_to_robot.sh
-```
 
 **Central terminal B — existing stack (unchanged):**
 
 ```bash
 source scripts/env/ros_domain_profile.bash
-./scripts/core/start_central.sh -c --comms-mode bridged_domains
+./scripts/core/start_central.sh --comms-mode bridged_domains
+# or filter: ./scripts/core/start_central.sh -c --comms-mode bridged_domains
 ```
 
-`domain_bridge` still maps Clyde domain `80` → central `50`. Zenoh only replaces the hostile Wi‑Fi DDS path between machines.
+`domain_bridge` still maps each robot domain → central `50`. Zenoh only replaces the hostile Wi‑Fi DDS path between machines.
 
 **Azure / same-LAN debug:** skip Zenoh; use normal DDS as before.
 
-**Check:** with Zenoh up, on central `ROS_DOMAIN_ID=80 ros2 topic list` should show `/clyde/map` (or `map_wire_z`) without multicast across TAMU.
-
-Robot-only checklist (copy/install/run on Clyde): [scripts/comms/CLYDE_SETUP.md](scripts/comms/CLYDE_SETUP.md).
+**Check:** with Zenoh up, on central `ROS_DOMAIN_ID=80 ros2 topic list` should show `/clyde/map` (or `map_wire_z`) without multicast across TAMU. Same pattern for other robots with their domain IDs from `config/fleet_domain_map.yaml`.
 
 ---
 
