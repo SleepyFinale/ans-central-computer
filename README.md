@@ -419,20 +419,27 @@ cd ~/central-computer
 # Listens on tcp/0.0.0.0:7447; injects /clyde/* into ROS_DOMAIN_ID=80 on localhost
 ```
 
-**Clyde — after robot bringup + SLAM/Nav2 (same domain profile as usual):**
+**Clyde — bringup + SLAM/Nav2, then Zenoh client:**
+
+Do **not** set `ROS_LOCALHOST_ONLY=1` on Clyde for Nav2/SLAM (CycloneDDS will run out of participant indices). Use Cyclone without localhost-only; Zenoh still tunnels over Tailscale.
 
 ```bash
-# On Clyde (SSH: source scripts/env/set_robot_env.sh clyde && ssh $ROBOT_SSH)
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export ROS_DOMAIN_ID=80   # matches config/fleet_domain_map.yaml
-# Point at central Tailscale name (or 100.x IP):
+# On Clyde — Terminal 1/2 (bringup + navigation2_slam) use:
+#   source scripts/env/ros_domain_profile.bash clyde
+#   export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+#   unset ROS_LOCALHOST_ONLY
+
+# Terminal 3 — Zenoh client (after bringup/SLAM are up):
 ./scripts/comms/start_zenoh_robot.sh clyde reverie
 ```
 
-If the robot repo does not yet contain `scripts/comms/`, scp from central:
+Full checklist: [scripts/comms/CLYDE_SETUP.md](scripts/comms/CLYDE_SETUP.md).
+
+If the robot repo does not yet contain `scripts/comms/`, from central:
 
 ```bash
-scp -r scripts/comms config/zenoh $ROBOT_SSH:~/turtlebot3/
+source scripts/env/set_robot_env.sh clyde
+./scripts/comms/sync_zenoh_to_robot.sh
 ```
 
 **Central terminal B — existing stack (unchanged):**
