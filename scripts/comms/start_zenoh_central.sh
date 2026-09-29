@@ -169,7 +169,6 @@ if ! ZENOH_BIN="$(resolve_zenoh_bridge_ros2dds)"; then
 fi
 
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
-export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-1}"
 export ROS_DISTRO="${ROS_DISTRO:-humble}"
 if [[ -f /opt/ros/${ROS_DISTRO}/setup.bash ]]; then
   # shellcheck disable=SC1090
@@ -178,6 +177,10 @@ if [[ -f /opt/ros/${ROS_DISTRO}/setup.bash ]]; then
   set -u
   export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
 fi
+# Always localhost. setup.bash or the calling shell may set ROS_LOCALHOST_ONLY=0,
+# and the bridge then ignores ros_localhost_only:true in the template. Discovery
+# and domain_bridge only see topics injected on localhost.
+export ROS_LOCALHOST_ONLY=1
 
 RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}/zenoh_bridge_central"
 mkdir -p "$RUNTIME_ROOT"
@@ -196,6 +199,18 @@ cleanup() {
     kill "$ROUTER_PID" 2>/dev/null || true
     wait "$ROUTER_PID" 2>/dev/null || true
   fi
+}
+start_tf_receive() {
+  local robot="$1"
+  local domain="$2"
+  echo "  tf:       ${robot} /${robot}/tf_zenoh -> /${robot}/tf (domain ${domain})"
+  (
+    export ROS_DOMAIN_ID="$domain"
+    export ROS_LOCALHOST_ONLY=1
+    export RMW_IMPLEMENTATION
+    exec python3 "${SCRIPT_DIR}/tf_zenoh_receive.py" "$robot"
+  ) &
+  CLIENT_PIDS+=("$!")
 }
 trap cleanup EXIT INT TERM
 
@@ -224,10 +239,11 @@ echo ""
 export ROS_DOMAIN_ID="$ROUTER_DOMAIN"
 "${ZENOH_BIN}" -c "$ROUTER_CFG" &
 ROUTER_PID=$!
+sleep 0.5
+start_tf_receive "$ROUTER_ROBOT" "$ROUTER_DOMAIN"
 
 # Extra domain bridges as local clients once the router is listening.
 if [[ ${#ROBOTS[@]} -gt 1 ]]; then
-  sleep 0.5
   for robot in "${ROBOTS[@]:1}"; do
     domain="$(domain_from_map "$robot")"
     cfg="${RUNTIME_ROOT}/${robot}_client.json5"
@@ -240,6 +256,7 @@ if [[ ${#ROBOTS[@]} -gt 1 ]]; then
       exec "${ZENOH_BIN}" -c "$cfg"
     ) &
     CLIENT_PIDS+=("$!")
+    start_tf_receive "$robot" "$domain"
   done
   echo ""
 fi

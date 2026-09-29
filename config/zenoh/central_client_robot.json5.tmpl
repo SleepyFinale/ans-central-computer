@@ -18,6 +18,7 @@
       domain: __DOMAIN__,
       ros_localhost_only: true,
       nodename: "zenoh_bridge_central___ROBOT__",
+      reliable_routes_blocking: false,
       allow: {
         publishers: [
           "/__ROBOT__/navigate_to_pose/_action/.*",
@@ -26,8 +27,8 @@
         subscribers: [
           "/__ROBOT__/map",
           "/__ROBOT__/map_wire_z",
-          "/__ROBOT__/tf",
-          "/__ROBOT__/tf_static",
+          "/__ROBOT__/tf_zenoh",
+          "/__ROBOT__/tf_static_zenoh",
           "/__ROBOT__/nav2_collision_ahead",
           "/__ROBOT__/nav2_retrace_active",
           "/__ROBOT__/navigate_to_pose/_action/.*",
@@ -53,8 +54,8 @@
       pub_max_frequencies: [
         "/__ROBOT__/map=1",
         "/__ROBOT__/map_wire_z=1",
-        "/__ROBOT__/tf=10",
-        "/__ROBOT__/tf_static=1",
+        "/__ROBOT__/tf_zenoh=10",
+        "/__ROBOT__/tf_static_zenoh=1",
       ],
     },
   },

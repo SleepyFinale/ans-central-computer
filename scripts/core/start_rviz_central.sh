@@ -99,6 +99,15 @@ get_robot_domain() {
     return 1
 }
 
+use_stack_rmw() {
+    # start_central / Zenoh publish on Cyclone. A default FastDDS RViz
+    # process is on a different graph and reports no map and no TF.
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    if pgrep -f 'zenoh-bridge-ros2dds' >/dev/null 2>&1; then
+        export ROS_LOCALHOST_ONLY=1
+    fi
+}
+
 detect_active_robots() {
     # Active means the robot domain currently exposes /<robot>/map.
     # We probe each domain directly rather than relying on central graph relay.
@@ -177,6 +186,8 @@ if load_domain_map; then
     HAS_DOMAIN_MAP=true
 fi
 
+use_stack_rmw
+
 if [[ "$MODE" == "global" ]]; then
     if [[ ! -f "$GLOBAL_CFG" ]]; then
         echo "ERROR: Global RViz config not found at: $GLOBAL_CFG" >&2
@@ -207,20 +218,21 @@ if [[ "$MODE" == "global" ]]; then
             # avoid empty global map sessions during single-robot runs.
             if [[ ${#ACTIVE_ROBOTS[@]} -eq 1 ]]; then
                 EFFECTIVE_ROBOT="${ACTIVE_ROBOTS[0]}"
-                if robot_domain="$(get_robot_domain "$EFFECTIVE_ROBOT" || true)" && [[ -n "$robot_domain" ]]; then
-                    export ROS_DOMAIN_ID="$robot_domain"
-                    EFFECTIVE_DOMAIN="$ROS_DOMAIN_ID"
-                    DOMAIN_SOURCE="auto(single_robot_local:${EFFECTIVE_ROBOT})"
-                    EFFECTIVE_MAP_TOPIC="/${EFFECTIVE_ROBOT}/map"
-                    EFFECTIVE_FIXED_FRAME="${EFFECTIVE_ROBOT}/map"
-                    EFFECTIVE_VIEW_MODE="local"
-                    if [[ ! -f "$LOCAL_TEMPLATE_CFG" ]]; then
-                        echo "ERROR: Local RViz template config not found at: $LOCAL_TEMPLATE_CFG" >&2
-                        exit 1
-                    fi
-                    EFFECTIVE_CFG="$(mktemp "/tmp/central_rviz_auto_local_${EFFECTIVE_ROBOT}_XXXX.rviz")"
-                    generate_local_cfg "$EFFECTIVE_ROBOT" "$EFFECTIVE_CFG"
+                # Stay on the central domain. domain_bridge and the TF relay
+                # publish /<robot>/map and /tf there. The robot domain only has
+                # /<robot>/tf, which RViz does not listen to, so frame
+                # <robot>/map never appears.
+                EFFECTIVE_DOMAIN="${ROS_DOMAIN_ID}"
+                DOMAIN_SOURCE="auto(single_robot_local:${EFFECTIVE_ROBOT})"
+                EFFECTIVE_MAP_TOPIC="/${EFFECTIVE_ROBOT}/map"
+                EFFECTIVE_FIXED_FRAME="${EFFECTIVE_ROBOT}/map"
+                EFFECTIVE_VIEW_MODE="local"
+                if [[ ! -f "$LOCAL_TEMPLATE_CFG" ]]; then
+                    echo "ERROR: Local RViz template config not found at: $LOCAL_TEMPLATE_CFG" >&2
+                    exit 1
                 fi
+                EFFECTIVE_CFG="$(mktemp "/tmp/central_rviz_auto_local_${EFFECTIVE_ROBOT}_XXXX.rviz")"
+                generate_local_cfg "$EFFECTIVE_ROBOT" "$EFFECTIVE_CFG"
             fi
         fi
     fi
@@ -234,6 +246,7 @@ if [[ "$MODE" == "global" ]]; then
     fi
     echo "Effective ROS_DOMAIN_ID: ${EFFECTIVE_DOMAIN}"
     echo "Domain source: ${DOMAIN_SOURCE}"
+    echo "RMW: ${RMW_IMPLEMENTATION}  ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-unset}"
     echo "Fixed frame: ${EFFECTIVE_FIXED_FRAME}, map topic: ${EFFECTIVE_MAP_TOPIC}"
     if [[ "$EFFECTIVE_VIEW_MODE" == "local" ]]; then
         echo "Costmap overlays: /${EFFECTIVE_ROBOT}/global_costmap/costmap and /${EFFECTIVE_ROBOT}/local_costmap/costmap"
@@ -255,12 +268,13 @@ else
         echo "ERROR: Domain map is required for --local mode auto-switch: $DOMAIN_MAP_FILE" >&2
         exit 1
     fi
-    robot_domain="$(get_robot_domain "$ROBOT_NAME" || true)"
-    if [[ -z "$robot_domain" ]]; then
+    if ! get_robot_domain "$ROBOT_NAME" >/dev/null; then
         echo "ERROR: Robot '${ROBOT_NAME}' not found in domain map: $DOMAIN_MAP_FILE" >&2
         exit 1
     fi
-    export ROS_DOMAIN_ID="$robot_domain"
+    if [[ -z "${ROS_DOMAIN_ID:-}" ]]; then
+        export ROS_DOMAIN_ID="${DEFAULT_CENTRAL_DOMAIN_ID}"
+    fi
 
     # Warn if the expected map topic is not currently available, but still start RViz.
     if command -v ros2 >/dev/null 2>&1; then
@@ -280,6 +294,7 @@ else
     echo "  $TMP_CFG"
     echo "Effective ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-unset}"
     echo "Domain source: local_robot_map(${ROBOT_NAME})"
+    echo "RMW: ${RMW_IMPLEMENTATION}  ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-unset}"
     echo "Fixed frame: ${local_fixed_frame}, map topic: /${ROBOT_NAME}/map"
     echo "Costmap overlays: /${ROBOT_NAME}/global_costmap/costmap and /${ROBOT_NAME}/local_costmap/costmap"
     echo ""

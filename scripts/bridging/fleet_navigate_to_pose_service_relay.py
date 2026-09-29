@@ -361,6 +361,9 @@ def main() -> int:
 
     def _request_shutdown(_signum=None, _frame=None):
         shutdown_evt.set()
+        # Service handlers block inside spin_once. Set this immediately so
+        # _forward stops within one queue poll instead of logging a 120s timeout.
+        node._shutdown.set()
 
     signal.signal(signal.SIGINT, _request_shutdown)
     signal.signal(signal.SIGTERM, _request_shutdown)
@@ -370,6 +373,10 @@ def main() -> int:
             try:
                 executor.spin_once(timeout_sec=0.2)
             except ExternalShutdownException:
+                break
+            except Exception:
+                if rclpy.ok() and not shutdown_evt.is_set():
+                    raise
                 break
     finally:
         # Unblock service threads waiting on _r2c before tearing down rclpy.

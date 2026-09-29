@@ -4828,8 +4828,9 @@ def main(args=None):
         # Treat Ctrl+C and external shutdown events as normal exit paths.
         pass
     except Exception:
-        # Keep cleanup path, but surface the real exception for debugging.
-        traceback.print_exc()
+        # Context is already gone after Ctrl+C; that is not a crash.
+        if rclpy.ok():
+            traceback.print_exc()
     finally:
         try:
             executor.shutdown()

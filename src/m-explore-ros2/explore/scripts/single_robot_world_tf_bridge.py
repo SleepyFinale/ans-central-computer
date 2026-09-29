@@ -54,6 +54,10 @@ def main(args=None):
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception:
+        # SIGINT invalidates the context before spin raises KeyboardInterrupt.
+        if rclpy.ok():
+            raise
     finally:
         if node is not None:
             try:
