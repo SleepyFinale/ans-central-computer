@@ -159,6 +159,9 @@ class RobotState:
     # World-frame goal (merged map) for blacklists / NavigateToPose after precheck.
     path_precheck_world_goal_xy: Optional[Tuple[float, float]] = None
     path_precheck_started_time: float = 0.0
+    # Bumped when a precheck is started or abandoned so a late Nav2 result
+    # cannot clear or blacklist a newer attempt.
+    path_precheck_epoch: int = 0
     # First time compute_path_to_pose wait_for_server succeeded (Nav2 warm-up).
     path_precheck_server_seen_time: float = 0.0
     # Session start pose in world frame (recorded on first TF once maps are ready).
@@ -1752,15 +1755,37 @@ class MultiRobotExplorer(Node):
                 < self.nav2_path_precheck_timeout_sec
             ):
                 continue
+            goal_xy = rs.path_precheck_world_goal_xy or rs.path_precheck_goal_xy
+            goal_txt = (
+                f' at ({goal_xy[0]:.2f}, {goal_xy[1]:.2f})'
+                if goal_xy is not None else ''
+            )
             self.get_logger().warn(
                 f'[{rs.name}] Nav2 path precheck timed out after '
-                f'{self.nav2_path_precheck_timeout_sec:.1f}s; skipping goal'
+                f'{self.nav2_path_precheck_timeout_sec:.1f}s{goal_txt}; '
+                'cancelling and skipping goal'
             )
             rs.precheck_timeout_events += 1
-            self._path_precheck_transient_fail(
+            hard, reason = self._note_transient_precheck_abort_and_maybe_escalate(
                 rs,
-                f'timed out after {self.nav2_path_precheck_timeout_sec:.1f}s'
+                goal_xy,
+                f'timed out after {self.nav2_path_precheck_timeout_sec:.1f}s',
             )
+            if hard:
+                self.get_logger().warn(
+                    f'[{rs.name}] Path precheck timed out repeatedly; '
+                    f'blacklisting goal and continuing ({reason})'
+                )
+                self._abort_path_precheck(
+                    rs,
+                    cancel_action=True,
+                    blacklist_xy=goal_xy,
+                    cooldown=True,
+                )
+                rs.precheck_transient_goal_xy = None
+                rs.precheck_transient_repeat_count = 0
+            else:
+                self._path_precheck_transient_fail(rs, reason)
 
         for rs in self.robots.values():
             if not rs.arrival_probe_in_progress:
@@ -3220,6 +3245,8 @@ class MultiRobotExplorer(Node):
                 rs.path_precheck_goal_handle.cancel_goal_async()
             except Exception:
                 pass
+        # Invalidate callbacks for this attempt before clearing its fields.
+        rs.path_precheck_epoch += 1
         rs.path_precheck_goal_handle = None
         rs.path_precheck_in_progress = False
         rs.path_precheck_frontier = None
@@ -3245,10 +3272,12 @@ class MultiRobotExplorer(Node):
         Nav2's planner server rejects goals while server_active_ is false
         (lifecycle still activating), even if wait_for_server() is true.
         Do not blacklist — retry shortly like NavigateToPose warm-up.
+        Cancel any in-flight ComputePathToPose so a hung get_result cannot
+        wedge the action relay.
         """
         self._abort_path_precheck(
             rs,
-            cancel_action=False,
+            cancel_action=True,
             blacklist_xy=None,
             cooldown=False,
         )
@@ -3373,6 +3402,8 @@ class MultiRobotExplorer(Node):
                 rs, 'tf_nav_dispatch_transform_failed', count_for_degraded=False)
             return
 
+        rs.path_precheck_epoch += 1
+        precheck_epoch = rs.path_precheck_epoch
         rs.path_precheck_world_goal_xy = (float(goal_x), float(goal_y))
         rs.goal_pending = True
         rs.goal_active = False
@@ -3394,7 +3425,8 @@ class MultiRobotExplorer(Node):
 
         send_future = rs.path_precheck_client.send_goal_async(cp_goal)
         send_future.add_done_callback(
-            lambda f, r=rs: self._path_precheck_goal_response_callback(f, r))
+            lambda f, r=rs, e=precheck_epoch: (
+                self._path_precheck_goal_response_callback(f, r, e)))
         self._event_info(
             f'[{rs.name}] Nav2 path precheck '
             f'{nav_goal.header.frame_id} '
@@ -3402,7 +3434,18 @@ class MultiRobotExplorer(Node):
             f'[world {goal_x:.2f}, {goal_y:.2f}]'
         )
 
-    def _path_precheck_goal_response_callback(self, future, rs: RobotState):
+    def _path_precheck_goal_response_callback(self, future, rs: RobotState, epoch: int):
+        if epoch != rs.path_precheck_epoch:
+            try:
+                goal_handle = future.result()
+            except Exception:
+                return
+            if goal_handle is not None and goal_handle.accepted:
+                try:
+                    goal_handle.cancel_goal_async()
+                except Exception:
+                    pass
+            return
         try:
             goal_handle = future.result()
         except Exception as exc:
@@ -3423,9 +3466,11 @@ class MultiRobotExplorer(Node):
         rs.path_precheck_goal_handle = goal_handle
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(
-            lambda f, r=rs: self._path_precheck_result_callback(f, r))
+            lambda f, r=rs, e=epoch: self._path_precheck_result_callback(f, r, e))
 
-    def _path_precheck_result_callback(self, future, rs: RobotState):
+    def _path_precheck_result_callback(self, future, rs: RobotState, epoch: int):
+        if epoch != rs.path_precheck_epoch:
+            return
         rs.path_precheck_goal_handle = None
         rs.path_precheck_in_progress = False
         goal_xy = rs.path_precheck_goal_xy

@@ -12,6 +12,11 @@ get_result / cancel_goal *services* on the central domain. This relay forwards:
 
 Hidden action topics (status / feedback / result) still come from domain_bridge
 YAML; this process only handles the three service types per action.
+
+get_result stays open until Nav2 finishes the action. The robot worker therefore
+keeps every service call in flight at once and pairs replies by request id.
+Otherwise one slow ComputePathToPose get_result blocks send_goal and
+cancel_goal, and the explorer times out forever without the robot ever moving.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from multiprocessing import Event, Queue
 
@@ -31,7 +37,7 @@ import rclpy
 from action_msgs.srv import CancelGoal
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.serialization import deserialize_message, serialize_message
 
@@ -159,38 +165,47 @@ def _robot_worker(
             'forwarding to central.'
         )
 
+        # (req_id, future). get_result blocks until the action ends, so it must
+        # not stall send_goal / cancel_goal behind spin_until_future_complete.
+        inflight: list[tuple[str, object]] = []
+
+        def _pump_inflight() -> bool:
+            if not _safe_spin_once_worker(node, 0.0):
+                return False
+            still: list[tuple[str, object]] = []
+            for req_id, fut in inflight:
+                if not fut.done():
+                    still.append((req_id, fut))
+                    continue
+                try:
+                    rsp = fut.result()
+                    if rsp is None:
+                        q_out.put((req_id, 'err', 'service call returned no response'))
+                    else:
+                        q_out.put((req_id, 'ok', serialize_message(rsp)))
+                except Exception as exc:  # noqa: BLE001
+                    q_out.put((req_id, 'err', str(exc)))
+            inflight[:] = still
+            return True
+
         while rclpy.ok():
             try:
-                item = q_in.get(timeout=0.5)
+                item = q_in.get(timeout=0.05)
             except queue.Empty:
-                if not _safe_spin_once_worker(node, 0.0):
+                if not _pump_inflight():
                     break
                 continue
             if item is None:
                 break
-            action_key, kind, req_bytes = item
+            req_id, action_key, kind, req_bytes = item
             sg, gr, cg = clients[action_key]
+            client = {'sg': sg, 'gr': gr, 'cg': cg}.get(kind)
+            if client is None:
+                q_out.put((req_id, 'err', f'unknown relay kind: {kind!r}'))
+                continue
             try:
-                if kind == 'sg':
-                    req = deserialize_message(req_bytes, sg.srv_type.Request)
-                    fut = sg.call_async(req)
-                    rclpy.spin_until_future_complete(node, fut)
-                    rsp = fut.result()
-                    q_out.put(serialize_message(rsp))
-                elif kind == 'gr':
-                    req = deserialize_message(req_bytes, gr.srv_type.Request)
-                    fut = gr.call_async(req)
-                    rclpy.spin_until_future_complete(node, fut)
-                    rsp = fut.result()
-                    q_out.put(serialize_message(rsp))
-                elif kind == 'cg':
-                    req = deserialize_message(req_bytes, CancelGoal.Request)
-                    fut = cg.call_async(req)
-                    rclpy.spin_until_future_complete(node, fut)
-                    rsp = fut.result()
-                    q_out.put(serialize_message(rsp))
-                else:
-                    node.get_logger().warn(f'Unknown relay kind: {kind!r}')
+                req = deserialize_message(req_bytes, client.srv_type.Request)
+                inflight.append((req_id, client.call_async(req)))
             except Exception as exc:  # noqa: BLE001
                 if not rclpy.ok():
                     break
@@ -198,6 +213,9 @@ def _robot_worker(
                     node,
                     f'Relay worker error ({action_key}/{kind}): {exc}',
                 )
+                q_out.put((req_id, 'err', str(exc)))
+            if not _pump_inflight():
+                break
     finally:
         _safe_destroy_node(node)
         _safe_rclpy_shutdown()
@@ -215,6 +233,11 @@ class _RelayNode(Node):
         self._c2r = central_to_robot
         self._r2c = robot_to_central
         self._shutdown = threading.Event()
+        self._waiters: dict[str, queue.Queue] = {}
+        self._waiters_lock = threading.Lock()
+        self._demux_thread = threading.Thread(
+            target=self._demux_responses, name=f'nav_relay_demux_{robot}', daemon=True)
+        self._demux_thread.start()
         cb_group = ReentrantCallbackGroup()
 
         for sp in _action_specs(robot):
@@ -274,23 +297,49 @@ class _RelayNode(Node):
 
         return handler
 
+    def _demux_responses(self) -> None:
+        """Deliver robot-side replies to the matching _forward waiter."""
+        while not self._shutdown.is_set():
+            try:
+                item = self._r2c.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if item is None:
+                continue
+            try:
+                req_id, status, payload = item
+            except Exception:
+                continue
+            with self._waiters_lock:
+                waiter = self._waiters.get(req_id)
+            if waiter is not None:
+                waiter.put((status, payload))
+
     def _forward(self, action_key: str, kind: str, request, resp_type: type):
         if self._shutdown.is_set() or not rclpy.ok():
             raise RelayShuttingDown()
+        req_id = uuid.uuid4().hex
         payload = serialize_message(request)
-        # SingleThreadedExecutor processes callbacks serially, so FIFO queue
-        # ordering is sufficient for request/response pairing here.
-        self._c2r.put((action_key, kind, payload))
-        deadline = time.monotonic() + 120.0
-        while time.monotonic() < deadline:
-            if self._shutdown.is_set() or not rclpy.ok():
-                raise RelayShuttingDown()
-            try:
-                data = self._r2c.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            return deserialize_message(data, resp_type)
-        raise TimeoutError(f'Relay timeout for {action_key}/{kind}')
+        waiter: queue.Queue = queue.Queue()
+        with self._waiters_lock:
+            self._waiters[req_id] = waiter
+        try:
+            self._c2r.put((req_id, action_key, kind, payload))
+            deadline = time.monotonic() + 120.0
+            while time.monotonic() < deadline:
+                if self._shutdown.is_set() or not rclpy.ok():
+                    raise RelayShuttingDown()
+                try:
+                    status, data = waiter.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if status != 'ok':
+                    raise RuntimeError(str(data))
+                return deserialize_message(data, resp_type)
+            raise TimeoutError(f'Relay timeout for {action_key}/{kind}')
+        finally:
+            with self._waiters_lock:
+                self._waiters.pop(req_id, None)
 
 
 def main() -> int:
@@ -352,7 +401,9 @@ def main() -> int:
 
     rclpy.init()
     node = _RelayNode(args.robot, q_c2r, q_r2c)
-    executor = SingleThreadedExecutor()
+    # Service handlers block inside _forward. A thread pool lets get_result
+    # stay open while send_goal and cancel_goal run.
+    executor = MultiThreadedExecutor(num_threads=8)
     executor.add_node(node)
 
     # Do not raise KeyboardInterrupt from a signal handler: it can fire during
