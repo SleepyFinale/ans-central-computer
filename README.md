@@ -234,6 +234,18 @@ For combined runs, start one motion script and one watermark script in separate 
 
 Use this when you need a clean fleet bring-up without reading the full runbook first.
 
+**One command on the central PC.** [`scripts/core/start_fleet.sh`](scripts/core/start_fleet.sh) starts central Zenoh, then bringup, SLAM, and robot Zenoh on each selected robot over SSH, then `start_central.sh` and RViz. It stays in the foreground until Ctrl+C, which stops every process it started. The terminal shows stage progress plus warnings and errors; pass `--verbose` to print every line. Full logs are still written on this PC. Install `sshpass` once (`sudo apt install sshpass`). The robot password is `ROBOT_SSH_PASSWORD` (default `ubuntu`). The central Tailscale name defaults to `reverie`.
+
+```bash
+cd ~/central-computer
+./scripts/core/start_fleet.sh                 # blinky, pinky, inky, and clyde
+./scripts/core/start_fleet.sh -ic             # inky and clyde
+./scripts/core/start_fleet.sh -c --no-rviz
+./scripts/core/start_fleet.sh --verbose -c     # print every process line
+```
+
+The bullets below are the hand-started central and robot terminals. Zenoh, which the script also starts, is in [Each session](#each-session).
+
 - **[CENTRAL-PC] Build and source**
   ```bash
   cd ~/central-computer
