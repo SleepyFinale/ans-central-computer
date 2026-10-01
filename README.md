@@ -12,6 +12,8 @@ This workspace contains editable TurtleBot3 packages for ROS 2 Humble, configure
   - [Building the Workspace](#building-the-workspace)
 3. [Robot Configuration and ROS Domain](#robot-configuration-and-ros-domain)
   - [TAMU_WiFi + Tailscale + Zenoh](#tamu_wifi--tailscale--zenoh)
+    - [One-time setup on a robot](#one-time-setup-on-a-robot)
+    - [Each session](#each-session)
 4. [Multi-Robot SLAM](#multi-robot-slam)
   - [Robot Terminal 1: Robot Bringup](#robot-terminal-1-robot-bringup)
   - [Robot Terminal 2: SLAM + Nav2](#robot-terminal-2-slam--nav2)
@@ -290,9 +292,7 @@ The table below lists the SSH targets for each robot on the Azure hotspot (stati
 
 **Azure hotspot (central PC join info):** SSID `Azure`, password `howdoyouwanttodothis`, gateway `172.20.10.1`, prefix `28`.
 
-`TAMU_WiFi` is supported on the robot side (auto-login) but uses DHCP and typically blocks ROS DDS. Preferred TAMU path: **Tailscale** with `sudo tailscale set --hostname=<robot>` on each Pi, then `source scripts/env/set_robot_env.sh <robot>` (no DHCP IP needed). Pass an explicit IP only if Tailscale is down.
-
-**Current bring-up focus:** Clyde + central (`reverie`) on Tailscale; other robots can join the same pattern later.
+`TAMU_WiFi` is supported on the robot side (auto-login) but uses DHCP and typically blocks ROS DDS. Preferred TAMU path: **Tailscale** with `sudo tailscale set --hostname=<robot>` on each Pi, then `source scripts/env/set_robot_env.sh <robot>` (no DHCP IP needed). Pass an explicit IP only if Tailscale is down. Full setup for any fleet robot is in [TAMU_WiFi + Tailscale + Zenoh](#tamu_wifi--tailscale--zenoh). The central PC's Tailscale name is `reverie`.
 
 ### Using `set_robot_env.sh` to SSH into a robot
 
@@ -343,7 +343,7 @@ Robot WiFi switching/boot logic lives in the robot repository (`~/turtlebot3`) u
 
 Important caveats when coordinating from central:
 
-- Boot auto-connect service (`boot-wifi.service`) tries `**azure -> tamu**` by default (Azure first; TAMU if Azure is unavailable).
+- Boot auto-connect service (`boot-wifi.service`) tries `**tamu -> azure**` by default (TAMU first; Azure if TAMU is unavailable).
 - Ensure only one netplan file configures `wlan0` on the robot. If `99-wifi-switch.yaml` is used, remove/comment `wifis.wlan0` in `/etc/netplan/50-cloud-init.yaml` to avoid duplicate access-point errors.
 
 ### ROS domain (ROS_DOMAIN_ID)
@@ -384,73 +384,103 @@ Bridge/domain sources used by startup:
 Campus `TAMU_WiFi` has building-wide coverage but typically **blocks ROS 2 DDS** (multicast / client isolation). Use:
 
 1. **Tailscale** for reachability and SSH (MagicDNS names)
-2. `**zenoh-bridge-ros2dds**` to tunnel ROS over Tailscale (local Fast DDS/Cyclone stays on each machine; DDS does not cross the Wi‑Fi)
+2. **zenoh-bridge-ros2dds** to tunnel ROS over Tailscale (local Cyclone DDS stays on each machine; DDS does not cross the Wi‑Fi)
 
-**Fleet bring-up (all robots share one Zenoh router on central `:7447`):**
+The steps below are the same for every fleet robot. Substitute that robot's name (`blinky`, `pinky`, `inky`, or `clyde`) wherever you see `<robot>`. Run the robot commands logged in as `<robot>`. Zenoh and `ROS_DOMAIN_ID` follow `ROBOT_NAME`, then `TURTLEBOT3_ROBOT_NAME`, then `USER`, then the hostname. A stock hostname such as `ubuntu` is not a robot name.
 
-
-| Role       | Tailscale name | ROS domain                         | Zenoh role                                                      |
-| ---------- | -------------- | ---------------------------------- | --------------------------------------------------------------- |
-| Central PC | `reverie`      | central `50` + each robot domain   | One **router** + optional local **client** bridges per robot    |
-| Blinky     | `blinky`       | `5`                                | Zenoh **client** → `tcp/reverie:7447` (auto-detect on robot)    |
-| Pinky      | `pinky`        | `22`                               | same                                                            |
-| Inky       | `inky`         | `19`                               | same                                                            |
-| Clyde      | `clyde`        | `80`                               | same                                                            |
+All robots share one Zenoh router on the central PC at `tcp/reverie:7447`. Domains below match `config/fleet_domain_map.yaml`.
 
 
-#### Install (central and each robot)
+| Role       | Tailscale name | ROS domain                       | Zenoh role                                                   |
+| ---------- | -------------- | -------------------------------- | ------------------------------------------------------------ |
+| Central PC | `reverie`      | central `50` + each robot domain | One **router** + local **client** bridges per robot         |
+| Blinky     | `blinky`       | `5`                              | Zenoh **client** → `tcp/reverie:7447` (auto-detect on robot) |
+| Pinky      | `pinky`        | `22`                             | same                                                         |
+| Inky       | `inky`         | `19`                             | same                                                         |
+| Clyde      | `clyde`        | `80`                             | same                                                         |
 
-Ubuntu 22.04 / Jammy: **do not** use `apt install zenoh-bridge-ros2dds` — that package needs glibc ≥ 2.38 (24.04). Use the standalone installer (pinned version, same on central and robots):
+
+Ubuntu 22.04: **do not** use `apt install zenoh-bridge-ros2dds`. That package needs glibc ≥ 2.38 (Ubuntu 24.04). Use `scripts/comms/install_zenoh_bridge.sh` on the central PC and on every robot. It pins the same bridge version (default `1.7.2`) and installs to `third_party/zenoh/zenoh-bridge-ros2dds` and `~/.local/bin/`.
+
+#### One-time setup on a robot
+
+The robot already has `~/turtlebot3`. Do this once per Pi, logged in as `<robot>`.
+
+**Tailscale.** Join the same tailnet as the central PC (`reverie`). Leave `--accept-routes` off.
 
 ```bash
-# Once per machine (no sudo required for the bridge binary)
-./scripts/comms/install_zenoh_bridge.sh
-# Installs to third_party/zenoh/zenoh-bridge-ros2dds and ~/.local/bin/
-
-sudo apt install -y ros-humble-rmw-cyclonedds-cpp
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+sudo tailscale set --hostname=<robot>
+tailscale status
 ```
 
-On a robot, run the same install from the turtlebot3 workspace (`~/turtlebot3/scripts/comms/install_zenoh_bridge.sh`). Robot scripts are edited in that repo directly (no sync step).
+`tailscale up` prints a login URL. Approve the node, then confirm `tailscale status` on the robot and on the central PC both show `<robot>` online.
 
-
-#### Run order (TAMU)
-
-**Central terminal A — Zenoh router (+ per-robot domain injectors):**
+From the central PC:
 
 ```bash
 cd ~/central-computer
-./scripts/comms/start_zenoh_central.sh              # all four robots
-# or: ./scripts/comms/start_zenoh_central.sh -c     # Clyde only
-# Listens on tcp/0.0.0.0:7447; injects /<robot>/* into each robot ROS_DOMAIN_ID on localhost
+source scripts/env/set_robot_env.sh <robot>
+ssh $ROBOT_SSH
 ```
 
-**Each robot — bringup + SLAM/Nav2, then Zenoh client:**
+Expect `ROBOT_SSH=<robot>@<robot>` and `(network: tamu/tailscale)` when this PC is on `TAMU_WiFi`.
 
-On the robot, `source scripts/env/ros_robot_env.bash` already sets `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and clears `ROS_LOCALHOST_ONLY` (needed so Nav2/SLAM do not exhaust Cyclone participant indices). Zenoh still tunnels over Tailscale.
-
-Identity for Zenoh matches `ros_domain_profile.bash`: `ROBOT_NAME` → `TURTLEBOT3_ROBOT_NAME` → `USER` → hostname (prefer logging in as `blinky`/`pinky`/`inky`/`clyde` — stock hostnames like `ubuntu` are not enough).
+**Zenoh bridge and Cyclone RMW.** From the robot workspace (not the central-computer tree):
 
 ```bash
-# Terminal 3 — Zenoh client (after bringup/SLAM are up), from turtlebot3:
-./scripts/comms/start_zenoh_robot.sh                # auto-detects robot + domain
-# or: ./scripts/comms/start_zenoh_robot.sh reverie  # override central Tailscale name
+cd ~/turtlebot3
+./scripts/comms/install_zenoh_bridge.sh
+sudo apt install -y ros-humble-rmw-cyclonedds-cpp
 ```
 
+On the central PC, once, the same two commands run from `~/central-computer`.
 
+#### Each session
 
-**Central terminal B — existing stack (unchanged):**
+1. **Central PC — Zenoh router** (before the robot client). Filter letters match `start_central.sh`: `b` = blinky, `p` = pinky, `i` = inky, `c` = clyde.
+
+   ```bash
+   cd ~/central-computer
+   ./scripts/comms/start_zenoh_central.sh                 # every robot in the table
+   # ./scripts/comms/start_zenoh_central.sh -<letters>    # subset, e.g. -c or -bpic
+   ```
+
+   The router listens on `tcp/0.0.0.0:7447` and injects `/<robot>/*` into that robot's `ROS_DOMAIN_ID` on localhost.
+
+2. **Robot — Zenoh client**, after bringup and SLAM/Nav2 are up. `source scripts/env/ros_robot_env.bash` sets `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` and clears `ROS_LOCALHOST_ONLY` so Nav2/SLAM do not exhaust Cyclone participant indices. Do not set `ROS_LOCALHOST_ONLY=1` on the robot afterward. Zenoh still carries traffic over Tailscale.
+
+   ```bash
+   cd ~/turtlebot3
+   export PATH="$HOME/.local/bin:$PATH"
+   ./scripts/comms/start_zenoh_robot.sh
+   # ./scripts/comms/start_zenoh_robot.sh reverie          # override central Tailscale name
+   # ROBOT_NAME=<robot> ./scripts/comms/start_zenoh_robot.sh
+   ```
+
+   Expect `robot=<robot>`, the domain from the table above, and `tcp/reverie:7447`.
+
+3. **Central PC — existing stack.** `domain_bridge` still maps each robot domain to central `50`. Zenoh only replaces the Wi‑Fi DDS path between machines.
+
+   ```bash
+   cd ~/central-computer
+   source scripts/env/ros_domain_profile.bash
+   ./scripts/core/start_central.sh --comms-mode bridged_domains
+   # ./scripts/core/start_central.sh -<letters> --comms-mode bridged_domains
+   ```
+
+**Azure / same-LAN debug:** skip Zenoh and use normal DDS.
+
+**Check** on the central PC while SLAM is running on the robot. `<domain>` is that robot's id from the table (or `config/fleet_domain_map.yaml`). `ROS_LOCALHOST_ONLY=1` is only for this check on the central PC.
 
 ```bash
-source scripts/env/ros_domain_profile.bash
-./scripts/core/start_central.sh --comms-mode bridged_domains
-# or filter: ./scripts/core/start_central.sh -c --comms-mode bridged_domains
+source /opt/ros/humble/setup.bash
+ROS_DOMAIN_ID=<domain> RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ROS_LOCALHOST_ONLY=1 \
+  ros2 topic list | grep <robot>
 ```
 
-`domain_bridge` still maps each robot domain → central `50`. Zenoh only replaces the hostile Wi‑Fi DDS path between machines.
-
-**Azure / same-LAN debug:** skip Zenoh; use normal DDS as before.
-
-**Check:** with Zenoh up, on central `ROS_DOMAIN_ID=80 ros2 topic list` should show `/clyde/map` (or `map_wire_z`) without multicast across TAMU. Same pattern for other robots with their domain IDs from `config/fleet_domain_map.yaml`.
+You should see `/<robot>/map` and/or `/<robot>/map_wire_z`, plus TF topics.
 
 ---
 
@@ -1178,7 +1208,7 @@ bash scripts/build/rebuild_common.sh clean
 
 **Fix:**
 
-- **Step 1**: Confirm which WiFi the robot is connected to. Robots try Azure first, then TAMU.
+- **Step 1**: Confirm which WiFi the robot is connected to. Robots try TAMU first, then Azure.
 - **Step 2**: On TAMU, confirm Tailscale: `tailscale status` on central should show the robot Online (e.g. `clyde`). On the robot: `sudo tailscale up` and `sudo tailscale set --hostname=<robot>`.
 - **Step 3**: On central: `source scripts/env/set_robot_env.sh <robot>` — expect `(network: tamu/tailscale)` and `ROBOT_SSH=<robot>@<robot>`. Azure: same command uses fixed IPs. Without Tailscale on TAMU: `source scripts/env/set_robot_env.sh <robot> <dhcp_ip>`.
 - **Step 4**: Check script output: `(network: azure)`, `(network: tamu/tailscale)`, or `(network: tamu)`.
