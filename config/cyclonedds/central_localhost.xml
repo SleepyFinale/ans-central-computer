@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Central DDS stays on 127.0.0.1, the same interface the Zenoh bridge uses
+  when ROS_LOCALHOST_ONLY=1. Do not select "lo" by name, disable multicast,
+  or add peers: those profiles cannot see topics the bridge injects.
+
+  Used only by start_rviz_central.sh. start_central.sh and the Zenoh bridge
+  must keep Cyclone's built-in localhost profile; this file hides the topics
+  the bridge injects.
+
+  MaxAutoParticipantIndex is raised because two robots fill the default cap
+  (10 participants) on domain 50, and RViz then fails with
+  "Failed to find a free participant index".
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface address="127.0.0.1"/>
+      </Interfaces>
+    </General>
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

@@ -85,9 +85,55 @@ bool MergingPipeline::estimateTransforms(
   }
   finder = {};
 
+  // AffineBestOf2NearestMatcher runs a 2-neighbor search. OpenCV asserts
+  // when a map has fewer than 2 keypoints, which is normal on a fresh scan.
+  size_t sparse_maps = 0;
+  for (const auto & features : image_features) {
+    if (features.keypoints.size() < 2) {
+      ++sparse_maps;
+    }
+  }
+  if (sparse_maps > 0) {
+    RCLCPP_INFO(
+      logger,
+      "[estimateTransforms] %zu map(s) have fewer than 2 features; "
+      "placing maps independently",
+      sparse_maps);
+    transforms_.clear();
+    transforms_.resize(images_.size());
+    matched_.assign(images_.size(), false);
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!images_[i].empty()) {
+        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+        break;
+      }
+    }
+    assignFallbackTransforms();
+    return true;
+  }
+
   /* find corespondent features */
   RCLCPP_DEBUG(logger, "[estimateTransforms] pairwise matching features");
-  (*matcher)(image_features, pairwise_matches);
+  try {
+    (*matcher)(image_features, pairwise_matches);
+  } catch (const cv::Exception & e) {
+    RCLCPP_WARN(
+      logger,
+      "[estimateTransforms] Feature matching failed (%s); "
+      "placing maps independently",
+      e.what());
+    transforms_.clear();
+    transforms_.resize(images_.size());
+    matched_.assign(images_.size(), false);
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!images_[i].empty()) {
+        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+        break;
+      }
+    }
+    assignFallbackTransforms();
+    return true;
+  }
   matcher = {};
 
 #ifndef NDEBUG

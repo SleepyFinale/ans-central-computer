@@ -180,6 +180,11 @@ fi
 # Always localhost. setup.bash or the calling shell may set ROS_LOCALHOST_ONLY=0,
 # and the bridge then ignores ros_localhost_only:true in the template. Discovery
 # and domain_bridge only see topics injected on localhost.
+# Do not also set CYCLONEDDS_URI here. ros_localhost_only already selects lo,
+# and a URI that selects lo again aborts the bridge with
+# "the same interface may not be selected twice".
+# start_rviz_central.sh may set config/cyclonedds/central_localhost.xml
+# for itself. That file stays off this process and off start_central.sh.
 export ROS_LOCALHOST_ONLY=1
 
 RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}/zenoh_bridge_central"

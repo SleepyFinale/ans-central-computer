@@ -4490,6 +4490,33 @@ class MultiRobotExplorer(Node):
                     )
                 ):
                     made_progress = True
+                # Bridged feedback is often missing, so distance_remaining stays
+                # None and the central pose can lag the robot. A multi-second
+                # Nav2 success is real motion. An instant success with no
+                # feedback is still rejected below.
+                goal_runtime = (
+                    max(0.0, now - rs.active_goal_sent_time)
+                    if rs.active_goal_sent_time > 0.0 else 0.0
+                )
+                if (
+                    not made_progress
+                    and rs.last_distance_remaining is None
+                    and goal_runtime >= 4.0
+                ):
+                    made_progress = True
+                # Nav2's goal checker is 0.25 m. A success from inside that
+                # radius is the robot already standing on the frontier, not a
+                # failed leg. Counting it as success blacklists the frontier
+                # in the map frame the assigner actually compares.
+                already_there = (
+                    rs.last_dist_to_goal is not None
+                    and math.isfinite(rs.last_dist_to_goal)
+                    and rs.last_dist_to_goal <= max(
+                        0.35, self.suspicious_success_distance
+                    )
+                )
+                if not made_progress and already_there and not suspicious:
+                    made_progress = True
                 if (suspicious and not small_map) or (not made_progress and not small_map):
                     rs.goals_failed += 1
                     rs.goal_status = 'failed'
@@ -4503,7 +4530,14 @@ class MultiRobotExplorer(Node):
                     if rs.goal_position and not (
                         self.degraded_hold_enabled and rs.degraded_active
                     ):
-                        rs.blacklist.append(rs.goal_position)
+                        self._append_blacklist_if_distant(rs, rs.goal_position)
+                        # goal_position is in the world frame. Frontier
+                        # assignment compares map-frame centroids, so a world
+                        # point alone does not stop the same frontier.
+                        if rs.last_target_frontier_centroid is not None:
+                            self._append_blacklist_if_distant(
+                                rs, rs.last_target_frontier_centroid
+                            )
                     self._arm_post_failure_cooldown(rs)
                 else:
                     rs.goals_reached += 1

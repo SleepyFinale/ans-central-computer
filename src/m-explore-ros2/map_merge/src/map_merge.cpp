@@ -767,30 +767,24 @@ void MapMerge::poseEstimation()
       }
     }
   } catch (const cv::Exception & e) {
-    // After a fatal OpenCV/FLANN error, disable further pose estimation and
-    // reset the pipeline so subsequent map merging can continue safely.
+    // Reset and try again on the next map. One sparse scan used to disable
+    // pose estimation for the rest of the run.
     {
       std::lock_guard<std::mutex> lock(pipeline_mutex_);
       pipeline_ = combine_grids::MergingPipeline();
     }
-    pose_estimation_disabled_ = true;
-    RCLCPP_ERROR_ONCE(
-      logger_,
-      "Grid pose estimation disabled permanently after OpenCV exception: %s. "
-      "Relative pose refinement will not run until the node is restarted; "
-      "TF may rely on provisional or previously published transforms.",
+    RCLCPP_WARN_THROTTLE(
+      logger_, *get_clock(), 5000,
+      "Grid pose estimation hit an OpenCV exception and will retry: %s",
       e.what());
   } catch (const std::exception & e) {
     {
       std::lock_guard<std::mutex> lock(pipeline_mutex_);
       pipeline_ = combine_grids::MergingPipeline();
     }
-    pose_estimation_disabled_ = true;
-    RCLCPP_ERROR_ONCE(
-      logger_,
-      "Grid pose estimation disabled permanently after exception: %s. "
-      "Relative pose refinement will not run until the node is restarted; "
-      "TF may rely on provisional or previously published transforms.",
+    RCLCPP_WARN_THROTTLE(
+      logger_, *get_clock(), 5000,
+      "Grid pose estimation hit an exception and will retry: %s",
       e.what());
   }
 }

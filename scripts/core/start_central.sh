@@ -69,6 +69,11 @@ if zenoh_transport_active; then
     export ROS_DISTRO="${ROS_DISTRO:-humble}"
     export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
     export ROS_LOCALHOST_ONLY=1
+    # The Zenoh bridge uses this localhost mode and no CYCLONEDDS_URI.
+    # A custom URI, even one that also selects 127.0.0.1, cannot see the
+    # topics the bridge injects, so /<robot>/(tf|map|map_wire_z) stay empty.
+    # RViz raises the participant cap on its own; this process must not.
+    unset CYCLONEDDS_URI
 fi
 
 if [[ ! -f "$TF_RELAY_SCRIPT" ]]; then
@@ -519,6 +524,7 @@ PY
                 ROS_DOMAIN_ID="$domain" \
                 RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-}" \
                 ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-}" \
+                env -u CYCLONEDDS_URI \
                 ros2 topic list 2>/dev/null || true
             )"
             # tf/map are canonical; map_wire_z is the fleet bridge side channel and
@@ -902,9 +908,8 @@ else
     start_map_merge_filtered
     sleep 2
     echo ""
-    echo "  map_merge recovery: if logs show 'Grid pose estimation disabled permanently'"
-    echo "  after an OpenCV/FLANN (miniflann) exception, restart this script or the"
-    echo "  map_merge process; relative pose refinement stays off until then."
+    echo "  map_merge: a sparse scan can skip feature matching for that cycle."
+    echo "  Pose estimation keeps running and retries on the next map."
     echo ""
 
     # ---- 2b. Map merge state monitor ----

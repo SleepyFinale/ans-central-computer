@@ -102,10 +102,28 @@ get_robot_domain() {
 use_stack_rmw() {
     # start_central / Zenoh publish on Cyclone. A default FastDDS RViz
     # process is on a different graph and reports no map and no TF.
+    # Keep ROS_LOCALHOST_ONLY for the robot-domain probes below. The RViz
+    # process itself switches to the participant-cap URI in use_rviz_cyclone_cap.
     export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
     if pgrep -f 'zenoh-bridge-ros2dds' >/dev/null 2>&1; then
         export ROS_LOCALHOST_ONLY=1
+        unset CYCLONEDDS_URI
     fi
+}
+
+use_rviz_cyclone_cap() {
+    # Two robots fill Cyclone's default 10 slots on domain 50. This file
+    # raises the cap and already binds 127.0.0.1. Leave ROS_LOCALHOST_ONLY
+    # set and Cyclone aborts: "lo: the same interface may not be selected twice".
+    [[ "${ROS_LOCALHOST_ONLY:-}" == "1" ]] || return 0
+    local cfg="${WORKSPACE_DIR}/config/cyclonedds/central_localhost.xml"
+    if [[ ! -f "$cfg" ]]; then
+        echo "ERROR: Cyclone config not found: $cfg" >&2
+        exit 1
+    fi
+    unset ROS_LOCALHOST_ONLY
+    export CYCLONEDDS_URI="file://${cfg}"
+    echo "Cyclone: participant cap via ${cfg}"
 }
 
 detect_active_robots() {
@@ -120,7 +138,13 @@ detect_active_robots() {
     for name in "${ROBOT_NAMES[@]}"; do
         domain="$(get_robot_domain "$name" || true)"
         [[ -z "$domain" ]] && continue
-        topics_raw="$(ROS_DOMAIN_ID="$domain" ros2 topic list 2>/dev/null || true)"
+        topics_raw="$(
+            ROS_DOMAIN_ID="$domain" \
+            ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-}" \
+            RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-}" \
+            env -u CYCLONEDDS_URI \
+            ros2 topic list 2>/dev/null || true
+        )"
         if grep -qE "^/${name}/map$" <<<"$topics_raw"; then
             active+=("$name")
         fi
@@ -248,6 +272,7 @@ if [[ "$MODE" == "global" ]]; then
     echo "Domain source: ${DOMAIN_SOURCE}"
     echo "RMW: ${RMW_IMPLEMENTATION}  ROS_LOCALHOST_ONLY: ${ROS_LOCALHOST_ONLY:-unset}"
     echo "Fixed frame: ${EFFECTIVE_FIXED_FRAME}, map topic: ${EFFECTIVE_MAP_TOPIC}"
+    use_rviz_cyclone_cap
     if [[ "$EFFECTIVE_VIEW_MODE" == "local" ]]; then
         echo "Costmap overlays: /${EFFECTIVE_ROBOT}/global_costmap/costmap and /${EFFECTIVE_ROBOT}/local_costmap/costmap"
     fi
@@ -302,6 +327,7 @@ else
     echo "starts disabled (enable in Displays if you need it). Two Map layers + high FPS often"
     echo "cause GPU stalls and GLSL warnings on central machines."
     echo ""
+    use_rviz_cyclone_cap
     exec rviz2 -d "$TMP_CFG"
 fi
 

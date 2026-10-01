@@ -46,6 +46,7 @@ PIDS=()
 TAIL_PIDS=()
 TMP_FILES=()
 declare -A SSH_TARGET=()
+declare -A PID_LABEL=()
 STOPPING=0
 LAST_PID=""
 
@@ -362,6 +363,7 @@ run_logged_bash() {
   setsid script -q -f -e -c "echo ${payload} | base64 -d > ${runner} && bash ${runner}" "$logfile" </dev/null >/dev/null 2>&1 &
   LAST_PID=$!
   PIDS+=("$LAST_PID")
+  PID_LABEL["$LAST_PID"]="$tag"
   prefix_follow "$tag" "$logfile"
 }
 
@@ -436,6 +438,7 @@ start_robot_stage() {
     >"$logfile" 2>&1 &
   LAST_PID=$!
   PIDS+=("$LAST_PID")
+  PID_LABEL["$LAST_PID"]="${robot}:${stage}"
   prefix_follow "${robot}:${stage}" "$logfile"
 }
 
@@ -547,11 +550,20 @@ echo ""
 echo "Fleet is up. Press Ctrl+C to stop."
 
 while true; do
+  alive=()
   for pid in "${PIDS[@]}"; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "ERROR: a fleet process exited (pid ${pid})." >&2
-      exit 1
+    if kill -0 "$pid" 2>/dev/null; then
+      alive+=("$pid")
+      continue
     fi
+    label="${PID_LABEL[$pid]:-unknown}"
+    if [[ "$label" == "rviz" ]]; then
+      echo "WARNING: RViz exited. The rest of the fleet is still running." >&2
+      continue
+    fi
+    echo "ERROR: ${label} exited (pid ${pid})." >&2
+    exit 1
   done
+  PIDS=("${alive[@]+"${alive[@]}"}")
   sleep 1
 done
