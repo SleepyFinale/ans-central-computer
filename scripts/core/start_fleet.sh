@@ -3,7 +3,7 @@
 # Zenoh, the central stack, and RViz.
 #
 # Usage:
-#   ./scripts/core/start_fleet.sh                       # -bpic, RViz on, host reverie
+#   ./scripts/core/start_fleet.sh                       # -bpic, RViz on, host = this PC
 #   ./scripts/core/start_fleet.sh -ic                   # inky + clyde
 #   ./scripts/core/start_fleet.sh -c --no-rviz
 #   ./scripts/core/start_fleet.sh -ic --central-host othername
@@ -37,7 +37,9 @@ declare -A LETTER_TO_ROBOT=(
 )
 
 SELECTION=""
-CENTRAL_HOST="reverie"
+# Robots dial this PC by name. Use the short hostname unless --central-host
+# overrides it. Tailscale names are lowercase.
+CENTRAL_HOST="$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]')"
 DRY_RUN=0
 WITH_RVIZ=1
 VERBOSE=0
@@ -60,7 +62,8 @@ Robot filter (same letters as start_central.sh):
   Default: -bpic
 
 Options:
-  --central-host <name>   Tailscale name of this PC (default: reverie)
+  --central-host <name>   Name passed to start_zenoh_robot.sh
+                          (default: this computer's hostname)
   --no-rviz               Do not start start_rviz_central.sh
   --verbose               Print every line from every process
   --dry-run               Print the stages and SSH targets, then exit
@@ -129,6 +132,10 @@ if [[ -z "$SELECTION" ]]; then
   SELECTION="bpic"
 fi
 
+if [[ -z "$CENTRAL_HOST" ]]; then
+  echo "ERROR: could not read this computer's hostname. Pass --central-host <name>." >&2
+  exit 1
+fi
 if [[ ! "$CENTRAL_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   echo "ERROR: invalid central Tailscale name '${CENTRAL_HOST}'." >&2
   exit 1
