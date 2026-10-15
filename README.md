@@ -16,6 +16,8 @@ How it fits together, and exactly what crosses the network: [docs/architecture.m
 
 ---
 
+
+
 ## Run the fleet
 
 One command starts everything: central Zenoh, then bringup, SLAM + Nav2 and the Zenoh client on each selected robot over SSH, then the central stack and RViz.
@@ -43,7 +45,7 @@ Central PC, terminal 1, then each robot (three SSH terminals), then central term
 # each robot (in ~/turtlebot3)
 ros2 launch turtlebot3_bringup robot.launch.py
 ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
-./scripts/comms/start_zenoh_robot.sh reverie     # this PC's Tailscale name
+./scripts/comms/start_zenoh_robot.sh pcname     # this PC's Tailscale name
 
 # central 2: map merge + explorer (waits up to 30 s for robot maps)
 ./scripts/core/start_central.sh -ic
@@ -62,7 +64,11 @@ ros2 action list                                  # /<robot>/navigate_to_pose, .
 
 ---
 
+
+
 ## One-time setup
+
+
 
 ### Central PC
 
@@ -84,7 +90,7 @@ Only `multirobot_map_merge` is compiled. The explorer and the other central node
 
 ### Tailscale
 
-This PC and every robot join the same tailnet. Robots use their own names (`sudo tailscale set --hostname=<robot>`); this PC is `reverie`. Leave `--accept-routes` off. Check with `tailscale status`.
+This PC and every robot join the same tailnet. Set each machine's Tailscale hostname to its own name (`sudo tailscale set --hostname=<name>`): robots are `blinky`, `pinky`, `inky`, `clyde`; this PC is its short hostname. Leave `--accept-routes` off. Check with `tailscale status`.
 
 ### Each robot
 
@@ -92,7 +98,10 @@ See the robot workspace README (`~/turtlebot3/README.md`) for SBC setup, buildin
 
 ---
 
+
+
 ## Robot access
+
 
 | Robot  | Tailscale (preferred) | Azure hotspot         |
 | ------ | --------------------- | --------------------- |
@@ -100,6 +109,7 @@ See the robot workspace README (`~/turtlebot3/README.md`) for SBC setup, buildin
 | Pinky  | `pinky@pinky`         | `pinky@172.20.10.14`  |
 | Inky   | `inky@inky`           | `inky@172.20.10.15`   |
 | Clyde  | `clyde@clyde`         | `clyde@172.20.10.16`  |
+
 
 ```bash
 source scripts/env/set_robot_env.sh inky     # sets ROBOT_SSH for the network you are on
@@ -111,16 +121,20 @@ Azure hotspot: SSID `Azure`, password `howdoyouwanttodothis`, gateway `172.20.10
 
 ---
 
+
+
 ## What the central stack runs
 
-| Process | Started by | Does |
-| --- | --- | --- |
-| `zenoh-bridge-ros2dds` (router, `tcp/0.0.0.0:7447`) | `start_zenoh_central.sh` | puts every robot's `/<robot>/...` topics and Nav2 actions into ROS domain 50 |
-| `fleet_zenoh_receive.py` | `start_zenoh_central.sh` | `tf_zenoh` -> `/tf`, `tf_static_zenoh` -> `/tf_static`, `map_wire_z` -> `/<robot>/map` |
-| `map_merge` | `start_central.sh`, 2+ robots | merged `/map` and `map -> <robot>/map` TF |
-| `map_merge_state_monitor.py` | `start_central.sh`, 2+ robots | `map_merge/merge_state` (NO_OVERLAP / PARTIAL / MERGED) |
-| `single_robot_world_tf_bridge.py`, `single_robot_map_relay.py` | `start_central.sh`, 1 robot | identity `map -> <robot>/map`, `/<robot>/map` -> `/map` |
-| `multi_robot_explorer.py` | `start_central.sh` | frontiers, goal assignment, path precheck, `NavigateToPose` |
+
+| Process                                                        | Started by                    | Does                                                                                   |
+| -------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------- |
+| `zenoh-bridge-ros2dds` (router, `tcp/0.0.0.0:7447`)            | `start_zenoh_central.sh`      | puts every robot's `/<robot>/...` topics and Nav2 actions into ROS domain 50           |
+| `fleet_zenoh_receive.py`                                       | `start_zenoh_central.sh`      | `tf_zenoh` -> `/tf`, `tf_static_zenoh` -> `/tf_static`, `map_wire_z` -> `/<robot>/map` |
+| `map_merge`                                                    | `start_central.sh`, 2+ robots | merged `/map` and `map -> <robot>/map` TF                                              |
+| `map_merge_state_monitor.py`                                   | `start_central.sh`, 2+ robots | `map_merge/merge_state` (NO_OVERLAP / PARTIAL / MERGED)                                |
+| `single_robot_world_tf_bridge.py`, `single_robot_map_relay.py` | `start_central.sh`, 1 robot   | identity `map -> <robot>/map`, `/<robot>/map` -> `/map`                                |
+| `multi_robot_explorer.py`                                      | `start_central.sh`            | frontiers, goal assignment, path precheck, `NavigateToPose`                            |
+
 
 Parameters:
 
@@ -139,11 +153,13 @@ Summary: inky[goal_active] reached=4(+1) failed=0(+0) status=executing cancel=- 
 
 ---
 
+
+
 ## Troubleshooting
 
-**`start_central.sh`: "no robot map arrived".** Work outward from the robot: SLAM running on the robot (`ros2 topic echo --once /<robot>/map` there), `start_zenoh_robot.sh` running and showing `TF zenoh publish`, `start_zenoh_central.sh` running here, then `source scripts/env/central_env.bash; ros2 topic echo --once /<robot>/map_wire_z --field layout`. `tailscale ping <robot>` checks the link.
+`start_central.sh`**: "no robot map arrived".** Work outward from the robot: SLAM running on the robot (`ros2 topic echo --once /<robot>/map` there), `start_zenoh_robot.sh` running and showing `TF zenoh publish`, `start_zenoh_central.sh` running here, then `source scripts/env/central_env.bash; ros2 topic echo --once /<robot>/map_wire_z --field layout`. `tailscale ping <robot>` checks the link.
 
-**`start_fleet.sh` times out at a stage.** It prints the last 40 lines of that stage's log and the line it was waiting for. Stage logs are in the `Logs:` directory it printed at start.
+`start_fleet.sh` **times out at a stage.** It prints the last 40 lines of that stage's log and the line it was waiting for. Stage logs are in the `Logs:` directory it printed at start.
 
 **"A central stack is already running".** A previous run left processes. Answer `y` to kill them, or stop them yourself; non-interactive shells need `CENTRAL_AUTO_KILL=true`.
 
@@ -151,13 +167,15 @@ Summary: inky[goal_active] reached=4(+1) failed=0(+0) status=executing cancel=- 
 
 **Robot stops making progress / goals fail repeatedly.** Some failures are normal: frontiers behind obstacles fail the path precheck and get blacklisted. Look at the robot's SLAM log (`<logs>/<robot>-slam.log`) for `Control loop missed its desired rate` (Pi out of CPU; check `top` on the robot) or `Starting point in lethal space` (robot too close to a wall; recoveries usually free it).
 
-**`map_merge` logs "Grid pose estimation disabled permanently"** after an OpenCV/FLANN exception: restart `start_central.sh`.
+`map_merge` **logs "Grid pose estimation disabled permanently"** after an OpenCV/FLANN exception: restart `start_central.sh`.
 
 **RViz GLSL warning** (`active samplers with a different type refer to the same texture image unit`): driver quirk, harmless if the map draws. If rendering is broken, try `LIBGL_ALWAYS_SOFTWARE=1`.
 
-**Two `/tf` publishers disagree about `map -> <robot>/map`.** A robot was started with `fleet_mode:=false` (bench mode publishes its own `map -> <robot>/map`). Restart it with the default `fleet_mode:=true`.
+**Two** `/tf` **publishers disagree about** `map -> <robot>/map`**.** A robot was started with `fleet_mode:=false` (bench mode publishes its own `map -> <robot>/map`). Restart it with the default `fleet_mode:=true`.
 
 ---
+
+
 
 ## Diagnostics and logging
 
@@ -171,6 +189,8 @@ All of these expect `source scripts/env/central_env.bash` first.
 - The explorer writes structured JSONL events through `src/m-explore-ros2/explore/scripts/central_explorer_event_logger.py` (`DEBUG_SESSION_ID` correlates with robot logs).
 
 ---
+
+
 
 ## Repository layout
 
@@ -193,3 +213,4 @@ src/m-explore-ros2/
   map_merge/ multirobot_map_merge (C++, built)
 third_party/zenoh/             standalone zenoh-bridge-ros2dds (installed by script)
 ```
+
