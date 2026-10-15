@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
+# Source in a central-PC terminal to see the fleet the way the central stack does:
+#   source scripts/env/central_env.bash
+#   ros2 topic list            # /tf, /map, /<robot>/map, /<robot>/navigate_to_pose, ...
 #
-# Sources ROS 2 Humble plus this workspace install/ overlay.
-#
-# Fleet:
-#   - shared_domain mode: same ROS_DOMAIN_ID on central and robots (legacy).
-#   - bridged_domains mode: central and robots use per-domain profiles.
-# Per-robot SSH targets: source scripts/env/set_robot_env.sh <blinky|pinky|inky|clyde>
-# Namespaces match hostnames: /blinky, /pinky, /inky, /clyde.
+# Loads ROS 2 Humble, this workspace's install/ overlay, and the DDS settings
+# that see what the central Zenoh bridge injects (Cyclone, localhost,
+# central ROS_DOMAIN_ID from config/fleet_domain_map.yaml).
 
-# Base ROS 2 Humble underlay
 if [ -f /opt/ros/humble/setup.bash ]; then
   # shellcheck disable=SC1091
   source /opt/ros/humble/setup.bash
@@ -17,22 +15,17 @@ else
   return 1 2>/dev/null || exit 1
 fi
 
-# Workspace overlay
-# If WS_DIR is not provided, infer it from this script's location.
-if [ -z "${WS_DIR:-}" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  WS_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-fi
+_central_env_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=fleet_common.bash
+source "${_central_env_dir}/fleet_common.bash"
+unset _central_env_dir
 
-if [ -f "${WS_DIR}/install/setup.bash" ]; then
+if [ -f "${FLEET_WORKSPACE_DIR}/install/setup.bash" ]; then
   # shellcheck disable=SC1091
-  source "${WS_DIR}/install/setup.bash"
+  source "${FLEET_WORKSPACE_DIR}/install/setup.bash"
 else
-  echo "ERROR: ${WS_DIR}/install/setup.bash not found."
-  echo "Make sure you are in the correct workspace and have run: colcon build"
-  return 1 2>/dev/null || exit 1
+  echo "WARNING: ${FLEET_WORKSPACE_DIR}/install/setup.bash not found; run scripts/build/rebuild_common.sh"
 fi
 
-echo "ROS 2 Humble and workspace environment loaded from:"
-echo "  Underlay: /opt/ros/humble"
-echo "  Overlay : ${WS_DIR}"
+fleet_use_zenoh_dds
+echo "Central ROS env: ROS_DOMAIN_ID=${ROS_DOMAIN_ID} RMW=${RMW_IMPLEMENTATION} ROS_LOCALHOST_ONLY=1"

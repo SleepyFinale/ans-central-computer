@@ -1,333 +1,74 @@
-# Capstone architecture (nested “boxes in boxes” diagrams)
+# Fleet architecture
 
-> Status note: This document is a conceptual architecture reference. For current fleet operations in this repository, treat **bridged domains** as canonical and **shared-domain** descriptions as historical context only.
+What runs where, and every piece of data that crosses between a robot and the central PC.
 
-These diagrams are meant to answer, at a glance:
-
-- **What** big functions exist (outer box)
-- **Which ROS2 programs/nodes** implement them (box inside)
-- **Which ROS2 data flows** (topics/TF/actions) connect them (innermost box)
-
-If you keep the diagrams “small and many” (instead of “one giant”), they stay readable and are easy to update as your capstone evolves.
-
----
-
-## Legend + reusable template
-
-- **Outer box** = Capstone function (capability)
-- **Middle box** = ROS2 programs (nodes, launch files, scripts)
-- **Inner box** = Data contracts (topics, TF frames, actions, services)
-- **Arrow direction** = producer → consumer
-- **Arrow label** = the specific contract (e.g., `topic:/map`, `tf:map->odom`, `action:NavigateToPose`)
+## Where software runs
 
 ```mermaid
-flowchart TB
-  subgraph FunctionExample["Function: SomeCapability"]
-    direction TB
-
-    subgraph Programs["Programs (ROS2 nodes/scripts/launch)"]
-      direction TB
-      progA["node: some_node"]
-      progB["launch: some_stack.launch.py"]
-    end
-
-    subgraph Data["Data (topics / TF / actions)"]
-      direction TB
-      t1["topic:/some_topic (Type)"]
-      tf1["tf: frameA -> frameB"]
-      act1["action:/some_action (ActionType)"]
-    end
-
-    progA -->|"topic:/some_topic"| progB
-    progB -->|"action:/some_action"| progA
-    progA -->|"tf: frameA->frameB"| tf1
+flowchart LR
+  subgraph robot ["Each robot Pi (namespace /<robot>, loopback-only DDS)"]
+    bring["robot.launch.py<br/>base, lidar, URDF"]
+    norm["laser_scan_normalizer<br/>(+ ultrasonic fusion)"]
+    slam["slam_toolbox<br/>/<robot>/map, map->odom"]
+    nav2["Nav2<br/>plans in <robot>/map"]
+    wire["map_wire_compressed_republisher"]
+    tfz["tf_zenoh_publish.py"]
+    zr["zenoh-bridge-ros2dds (client)"]
+    bring --> norm --> slam --> nav2
+    slam --> wire --> zr
+    bring --> tfz --> zr
+    zr <--> nav2
   end
+  subgraph central ["Central PC (ROS domain 50, localhost)"]
+    zc["zenoh-bridge-ros2dds (router :7447)"]
+    rx["fleet_zenoh_receive.py"]
+    mm["map_merge (2+ robots)<br/>or map relay (1 robot)"]
+    mon["map_merge_state_monitor"]
+    ex["multi_robot_explorer"]
+    rv["RViz"]
+    zc --> rx
+    rx -->|"/tf, /tf_static, /<robot>/map"| mm
+    mm -->|"/map, map-><robot>/map"| ex
+    mon --> ex
+    ex <-->|"NavigateToPose,<br/>ComputePathToPose"| zc
+    rx --> rv
+    mm --> rv
+  end
+  zr <-->|"Tailscale TCP"| zc
 ```
 
----
+A robot never receives TF or maps from the central PC. It only receives action goals, so it keeps its own consistent view and a dropped link stops new goals without confusing Nav2.
 
-## System context (Central ↔ Robots ↔ GUI)
+## Data on the link
 
-```mermaid
-flowchart TB
-  subgraph Robots["Individual Robots (SBCs, per-robot domain IDs in bridged mode)"]
-    direction TB
-    r1["Robot: Blinky (ns=/blinky, per-robot ROS_DOMAIN_ID)"]
-    r2["Robot: Pinky (ns=/pinky, per-robot ROS_DOMAIN_ID)"]
-    r3["Robot: Inky (ns=/inky, per-robot ROS_DOMAIN_ID)"]
-    r4["Robot: Clyde (ns=/clyde, per-robot ROS_DOMAIN_ID)"]
-  end
+Allowlists: `config/zenoh/central_router.json5.tmpl` here and `config/zenoh/robot_client.json5.tmpl` in the turtlebot3 workspace. Keep them in step.
 
-  subgraph Central["Central Computer (bridged domain profile from fleet_domain_map.yaml)"]
-    direction TB
-    centralMapping["Function: GlobalMapping"]
-    centralTasking["Function: Frontier+TaskAllocation"]
-    centralSecurity["Function: SecurityMonitoring"]
-  end
+| Robot sends | Rate cap | Central turns it into |
+| --- | --- | --- |
+| `/<robot>/tf_zenoh` (changed edges only, best effort) | 10 Hz | `/tf` |
+| `/<robot>/tf_static_zenoh` | 1 Hz | `/tf_static` (one latched message for the fleet) |
+| `/<robot>/map_wire_z` (zlib-compressed OccupancyGrid) | 1 Hz | `/<robot>/map` |
+| `/<robot>/nav2_collision_ahead`, `nav2_retrace_active` | — | read by the explorer (robot nodes are off by default) |
+| `/<robot>/plan`, `scan_normalized`, `local_costmap/costmap` | 2/2/1 Hz | RViz only; sent while someone subscribes |
 
-  subgraph GUI["Graphical User Interface"]
-    direction TB
-    guiMap["Global map + robot poses"]
-    guiObjects["Object markers"]
-    guiVideo["Live video feeds"]
-    guiStatus["Robot status panel"]
-  end
+Nav2 actions `/<robot>/navigate_to_pose` and `/<robot>/compute_path_to_pose` are bridged both ways.
 
-  Robots -->|"sensor+pose+maps via bridge contract"| Central
-  Central -->|"waypoints / safety commands (capstone contract)"| Robots
-  Central -->|"map+poses+events"| GUI
-  Robots -->|"video + object detections"| GUI
-```
+Robot frames already carry the robot prefix (`inky/odom`, `inky/base_footprint`, `inky/map`), so every robot's TF lands in one `/tf` tree without renaming. The world frame `map` belongs to the central PC: `map_merge` publishes `map -> <robot>/map`, or with one robot `single_robot_world_tf_bridge.py` publishes it as identity.
 
----
+### Why TF goes through `tf_zenoh_publish.py`
 
-## Function: GlobalMapping (multi-robot SLAM + map merge) — matches current workspace
+The Zenoh bridge subscribes with the publisher's QoS. A reliable reader on `/<robot>/tf` back-pressures slam_toolbox, `map -> odom` goes stale, and Nav2 reports false goal success. The helper reads best-effort and republishes on `*_zenoh` topics instead.
 
-This function already exists in your central workspace. The fleet (Blinky, Pinky, Inky, Clyde) runs **namespaced** Nav2 + SLAM stacks with per-robot domains, and the central computer consumes contract topics/actions through configured domain bridges.
+### DDS settings on the central PC
 
-- **TF stitching**: `src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py` (always `prefix_frames:=true`; merges `/<robot>/tf` into `/tf`)
-- **Single-robot world link**: `src/m-explore-ros2/explore/scripts/single_robot_world_tf_bridge.py` publishes static `map` → `<robot>/map` when `start_central.sh` runs with one robot (map merge is skipped)
-- **Per-robot SLAM**: `slam_toolbox` on each robot uses TF frame `<robot>/map` and publishes `/<robot>/map`
-- **Map merge**: `multirobot_map_merge/map_merge` using `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml` (multi-robot only; unknown initial poses on the central computer)
+The bridge injects topics through Cyclone's built-in localhost profile (`ROS_LOCALHOST_ONLY=1`, no `CYCLONEDDS_URI`). Every central process uses the same profile via `fleet_use_zenoh_dds` in `scripts/env/fleet_common.bash`. RViz is the exception: it uses `config/cyclonedds/central_localhost.xml` to get past Cyclone's 10-participant default cap.
 
-```mermaid
-flowchart TB
-  subgraph Function_GlobalMapping["Function: GlobalMapping (LocalMaps -> GlobalMap)"]
-    direction TB
+## Exploration loop
 
-    subgraph Programs_GlobalMapping["Programs"]
-      direction TB
-      tfRelay["script: src/m-explore-ros2/explore/scripts/tf_relay_multirobot.py"]
-      slamB["node: slam_toolbox (Blinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
-      slamP["node: slam_toolbox (Pinky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
-      slamI["node: slam_toolbox (Inky on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
-      slamC["node: slam_toolbox (Clyde on robot)\nasync_slam_toolbox_node\n(robot-side params in ans-turtlebot3 workspace)"]
-      mapMerge["node: multirobot_map_merge/map_merge\nsrc/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml"]
-    end
+1. Frontiers: free cells next to unknown cells on the merged `/map` (or a robot's own map early on; `mode: auto` switches when `map_merge/merge_state` reports `MERGED` stably).
+2. Assignment: each idle robot gets the unclaimed frontier with the best size-versus-distance score; robots are kept apart.
+3. Precheck: `compute_path_to_pose` on the robot. Goals with no plan are blacklisted and the next frontier is tried.
+4. Dispatch: the goal is transformed into `<robot>/map` and sent as `NavigateToPose`. Nav2 on the robot plans and drives.
+5. Watchdogs: stalls, aborts and repeated near-identical goals are cancelled and blacklisted. When no frontiers remain, robots return to their start pose.
 
-    subgraph Data_GlobalMapping["Data (topics + TF)"]
-      direction TB
-      bMap["topic:/blinky/map (nav_msgs/OccupancyGrid)"]
-      pMap["topic:/pinky/map (nav_msgs/OccupancyGrid)"]
-      iMap["topic:/inky/map (nav_msgs/OccupancyGrid)"]
-      cMap["topic:/clyde/map (nav_msgs/OccupancyGrid)"]
-      gMap["topic:/map (nav_msgs/OccupancyGrid)"]
-
-      bTF["topic:/blinky/tf + /blinky/tf_static (tf2_msgs/TFMessage)"]
-      pTF["topic:/pinky/tf + /pinky/tf_static (tf2_msgs/TFMessage)"]
-      iTF["topic:/inky/tf + /inky/tf_static (tf2_msgs/TFMessage)"]
-      cTF["topic:/clyde/tf + /clyde/tf_static (tf2_msgs/TFMessage)"]
-      gTF["topic:/tf + /tf_static (tf2_msgs/TFMessage)"]
-
-      tfChain["TF per robot after merge:\nmap -> robot/map -> robot/odom -> robot/base_footprint\n(robot in blinky, pinky, inky, clyde)"]
-    end
-
-    bTF -->|"script: prefix+merge"| tfRelay
-    pTF -->|"script: prefix+merge"| tfRelay
-    iTF -->|"script: prefix+merge"| tfRelay
-    cTF -->|"script: prefix+merge"| tfRelay
-    tfRelay -->|"topic:/tf + /tf_static"| gTF
-
-    slamB -->|"topic:/blinky/map"| bMap
-    slamP -->|"topic:/pinky/map"| pMap
-    slamI -->|"topic:/inky/map"| iMap
-    slamC -->|"topic:/clyde/map"| cMap
-
-    bMap -->|"map_merge inputs"| mapMerge
-    pMap -->|"map_merge inputs"| mapMerge
-    iMap -->|"map_merge inputs"| mapMerge
-    cMap -->|"map_merge inputs"| mapMerge
-    mapMerge -->|"topic:/map"| gMap
-    mapMerge -->|"tf: map-><robot>/map (publish_tf)"| tfChain
-  end
-```
-
-### Note on laser scan normalization
-
-- In the current central workflow, scan topics are bridged from `fleet_bridge_contract.yaml` + `fleet_domain_map.yaml` via generated files under `config/generated_domain_bridge/`.
-- If robot-side SLAM already uses normalized scans (for example `/<robot>/scan_normalized`), keep that topic contract consistent between robot launch params and bridge contract entries.
-- If you switch to central-side normalization, ensure raw `/<robot>/scan` is present on the central graph and update robot SLAM params accordingly.
-
----
-
-## Function: Frontier detection + waypoint assignment + navigation (capstone contract)
-
-Your current workspace includes per-robot **Nav2** on each robot and a central explorer started from:
-
-- `scripts/core/start_central.sh` (central orchestration: TF relay, map merge where applicable, explorer)
-- `scripts/core/start_rviz_central.sh` (central RViz helper)
-
-For the capstone requirement (“optimized waypoints”, “minimize overlap”), you typically add a **central TaskAllocator** that assigns frontiers/waypoints per robot (instead of each robot greedily exploring on its own).
-
-```mermaid
-flowchart TB
-  subgraph Function_TaskAndNav["Function: Frontier+TaskAllocation+Navigation"]
-    direction TB
-
-    subgraph Programs_TaskAndNav["Programs"]
-      direction TB
-      globalMapSrc["Global map provider\n(map_merge from GlobalMapping)"]
-
-      frontierDetect["node: FrontierDetector\n(current: explore_lite per-robot)\n(capstone: central frontier service)"]
-      taskAllocator["node: TaskAllocator (central)\n(assigns non-overlapping goals)"]
-
-      nav2B["stack: Nav2 (namespace: blinky)\nplanner/controller/BT navigator"]
-      nav2P["stack: Nav2 (namespace: pinky)\nplanner/controller/BT navigator"]
-
-      explorerB["node: explore_lite (blinky namespace)\n(current behavior)"]
-      explorerP["node: explore_lite (pinky namespace)\n(current behavior)"]
-    end
-
-    subgraph Data_TaskAndNav["Data (topics + TF + actions)"]
-      direction TB
-      mapTopic["topic:/map (OccupancyGrid)"]
-      tfTopic["topic:/tf + /tf_static"]
-
-      frontiers["topic:/frontiers (planned)"]
-      assignedGoals["topic:/assigned_waypoints (planned)"]
-
-      navGoalB["action:/blinky/navigate_to_pose (nav2_msgs/NavigateToPose)"]
-      navGoalP["action:/pinky/navigate_to_pose (nav2_msgs/NavigateToPose)"]
-      navResult["action feedback/result (success/failure/blocked)"]
-      cmdVel["topic:/<robot>/cmd_vel (geometry_msgs/Twist)\n(emitted where Nav2 runs)"]
-    end
-
-    globalMapSrc -->|"topic:/map"| mapTopic
-    mapTopic --> frontierDetect
-    tfTopic --> frontierDetect
-
-    %% Capstone intended loop
-    frontierDetect -->|"topic:/frontiers"| frontiers
-    frontiers --> taskAllocator
-    taskAllocator -->|"topic:/assigned_waypoints"| assignedGoals
-    assignedGoals -->|"action goals"| nav2B
-    assignedGoals -->|"action goals"| nav2P
-
-    nav2B -->|"action:/blinky/navigate_to_pose"| navGoalB
-    nav2P -->|"action:/pinky/navigate_to_pose"| navGoalP
-    navGoalB --> navResult
-    navGoalP --> navResult
-    navResult -->|"replan on completion/invalid path"| taskAllocator
-
-    nav2B -->|"topic:/blinky/cmd_vel"| cmdVel
-    nav2P -->|"topic:/pinky/cmd_vel"| cmdVel
-
-    %% Current implemented (greedy per-robot)
-    mapTopic --> explorerB
-    mapTopic --> explorerP
-    explorerB -->|"action goals"| nav2B
-    explorerP -->|"action goals"| nav2P
-  end
-```
-
----
-
-## Function: Object detection + reporting (capstone contract)
-
-```mermaid
-flowchart TB
-  subgraph Function_ObjectDetection["Function: ObjectDetection+Reporting"]
-    direction TB
-
-    subgraph Programs_ObjectDetection["Programs"]
-      direction TB
-      objDetB["node: ObjectDetector (on robot blinky)\n(model inference)"]
-      objDetP["node: ObjectDetector (on robot pinky)\n(model inference)"]
-      objFuse["node: ObjectReportAggregator (central)\n(optional: de-dup + global transform)"]
-    end
-
-    subgraph Data_ObjectDetection["Data (topics + TF)"]
-      direction TB
-      imageB["topic:/blinky/camera/image_*"]
-      imageP["topic:/pinky/camera/image_*"]
-      detB["topic:/blinky/object_detections (planned)"]
-      detP["topic:/pinky/object_detections (planned)"]
-      tfGlobal["topic:/tf (map->...->base/camera)"]
-      globalObjects["topic:/object_markers (visualization_msgs/MarkerArray)"]
-    end
-
-    imageB --> objDetB
-    imageP --> objDetP
-    objDetB -->|"topic:/blinky/object_detections"| detB
-    objDetP -->|"topic:/pinky/object_detections"| detP
-
-    detB --> objFuse
-    detP --> objFuse
-    tfGlobal --> objFuse
-    objFuse -->|"topic:/object_markers"| globalObjects
-  end
-```
-
----
-
-## Function: GUI (global map + markers + status + video)
-
-```mermaid
-flowchart TB
-  subgraph Function_GUI["Function: GUI (Operator View)"]
-    direction TB
-
-    subgraph Programs_GUI["Programs"]
-      direction TB
-      guiApp["GUI app (RViz2 / rqt / web UI)\n(planned: custom dashboard)"]
-      statusAgg["node: RobotStatusAggregator (central)\n(planned)"]
-    end
-
-    subgraph Data_GUI["Data (topics)"]
-      direction TB
-      mapTopic["topic:/map (OccupancyGrid)"]
-      tfTopic["topic:/tf + /tf_static"]
-      markers["topic:/object_markers (MarkerArray)"]
-      robotStatus["topic:/robot_status (planned)\n(name, IP, battery, link, last_seen)"]
-      video["topic:/<robot>/camera/image_* (or compressed)"]
-    end
-
-    mapTopic --> guiApp
-    tfTopic --> guiApp
-    markers --> guiApp
-
-    statusAgg -->|"topic:/robot_status"| robotStatus
-    robotStatus --> guiApp
-
-    video --> guiApp
-  end
-```
-
----
-
-## Function: Security monitoring (deviation + silence watchdog + quarantine)
-
-```mermaid
-flowchart TB
-  subgraph Function_Security["Function: SecurityMonitoring"]
-    direction TB
-
-    subgraph Programs_Security["Programs"]
-      direction TB
-      securityMon["node: SecurityMonitor (central)\n(planned)"]
-      watchdog["node: RobotWatchdog (central)\n(planned: last-message timers)"]
-      navCancel["node: Nav2GoalCanceler (optional)\n(planned: cancel goals on compromise)"]
-    end
-
-    subgraph Data_Security["Data (topics/actions)"]
-      direction TB
-      assigned["topic:/assigned_waypoints (planned)"]
-      pose["topic:/tf (robot pose in map frame)"]
-      heartbeat["topic:/<robot>/heartbeat (planned)\n(or watchdog critical topics)"]
-      alerts["topic:/security_alerts (planned)"]
-      stop["topic:/<robot>/cmd_vel (zero) OR service:/emergency_stop (planned)"]
-      cancel["action:/<robot>/navigate_to_pose/cancel (planned)"]
-    end
-
-    assigned --> securityMon
-    pose --> securityMon
-    heartbeat --> watchdog
-
-    securityMon -->|"publish alerts"| alerts
-    watchdog -->|"robot silent => alert"| alerts
-
-    alerts --> navCancel
-    navCancel -->|"cancel current goal"| cancel
-    alerts -->|"halt robot"| stop
-  end
-```
+Parameters: `src/m-explore-ros2/explore/config/multi_robot_explorer.yaml`, `src/m-explore-ros2/map_merge/config/multirobot_params_unknown_poses.yaml`.

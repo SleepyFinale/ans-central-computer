@@ -19,7 +19,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=../env/fleet_common.bash
+source "${SCRIPT_DIR}/../env/fleet_common.bash"
+WORKSPACE_DIR="$FLEET_WORKSPACE_DIR"
 
 TIMEOUT_ZENOH_CENTRAL="${TIMEOUT_ZENOH_CENTRAL:-90}"
 TIMEOUT_BRINGUP="${TIMEOUT_BRINGUP:-180}"
@@ -27,14 +29,6 @@ TIMEOUT_SLAM="${TIMEOUT_SLAM:-300}"
 TIMEOUT_ZENOH_ROBOT="${TIMEOUT_ZENOH_ROBOT:-90}"
 TIMEOUT_CENTRAL="${TIMEOUT_CENTRAL:-180}"
 TIMEOUT_RVIZ="${TIMEOUT_RVIZ:-60}"
-
-ALL_ROBOTS=(blinky pinky inky clyde)
-declare -A LETTER_TO_ROBOT=(
-  [b]="blinky"
-  [p]="pinky"
-  [i]="inky"
-  [c]="clyde"
-)
 
 SELECTION=""
 # Robots dial this PC by name. Use the short hostname unless --central-host
@@ -96,7 +90,7 @@ EOF
 while (($# > 0)); do
   case "$1" in
     -[bpic]*)
-      SELECTION="${1#-}"
+      SELECTION="$1"
       ;;
     --central-host)
       shift
@@ -128,9 +122,8 @@ while (($# > 0)); do
   shift
 done
 
-if [[ -z "$SELECTION" ]]; then
-  SELECTION="bpic"
-fi
+fleet_select_robots "$SELECTION"
+SELECTION="$(for r in "${ROBOTS[@]}"; do printf '%s' "${r:0:1}"; done)"
 
 if [[ -z "$CENTRAL_HOST" ]]; then
   echo "ERROR: could not read this computer's hostname. Pass --central-host <name>." >&2
@@ -138,26 +131,6 @@ if [[ -z "$CENTRAL_HOST" ]]; then
 fi
 if [[ ! "$CENTRAL_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
   echo "ERROR: invalid central Tailscale name '${CENTRAL_HOST}'." >&2
-  exit 1
-fi
-
-declare -A SELECTED_ROBOT_SET=()
-for ((idx=0; idx<${#SELECTION}; idx++)); do
-  ch="${SELECTION:$idx:1}"
-  if [[ -z "${LETTER_TO_ROBOT[$ch]:-}" ]]; then
-    echo "ERROR: invalid robot selector '${ch}' in '-${SELECTION}'" >&2
-    echo "Use any combination of: b=blinky, p=pinky, i=inky, c=clyde" >&2
-    exit 1
-  fi
-  SELECTED_ROBOT_SET["${LETTER_TO_ROBOT[$ch]}"]=1
-done
-
-ROBOTS=()
-for robot in "${ALL_ROBOTS[@]}"; do
-  [[ -n "${SELECTED_ROBOT_SET[$robot]:-}" ]] && ROBOTS+=("$robot")
-done
-if [[ ${#ROBOTS[@]} -eq 0 ]]; then
-  echo "ERROR: no robots selected" >&2
   exit 1
 fi
 
@@ -216,7 +189,7 @@ ready_slam() {
 
 ready_zenoh_robot() {
   local robot="$1"
-  printf 'TF zenoh publish: /%s/tf -> /%s/tf_zenoh and /tf (best-effort in, merged, 10 Hz)' "$robot" "$robot"
+  printf 'TF zenoh publish: /%s/tf -> /%s/tf_zenoh' "$robot" "$robot"
 }
 
 print_plan() {
@@ -379,8 +352,7 @@ central_body() {
   cat <<EOF
 set +u
 cd $(printf '%q' "$WORKSPACE_DIR")
-source $(printf '%q' "${WORKSPACE_DIR}/scripts/env/ros_domain_profile.bash")
-source $(printf '%q' "${WORKSPACE_DIR}/scripts/env/ros_robot_env.bash")
+source $(printf '%q' "${WORKSPACE_DIR}/scripts/env/central_env.bash")
 exec ${command}
 EOF
 }

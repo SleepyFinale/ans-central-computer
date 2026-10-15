@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Diagnose multi-robot TF tree: report what's working and where it breaks.
-Run with the same ROS_DOMAIN_ID as the central PC and all robots (e.g. 50 or 64).
+Run on the central PC after: source scripts/env/central_env.bash
 
-Expected global chain per robot (after tf_relay + map_merge or single-robot bridge):
+Expected global chain per robot (fleet_zenoh_receive.py + map_merge or single-robot bridge):
   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
 
-Equivalent manual checks (central PC or robot, same ROS_DOMAIN_ID):
+Equivalent manual checks on the central PC:
 
   ros2 run tf2_ros tf2_echo map <robot>/map
   ros2 run tf2_ros tf2_echo map <robot>/base_footprint
@@ -262,7 +262,7 @@ class TFDiagnostics(Node):
 
         domain = os.environ.get('ROS_DOMAIN_ID', '?')
         self.log(
-            f'ROS_DOMAIN_ID = {domain} (must match central PC and every robot)',
+            f'ROS_DOMAIN_ID = {domain} (central domain; source scripts/env/central_env.bash)',
             ok=None,
         )
 
@@ -285,7 +285,7 @@ class TFDiagnostics(Node):
                 ok=None,
             )
 
-        critical_topics = ['/tf', '/tf_static'] + [f'/{r}/tf' for r in self.robots] + ['/map']
+        critical_topics = ['/tf', '/tf_static'] + [f'/{r}/tf_zenoh' for r in self.robots] + ['/map']
         # Laser scans stay on the robots; they are optional from the
         # central PC's point of view (Nav2 + SLAM use them locally).
         optional_scan_topics = [f'/{r}/scan' for r in self.robots]
@@ -298,23 +298,19 @@ class TFDiagnostics(Node):
                 continue
 
             is_global = topic in ('/tf', '/tf_static', '/map')
-            is_robot_tf = (
-                topic.endswith('/tf')
-                and topic not in ('/tf', '/tf_static')
-                and topic.count('/') == 2
-            )
+            is_robot_tf = topic.endswith('/tf_zenoh')
             if is_global:
                 self.log(f'Topic {topic}: {n} publisher(s)', ok=(n > 0))
             elif is_robot_tf:
                 if discovered:
-                    # Central PC often sees 0 publishers on /<robot>/tf while tf_relay
-                    # still merges that robot onto global /tf.
+                    # The Zenoh bridge advertises /<robot>/tf_zenoh only while
+                    # that robot's start_zenoh_robot.sh is connected.
                     if n > 0:
                         self.log(f'Topic {topic}: {n} publisher(s)', ok=True)
                     else:
                         self.log(
                             f'Topic {topic}: 0 publisher(s) '
-                            f'(namespaced TF may only be relayed to /tf here; not an error)',
+                            f'(robot Zenoh bridge not connected yet?)',
                             ok=None,
                         )
                 else:
@@ -351,7 +347,7 @@ class TFDiagnostics(Node):
         #
         # Critical checks are things that must exist for Nav2 and the
         # central multi_robot_explorer to work:
-        #   - odom -> base_footprint for each robot (via tf_relay)
+        #   - odom -> base_footprint for each robot (via fleet_zenoh_receive.py)
         #   - map -> <robot>/map from map_merge
         #   - full chain map -> <robot>/base_footprint
         #
@@ -427,18 +423,19 @@ class TFDiagnostics(Node):
             print('\nTypical causes:')
             for r in self.robots:
                 label = r.capitalize()
-                topic_key = f'Topic /{r}/tf:'
+                topic_key = f'Topic /{r}/tf_zenoh:'
                 if any(topic_key in res and '[MISSING]' in res for res in self.results):
                     print(
-                        f'  - /{r}/tf: domain bridges or {label} robot not running'
+                        f'  - /{r}/tf_zenoh: start_zenoh_robot.sh not running on {label}, '
+                        'or start_zenoh_central.sh not running here'
                     )
             if any('Robot TF (odom->base_footprint):' in r and '[MISSING]' in r for r in self.results):
-                print('  - odom->base_footprint: base TF on the robot or tf_relay may not be running.')
+                print('  - odom->base_footprint: robot bringup or fleet_zenoh_receive.py may not be running.')
             if any('World TF (map_merge):' in r and '[MISSING]' in r for r in self.results):
                 print('  - map-><robot>/map: map_merge may not be running, publish_tf false, or pose '
                       'estimates not ready yet (see publish_provisional_tf in map_merge params).')
             if any('Explorer chain:' in r and '[MISSING]' in r for r in self.results):
-                print('  - Explorer chain: ensure map_merge, slam_toolbox, tf_relay, and all robots are running.')
+                print('  - Explorer chain: ensure map_merge, slam_toolbox, fleet_zenoh_receive.py, and all robots are running.')
                 print('  - If the error mentions extrapolation into the future, TF stamps on '
                       'map / SLAM / odom may be skewed; the script retries several past times—'
                       'run again after a few seconds or check clock sync (NTP) on Pis + central PC.')

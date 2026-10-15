@@ -1,0 +1,70 @@
+////
+//// Central PC: Zenoh router + one ros2dds bridge for the whole fleet.
+//// Placeholders: __DOMAIN__ (central ROS domain), __ROBOTS__ (e.g. "(inky|clyde)")
+////
+//// Every robot's topics are namespaced (/<robot>/...), so all of them land
+//// in the one central domain. Robot->central data: subscribers only, so
+//// central never echoes TF or maps back to a robot. Actions stay bidirectional.
+//// Keep this list in step with config/zenoh/robot_client.json5.tmpl in the
+//// turtlebot3 workspace.
+////
+{
+  mode: "router",
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+  scouting: {
+    multicast: { enabled: false },
+  },
+  plugins: {
+    ros2dds: {
+      domain: __DOMAIN__,
+      ros_localhost_only: true,
+      nodename: "zenoh_bridge_central",
+      reliable_routes_blocking: false,
+      allow: {
+        publishers: [
+          "/__ROBOTS__/navigate_to_pose/_action/.*",
+          "/__ROBOTS__/compute_path_to_pose/_action/.*",
+        ],
+        subscribers: [
+          "/__ROBOTS__/map_wire_z",
+          "/__ROBOTS__/tf_zenoh",
+          "/__ROBOTS__/tf_static_zenoh",
+          "/__ROBOTS__/nav2_collision_ahead",
+          "/__ROBOTS__/nav2_retrace_active",
+          // RViz only; the robot sends them only while someone subscribes.
+          "/__ROBOTS__/plan",
+          "/__ROBOTS__/scan_normalized",
+          "/__ROBOTS__/local_costmap/costmap",
+          "/__ROBOTS__/navigate_to_pose/_action/.*",
+          "/__ROBOTS__/compute_path_to_pose/_action/.*",
+        ],
+        service_servers: [
+          "/__ROBOTS__/navigate_to_pose/_action/.*",
+          "/__ROBOTS__/compute_path_to_pose/_action/.*",
+        ],
+        service_clients: [
+          "/__ROBOTS__/navigate_to_pose/_action/.*",
+          "/__ROBOTS__/compute_path_to_pose/_action/.*",
+        ],
+        action_servers: [
+          "/__ROBOTS__/navigate_to_pose",
+          "/__ROBOTS__/compute_path_to_pose",
+        ],
+        action_clients: [
+          "/__ROBOTS__/navigate_to_pose",
+          "/__ROBOTS__/compute_path_to_pose",
+        ],
+      },
+      pub_max_frequencies: [
+        "/__ROBOTS__/map_wire_z=1",
+        "/__ROBOTS__/tf_zenoh=10",
+        "/__ROBOTS__/tf_static_zenoh=1",
+        "/__ROBOTS__/plan=2",
+        "/__ROBOTS__/scan_normalized=2",
+        "/__ROBOTS__/local_costmap/costmap=1",
+      ],
+    },
+  },
+}

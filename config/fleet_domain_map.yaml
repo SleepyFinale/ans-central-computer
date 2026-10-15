@@ -1,12 +1,11 @@
 fleet_domain_map:
   version: 1
-  # Central coordination domain used by central-computer processes.
-  # Must not collide with any robot domain in robot_domain_ids.
+  # ROS domain of every central process (Zenoh bridge, map_merge, explorer,
+  # RViz). All robots' namespaced topics arrive here through Zenoh.
   central_domain_id: 50
-  # Deterministic per-robot domain assignments consumed by:
-  # - scripts/core/start_central.sh
-  # - scripts/bridging/generate_domain_bridge_configs.py
-  # - scripts/core/start_rviz_central.sh (local mode auto-domain switch)
+  # Each robot's own loopback-only domain (reference only). The robot side
+  # sets it in ~/turtlebot3/scripts/env/ros_domain_profile.bash and
+  # scripts/comms/start_zenoh_robot.sh; keep those in step if this changes.
   robot_domain_ids:
     blinky: 05
     pinky: 22

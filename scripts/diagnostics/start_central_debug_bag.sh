@@ -6,7 +6,7 @@ set -eo pipefail
 #
 # Usage:
 #   ./scripts/diagnostics/start_central_debug_bag.sh pinky blinky
-#   ./scripts/diagnostics/start_central_debug_bag.sh   # auto-detect from /<robot>/tf
+#   ./scripts/diagnostics/start_central_debug_bag.sh   # every robot sending a map
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
@@ -14,8 +14,7 @@ WORKSPACE_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 cd "$WORKSPACE_DIR"
 # Some ROS setup scripts may reference unset variables (for example
 # AMENT_TRACE_SETUP_FILES), so avoid nounset during sourcing.
-source /opt/ros/humble/setup.bash
-source install/setup.bash 2>/dev/null || true
+source scripts/env/central_env.bash >/dev/null
 set -u
 
 SESSION_TS="$(date +%Y%m%d-%H%M%S)"
@@ -33,10 +32,7 @@ fi
 
 ROBOTS=("$@")
 if [[ ${#ROBOTS[@]} -eq 0 ]]; then
-  mapfile -t ROBOTS < <(ros2 topic list 2>/dev/null \
-    | grep -E '^/[^/]+/tf$' \
-    | sed -E 's#^/([^/]+)/tf$#\1#' \
-    | sort -u)
+  mapfile -t ROBOTS < <(fleet_robots_with_maps 5 "${FLEET_ROBOTS[@]}")
 fi
 
 if [[ ${#ROBOTS[@]} -eq 0 ]]; then
@@ -56,7 +52,6 @@ for r in "${ROBOTS[@]}"; do
   TOPICS+=(
     "/${r}/map"
     "/${r}/plan"
-    "/${r}/cmd_vel_nav"
     "/${r}/navigate_to_pose/_action/status"
     "/${r}/navigate_to_pose/_action/feedback"
     "/${r}/navigate_to_pose/_action/result"

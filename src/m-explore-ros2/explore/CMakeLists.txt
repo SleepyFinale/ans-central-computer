@@ -77,11 +77,9 @@ install(DIRECTORY
 )
 install(PROGRAMS
   scripts/multi_robot_explorer.py
-  scripts/tf_relay_multirobot.py
   scripts/single_robot_map_relay.py
   scripts/single_robot_world_tf_bridge.py
   scripts/central_explorer_event_logger.py
-  scripts/start_multirobot_explorer.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 
