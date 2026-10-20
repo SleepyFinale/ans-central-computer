@@ -245,6 +245,15 @@ multi_robot_explorer:
     # Slightly smaller radius reduces cross-robot centroid blacklist overlap / livelock.
     blacklist_radius: 0.20
 
+    # Blacklist points never expire on their own. When a robot has sat idle
+    # this long (s) with frontiers left but every one blacklisted or gated,
+    # its blacklist is cleared and they are tried again: a robot briefly
+    # boxed in by a bump or a low-obstacle mark (kept 2-3 min on the robot)
+    # blacklists everything beyond it, then otherwise idles for good.
+    # At most blacklist_reset_max resets between successful goals. 0 disables.
+    blacklist_reset_idle_sec: 60.0
+    blacklist_reset_max: 3
+
     # When a robot successfully reaches a goal, blacklist points within this
     # distance (m) of the success pose are removed. Revives spurious
     # failure-payload blacklists; runs before post_success_frontier_avoidance.

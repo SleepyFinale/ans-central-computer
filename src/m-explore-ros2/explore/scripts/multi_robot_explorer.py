@@ -82,6 +82,10 @@ class RobotState:
     goals_reached: int = 0
     goals_failed: int = 0
     blacklist: list = field(default_factory=list)
+    # Idle with frontiers left but none assignable, since this time (None
+    # while assigning normally); blacklist resets since the last success.
+    unassignable_since: Optional[float] = None
+    blacklist_resets: int = 0
     server_unavailable_logged: bool = False
     last_distance_remaining: Optional[float] = None
     last_progress_distance: Optional[float] = None
@@ -506,6 +510,16 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('nearby_penalty_dist', 2.0)
         self.declare_parameter('blacklist_radius', 0.5)
         self.declare_parameter('blacklist_clear_radius', 0.5)
+        # Blacklist entries never expire on their own. A robot briefly boxed
+        # in (a fresh bump or stereo mark across a doorway, kept for a few
+        # minutes on the robot) fails every goal beyond it, blacklists them
+        # all, and then sits idle for good with frontiers left. After
+        # blacklist_reset_idle_sec idle with only gated frontiers, its
+        # blacklist is cleared and they are tried again; at most
+        # blacklist_reset_max times between successes, so a map that is
+        # really finished still ends. 0 disables.
+        self.declare_parameter('blacklist_reset_idle_sec', 60.0)
+        self.declare_parameter('blacklist_reset_max', 3)
         # On exploration success, drop blacklist points near the goal (revives
         # stale failure flags), then (if true) add the just-visited frontier
         # centroid to reduce instant re-send while the map is unchanged.
@@ -754,6 +768,9 @@ class MultiRobotExplorer(Node):
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
         self.blacklist_clear_radius = float(
             self.get_parameter('blacklist_clear_radius').value)
+        self.blacklist_reset_idle_sec = float(
+            self.get_parameter('blacklist_reset_idle_sec').value)
+        self.blacklist_reset_max = int(self.get_parameter('blacklist_reset_max').value)
         self.post_success_frontier_avoidance: bool = bool(
             self.get_parameter('post_success_frontier_avoidance').value)
         self.repeat_goal_dist_threshold: float = max(
@@ -2026,6 +2043,11 @@ class MultiRobotExplorer(Node):
             goal_dist_fn=self._goal_dist_for_assignment,
             assignment_robot_order_fn=self._assignment_robot_order,
         )
+        for rname, rs_i in self.robots.items():
+            if rs_i.goal_active or rs_i.goal_pending or rs_i.position is None:
+                continue
+            if self._robot_may_assign_now(rs_i, now):
+                self._note_assignable(rs_i, bool(frontiers) and rname not in assignments, now)
         if not assignments and n_idle > 0 and frontiers:
             if now - self._last_no_assignment_log_time >= 15.0:
                 self._last_no_assignment_log_time = now
@@ -2105,6 +2127,7 @@ class MultiRobotExplorer(Node):
                     f'[{name}] Relaxed min_goal_separation for assignment (robot '
                     'on/near frontier after a goal); repeat-goal blacklist still applies'
                 )
+            self._note_assignable(rs, bool(frontiers) and name not in sub_assignments, now)
             if name not in sub_assignments and frontiers:
                 # Mirror global-mode diagnostics so local mode does not appear
                 # "stuck" when frontiers exist but all candidates are gated.
@@ -2494,11 +2517,36 @@ class MultiRobotExplorer(Node):
         if not self._should_skip_blacklist_due_to_lethal(rs):
             rs.blacklist.append((float(xy[0]), float(xy[1])))
 
+    def _note_assignable(self, rs: RobotState, stuck: bool, now: float) -> None:
+        """Track an idle robot that has frontiers but none it may take, and
+        clear its blacklist once that has lasted blacklist_reset_idle_sec."""
+        if not stuck:
+            rs.unassignable_since = None
+            return
+        if rs.unassignable_since is None:
+            rs.unassignable_since = now
+            return
+        if self.blacklist_reset_idle_sec <= 0.0 or not rs.blacklist:
+            return
+        if now - rs.unassignable_since < self.blacklist_reset_idle_sec:
+            return
+        if rs.blacklist_resets >= self.blacklist_reset_max:
+            return
+        rs.blacklist_resets += 1
+        self.get_logger().warning(
+            f'[{rs.name}] Idle {now - rs.unassignable_since:.0f}s with only blacklisted '
+            f'frontiers; clearing {len(rs.blacklist)} blacklist point(s) and retrying '
+            f'(reset {rs.blacklist_resets}/{self.blacklist_reset_max} since last success)'
+        )
+        rs.blacklist = []
+        rs.unassignable_since = None
+
     def _apply_post_success_blacklist_policy(self, rs: RobotState) -> None:
         """After a successful exploration leg, relax stale blacklists near the
         success pose, then (optionally) blacklist the visited frontier so the
         same assignment is not re-emitted on the next tick.
         """
+        rs.blacklist_resets = 0
         if rs.homing_active:
             return
         if rs.goal_position is None:
