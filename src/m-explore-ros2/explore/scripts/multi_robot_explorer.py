@@ -27,6 +27,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 import rclpy
@@ -604,6 +605,9 @@ class MultiRobotExplorer(Node):
         # - reject goals that do not have enough local obstacle clearance
         self.declare_parameter('goal_max_cell_cost', 80)
         self.declare_parameter('goal_min_clearance_gate_m', 0.30)
+        # A goal that fails the safety gate moves to the nearest free cell
+        # within this distance that passes it (0 = drop the frontier instead).
+        self.declare_parameter('goal_safe_search_m', 0.6)
         # Re-check selected goals against the latest map right before sending
         # to Nav2. This avoids dispatching goals that became unsafe between
         # frontier assignment and NavigateToPose dispatch.
@@ -847,6 +851,11 @@ class MultiRobotExplorer(Node):
         self.goal_min_clearance_gate_m = float(
             self.get_parameter('goal_min_clearance_gate_m').value
         )
+        self.goal_safe_search_m = float(
+            self.get_parameter('goal_safe_search_m').value
+        )
+        # (map message, grid, clearance) for the map last used in goal selection.
+        self._map_arrays_cache = None
         self.goal_revalidate_before_send = bool(
             self.get_parameter('goal_revalidate_before_send').value
         )
@@ -2369,6 +2378,28 @@ class MultiRobotExplorer(Node):
         idx = cy * m.info.width + cx
         return int(m.data[idx])
 
+    def _map_arrays(self, m: OccupancyGrid) -> Tuple[np.ndarray, np.ndarray]:
+        """(grid, clearance in m to the nearest occupied cell, capped at
+        goal_clearance_radius_m) for one map message, computed once.
+
+        Goal selection asks for clearance at every frontier cell; rebuilding
+        the grid from m.data and scanning a window per call cost a full map
+        conversion per cell.
+        """
+        cached = self._map_arrays_cache
+        if cached is not None and cached[0] is m:
+            return cached[1], cached[2]
+        grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+        free = (grid < OCCUPIED_THRESH).astype(np.uint8)
+        if np.all(free):
+            clearance = np.full(grid.shape, self.goal_clearance_radius_m, dtype=np.float32)
+        else:
+            # Distance from each cell centre to the nearest occupied cell centre.
+            dist = cv2.distanceTransform(free, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+            clearance = np.minimum(dist * float(m.info.resolution), self.goal_clearance_radius_m)
+        self._map_arrays_cache = (m, grid, clearance)
+        return grid, clearance
+
     def _goal_clearance_m(self, m: Optional[OccupancyGrid], x: float, y: float) -> float:
         if m is None:
             return self.goal_clearance_radius_m
@@ -2376,21 +2407,45 @@ class MultiRobotExplorer(Node):
         if cell is None:
             return 0.0
         cx, cy = cell
-        res = m.info.resolution
-        radius_cells = max(1, int(self.goal_clearance_radius_m / res))
-        grid = np.array(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
-        min_clearance = self.goal_clearance_radius_m
-        y0 = max(0, cy - radius_cells)
-        y1 = min(m.info.height - 1, cy + radius_cells)
-        x0 = max(0, cx - radius_cells)
-        x1 = min(m.info.width - 1, cx + radius_cells)
-        for yy in range(y0, y1 + 1):
-            for xx in range(x0, x1 + 1):
-                if grid[yy, xx] >= OCCUPIED_THRESH:
-                    d = math.hypot((xx - cx) * res, (yy - cy) * res)
-                    if d < min_clearance:
-                        min_clearance = d
-        return min_clearance
+        _grid, clearance = self._map_arrays(m)
+        return float(clearance[cy, cx])
+
+    def _nearest_safe_goal(
+        self, m: Optional[OccupancyGrid], x: float, y: float
+    ) -> Optional[Tuple[float, float]]:
+        """Nearest known-free cell to (x, y), within goal_safe_search_m, that
+        passes the safety gate; None if there is none.
+
+        A frontier among furniture often has every cell, and its centroid,
+        within goal_min_clearance_gate_m of an obstacle. The explorer then
+        skipped it on every cycle and the robot stood idle; a goal a few
+        centimetres further from the obstacle sees the same frontier.
+        """
+        if m is None or self.goal_safe_search_m <= 0.0:
+            return None
+        cell = self._world_to_cell(m, x, y)
+        if cell is None:
+            return None
+        cx, cy = cell
+        res = float(m.info.resolution)
+        r = max(1, int(math.ceil(self.goal_safe_search_m / res)))
+        grid, clearance = self._map_arrays(m)
+        y0, y1 = max(0, cy - r), min(grid.shape[0], cy + r + 1)
+        x0, x1 = max(0, cx - r), min(grid.shape[1], cx + r + 1)
+        g = grid[y0:y1, x0:x1]
+        ok = (
+            (g >= 0) & (g < min(self.goal_max_cell_cost, OCCUPIED_THRESH))
+            & (clearance[y0:y1, x0:x1] >= self.goal_min_clearance_gate_m)
+        )
+        if not np.any(ok):
+            return None
+        jj, ii = np.nonzero(ok)
+        d2 = (jj + y0 - cy) ** 2 + (ii + x0 - cx) ** 2
+        k = int(np.argmin(d2))
+        if d2[k] * res * res > self.goal_safe_search_m ** 2:
+            return None
+        ox, oy = m.info.origin.position.x, m.info.origin.position.y
+        return ox + (ii[k] + x0 + 0.5) * res, oy + (jj[k] + y0 + 0.5) * res
 
     def _frontier_unknown_adjacency_counts(
         self, grid: np.ndarray, ys: np.ndarray, xs: np.ndarray
@@ -3100,6 +3155,11 @@ class MultiRobotExplorer(Node):
                 if picked is not None:
                     gx, gy = picked
 
+        m = self._current_goal_map
+        if not self._goal_passes_safety_gate(m, gx, gy):
+            safe = self._nearest_safe_goal(m, gx, gy)
+            if safe is not None:
+                gx, gy = safe
         return gx, gy
 
     def _goal_dist_for_assignment(self, rname: str, fr: Frontier) -> float:

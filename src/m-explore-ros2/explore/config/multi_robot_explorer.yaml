@@ -305,11 +305,18 @@ multi_robot_explorer:
     # Hard safety gate:
     # - goal_max_cell_cost: reject candidate goal cells at/above this map cost.
     # - goal_min_clearance_gate_m: reject candidates with less obstacle
-    #   clearance than this threshold.
+    #   clearance than this threshold. Above the robots' global costmap
+    #   robot_radius (0.18 m): at 0.15 m, goals among chair legs landed in
+    #   inscribed space and Nav2 failed "no valid path found" until blacklisted.
+    # - goal_safe_search_m: a goal that fails the gate moves to the nearest
+    #   known-free cell within this distance that passes it, instead of the
+    #   frontier being skipped (a robot stood idle for minutes when every
+    #   frontier failed).
     goal_clearance_radius_m: 0.42
     goal_clearance_weight: 3.5
     goal_max_cell_cost: 80
-    goal_min_clearance_gate_m: 0.15
+    goal_min_clearance_gate_m: 0.22
+    goal_safe_search_m: 0.6
     # Re-check goal safety immediately before NavigateToPose dispatch.
     goal_revalidate_before_send: true
 
