@@ -91,6 +91,15 @@ multi_robot_explorer:
     nav2_path_precheck_abort_active_planner_is_hard_fail: false
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).
     nav2_path_precheck_planner_id: "GridBased"
+    # Prechecks to this many different goals failing (within the window) with
+    # the robot in place mean the robot is boxed in, not that the frontiers
+    # are unreachable: those goals are not blacklisted, and the explorer waits
+    # boxed_in_wait_sec while the robot's stuck_detector clears its costmap
+    # and narrows its radius. Without this, every frontier on the map was
+    # blacklisted while Inky stood among chair legs. 0 disables.
+    boxed_in_goal_count: 3
+    boxed_in_window_sec: 60.0
+    boxed_in_wait_sec: 10.0
 
     # Near-goal arrival probe: after the robot is close to the goal (or stuck
     # short of it with low distance_remaining), call compute_path_to_pose with
@@ -205,6 +214,21 @@ multi_robot_explorer:
     # Higher gain_scale       = prefer larger frontiers
     potential_scale: 2.0
     gain_scale: 1.0
+    # Frontier size counts only up to this many metres. Uncapped, a long
+    # frontier on the far side of the map outweighed several metres of travel
+    # and the robot left the room it was exploring. 0 = no cap.
+    frontier_gain_cap_m: 2.0
+    # "distance" above is travel distance around walls (Dijkstra on the map,
+    # obstacles grown by geodesic_inflate_m, unknown cells cost
+    # geodesic_unknown_cost per metre), not straight line: a frontier behind
+    # a wall is as far as the way round to it.
+    use_geodesic_distance: true
+    geodesic_inflate_m: 0.15
+    geodesic_unknown_cost: 1.5
+    geodesic_unreachable_factor: 3.0
+    # Metres of travel a goal straight behind the robot costs extra (scaled by
+    # angle / pi), so the robot keeps sweeping the way it faces.
+    heading_penalty_m: 0.5
 
     # Stall watchdog: cancellation is based on physical TF pose stagnation.
     # If a robot has an active goal and is not near goal, it is canceled only
@@ -353,7 +377,14 @@ multi_robot_explorer:
     # passes this check (e.g. robot just reached a goal on that frontier), the
     # planner retries with separation 0 so exploration continues; repeat-goal
     # blacklisting still limits useless resends.
-    min_goal_separation: 0.15
+    # Above Nav2's xy_goal_tolerance (0.25 m): closer goals "succeed" the
+    # moment they are sent. At 0.15 m Inky reached 8 such goals in 14 s,
+    # each a precheck plus a NavigateToPose round trip that moved nothing.
+    min_goal_separation: 0.40
+    # When no frontier passes min_goal_separation the planner retries with
+    # this instead of 0. Keep it above xy_goal_tolerance too: at 0, the
+    # fallback picked goals 0.24 m away that succeeded without moving.
+    relaxed_min_goal_separation: 0.30
 
     # If a robot's NavigateToPose action server on /<robot>/navigate_to_pose is
     # unavailable, optionally publish PoseStamped goals on /<robot>/goal_pose

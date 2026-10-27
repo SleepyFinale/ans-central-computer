@@ -29,6 +29,13 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+try:
+    from scipy import ndimage as _ndimage
+    from scipy.sparse import coo_matrix as _coo_matrix
+    from scipy.sparse.csgraph import dijkstra as _dijkstra
+except ImportError:  # labelling falls back to pure NumPy, distances to straight lines
+    _ndimage = None
+    _dijkstra = None
 
 import rclpy
 from rclpy.node import Node
@@ -83,6 +90,9 @@ class RobotState:
     goals_reached: int = 0
     goals_failed: int = 0
     blacklist: list = field(default_factory=list)
+    # Blacklist points from repeated-goal detection; a nearby success does
+    # not release them (only an idle blacklist reset does).
+    repeat_blacklist: set = field(default_factory=set)
     # Idle with frontiers left but none assignable, since this time (None
     # while assigning normally); blacklist resets since the last success.
     unassignable_since: Optional[float] = None
@@ -193,6 +203,9 @@ class RobotState:
     # Track repeated transient ABORTED precheck outcomes for the same goal.
     precheck_transient_goal_xy: Optional[Tuple[float, float]] = None
     precheck_transient_repeat_count: int = 0
+    # (time, goal xy, robot xy) for hard precheck failures since the last good
+    # plan; see MultiRobotExplorer._precheck_boxed_in.
+    precheck_fail_streak: list = field(default_factory=list)
     # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
     arrival_probe_in_progress: bool = False
     arrival_probe_goal_handle: Optional[object] = None
@@ -285,16 +298,26 @@ def detect_frontiers(
     if not np.any(frontier_mask):
         return []
 
-    # cluster with 8-connectivity (pure NumPy implementation)
-    labelled, n_labels = _label_frontiers_8c(frontier_mask)
+    # cluster with 8-connectivity. The pure-Python fallback visits every map
+    # cell in an interpreted loop (~0.1 s per tick on a 400x400 map).
+    if _ndimage is not None:
+        labelled, n_labels = _ndimage.label(frontier_mask, structure=np.ones((3, 3), dtype=bool))
+    else:
+        labelled, n_labels = _label_frontiers_8c(frontier_mask)
 
     # Interpret min_size_m as a characteristic linear size and require at
     # least the corresponding area in cells. This better matches the
     # cluster-size semantics used in costmap-based frontier search.
     min_cells = max(1, int((min_size_m / resolution) ** 2))
     frontiers: List[Frontier] = []
+    # One pass over the labels instead of one full-map comparison per label.
+    all_ys, all_xs = np.nonzero(labelled)
+    order = np.argsort(labelled[all_ys, all_xs], kind='stable')
+    all_ys, all_xs = all_ys[order], all_xs[order]
+    bounds = np.searchsorted(labelled[all_ys, all_xs], np.arange(1, n_labels + 2))
     for label_id in range(1, n_labels + 1):
-        ys, xs = np.where(labelled == label_id)
+        ys = all_ys[bounds[label_id - 1]:bounds[label_id]]
+        xs = all_xs[bounds[label_id - 1]:bounds[label_id]]
         n = len(ys)
         if n < min_cells:
             continue
@@ -323,6 +346,59 @@ def _dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def geodesic_distance_field(
+    grid: np.ndarray,
+    start_rc: Tuple[int, int],
+    resolution: float,
+    inflate_cells: int,
+    unknown_cost: float,
+) -> Optional[np.ndarray]:
+    """Travel distance (m) from start_rc to every cell, around obstacles.
+
+    Straight-line distance made a frontier on the far side of a wall look
+    as close as one in the same room, so the robot left rooms half explored
+    and crossed the map for it. Occupied cells are grown by inflate_cells
+    (about the robot radius) so gaps the robot cannot pass do not count as
+    shortcuts; unknown cells are passable at unknown_cost per metre, since
+    Nav2 plans through unknown space too. Unreachable cells are inf.
+    Returns None without SciPy.
+    """
+    if _dijkstra is None:
+        return None
+    h, w = grid.shape
+    occupied = grid >= OCCUPIED_THRESH
+    if inflate_cells > 0 and np.any(occupied):
+        k = 2 * inflate_cells + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+        blocked = cv2.dilate(occupied.astype(np.uint8), kernel).astype(bool)
+    else:
+        blocked = occupied.copy()
+    sr, sc = start_rc
+    if not (0 <= sr < h and 0 <= sc < w):
+        return None
+    # The robot often stands inside the inflated band (next to a wall, in a
+    # doorway); free its own neighbourhood so it can leave it.
+    r = inflate_cells + 1
+    y0, y1, x0, x1 = max(0, sr - r), min(h, sr + r + 1), max(0, sc - r), min(w, sc + r + 1)
+    blocked[y0:y1, x0:x1] &= occupied[y0:y1, x0:x1]
+    blocked[sr, sc] = False
+    cost = np.where(grid < 0, float(unknown_cost), 1.0)
+    ids = np.arange(h * w).reshape(h, w)
+    rows, cols, weights = [], [], []
+    for dy, dx, step in ((0, 1, 1.0), (1, 0, 1.0), (1, 1, math.sqrt(2.0)), (1, -1, math.sqrt(2.0))):
+        a = (slice(0, h - dy), slice(max(0, -dx), w - max(0, dx)))
+        b = (slice(dy, h), slice(max(0, dx), w - max(0, -dx)))
+        ok = ~blocked[a] & ~blocked[b]
+        rows.append(ids[a][ok])
+        cols.append(ids[b][ok])
+        weights.append(step * resolution * 0.5 * (cost[a][ok] + cost[b][ok]))
+    graph = _coo_matrix(
+        (np.concatenate(weights), (np.concatenate(rows), np.concatenate(cols))),
+        shape=(h * w, h * w)).tocsr()
+    dist = _dijkstra(graph, directed=False, indices=int(ids[sr, sc]))
+    return dist.reshape(h, w)
+
+
 def assign_frontiers(
     robots: Dict[str, RobotState],
     frontiers: List[Frontier],
@@ -336,6 +412,8 @@ def assign_frontiers(
     robot_ready_fn: Optional[Callable[[str], bool]] = None,
     goal_dist_fn: Optional[Callable[[str, Frontier], float]] = None,
     assignment_robot_order_fn: Optional[Callable[[List[str]], List[str]]] = None,
+    gain_cap_m: float = 0.0,
+    relaxed_min_goal_separation: float = 0.0,
 ) -> Tuple[Dict[str, int], bool]:
     """Assign one frontier to each idle robot.
 
@@ -343,7 +421,9 @@ def assign_frontiers(
 
     If every candidate is closer than ``min_goal_separation`` (e.g. robot
     just reached a goal on that frontier), the matrix would be empty. A
-    second pass uses separation 0 so exploration can continue; the node also
+    second pass uses ``relaxed_min_goal_separation`` so exploration can
+    continue (keep it above Nav2's goal tolerance, or the goal "succeeds"
+    without the robot moving); the node also
     blacklists a just-visited frontier on Nav2 success (and clears stale
     blacklists near the success pose) so the same point is not re-selected
     on the next map tick. Repeat-goal blacklisting is an additional backstop
@@ -355,8 +435,9 @@ def assign_frontiers(
     is idle but not actually exploring.
 
     Utility for (robot, frontier):
-        gain_scale * frontier.size_m  -  potential_scale * distance
+        gain_scale * min(frontier.size_m, gain_cap_m)  -  potential_scale * distance
         minus a penalty if another robot already targets a nearby frontier.
+    gain_cap_m <= 0 leaves the gain uncapped.
     """
     # robots that need a new goal
     idle_robots = {
@@ -378,7 +459,7 @@ def assign_frontiers(
     relaxed = False
     utilities = np.full((len(robot_list), len(frontiers)), -np.inf)
 
-    for min_sep in (min_goal_separation, 0.0):
+    for min_sep in (min_goal_separation, min(min_goal_separation, relaxed_min_goal_separation)):
         utilities.fill(-np.inf)
         for ri, rname in enumerate(robot_list):
             rpos = idle_robots[rname].position
@@ -400,7 +481,8 @@ def assign_frontiers(
                 # relaxed pass after a successful leg onto the frontier.
                 if dist < min_sep:
                     continue
-                gain = gain_scale * fr.size_m
+                size_m = min(fr.size_m, gain_cap_m) if gain_cap_m > 0.0 else fr.size_m
+                gain = gain_scale * size_m
                 cost = potential_scale * dist
                 penalty = 0.0
                 for ag in active_goals:
@@ -502,6 +584,30 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('min_frontier_cells_for_goal', 32)
         self.declare_parameter('potential_scale', 3.0)
         self.declare_parameter('gain_scale', 1.0)
+        # Frontier size counts towards utility only up to this (m; 0 = no cap).
+        # Uncapped, a long frontier along an unexplored corridor outweighed
+        # metres of travel, and the robot left the room it was in for it.
+        self.declare_parameter('frontier_gain_cap_m', 2.0)
+        # Distance in utilities is travel distance around obstacles
+        # (geodesic_distance_field), not straight line.
+        self.declare_parameter('use_geodesic_distance', True)
+        self.declare_parameter('geodesic_inflate_m', 0.15)
+        self.declare_parameter('geodesic_unknown_cost', 1.5)
+        # Straight-line distance x this for a goal with no travel route.
+        self.declare_parameter('geodesic_unreachable_factor', 3.0)
+        # Turning to face a goal behind the robot costs this many metres of
+        # travel (scaled by the angle / pi), so with similar frontiers the
+        # robot keeps going the way it faces instead of doubling back.
+        self.declare_parameter('heading_penalty_m', 0.5)
+        # Plans to this many different goals failing within boxed_in_window_sec
+        # with the robot in place means the robot is boxed in: stop
+        # blacklisting and wait boxed_in_wait_sec. 0 disables.
+        # Fallback minimum when no frontier is min_goal_separation away;
+        # above Nav2's xy_goal_tolerance (0.25 m) so a goal means a move.
+        self.declare_parameter('relaxed_min_goal_separation', 0.30)
+        self.declare_parameter('boxed_in_goal_count', 3)
+        self.declare_parameter('boxed_in_window_sec', 60.0)
+        self.declare_parameter('boxed_in_wait_sec', 10.0)
         # Progress timeout is interpreted as "no meaningful distance progress"
         # for this many seconds before a goal is considered stalled.
         self.declare_parameter('progress_timeout', 45.0)
@@ -758,6 +864,25 @@ class MultiRobotExplorer(Node):
         )
         self.potential_scale = self.get_parameter('potential_scale').value
         self.gain_scale = self.get_parameter('gain_scale').value
+        self.frontier_gain_cap_m = float(self.get_parameter('frontier_gain_cap_m').value)
+        self.use_geodesic_distance = bool(self.get_parameter('use_geodesic_distance').value)
+        self.geodesic_inflate_m = float(self.get_parameter('geodesic_inflate_m').value)
+        self.geodesic_unknown_cost = float(self.get_parameter('geodesic_unknown_cost').value)
+        self.geodesic_unreachable_factor = float(
+            self.get_parameter('geodesic_unreachable_factor').value)
+        self.heading_penalty_m = float(self.get_parameter('heading_penalty_m').value)
+        self.relaxed_min_goal_separation = float(
+            self.get_parameter('relaxed_min_goal_separation').value)
+        self.boxed_in_goal_count = int(self.get_parameter('boxed_in_goal_count').value)
+        self.boxed_in_window_sec = float(self.get_parameter('boxed_in_window_sec').value)
+        self.boxed_in_wait_sec = float(self.get_parameter('boxed_in_wait_sec').value)
+        # robot name -> (map message, robot cell, distance field)
+        self._geodesic_cache: Dict[str, tuple] = {}
+        # (robot, frontier centroid, size) -> (map message, robot position, goal xy)
+        self._goal_point_cache: Dict[tuple, tuple] = {}
+        if self.use_geodesic_distance and _dijkstra is None:
+            self.get_logger().warning(
+                'use_geodesic_distance: SciPy is missing; using straight-line distance')
         self.progress_timeout = self.get_parameter('progress_timeout').value
         self.progress_min_delta = (
             self.get_parameter('progress_min_delta').value)
@@ -2044,6 +2169,8 @@ class MultiRobotExplorer(Node):
             self.nearby_penalty_dist,
             self.min_goal_separation,
             self.blacklist_radius,
+            gain_cap_m=self.frontier_gain_cap_m,
+            relaxed_min_goal_separation=self.relaxed_min_goal_separation,
             utility_penalty_fn=lambda rname, fr: self._frontier_penalty(self.robots[rname], fr),
             skip_frontier_fn=lambda rname, fr: self._should_skip_frontier_for_assignment(
                 self.robots[rname], fr),
@@ -2126,6 +2253,8 @@ class MultiRobotExplorer(Node):
                 self.nearby_penalty_dist,
                 self.min_goal_separation,
                 self.blacklist_radius,
+                gain_cap_m=self.frontier_gain_cap_m,
+                relaxed_min_goal_separation=self.relaxed_min_goal_separation,
                 utility_penalty_fn=lambda _rname, fr: self._frontier_penalty(rs, fr),
                 skip_frontier_fn=lambda _rname, fr: self._should_skip_frontier_for_assignment(rs, fr),
                 robot_ready_fn=lambda _rname: self._robot_may_assign_now(rs, now),
@@ -2325,7 +2454,11 @@ class MultiRobotExplorer(Node):
         """Build a PoseStamped for Nav2 in the robot dispatch frame (Path 2)."""
         dst = self._nav_dispatch_frame_id(rs)
         ps = PoseStamped()
-        ps.header.stamp = self.get_clock().now().to_msg()
+        # Zero stamp = "latest transform". Nav2 transforms with the goal's
+        # stamp for as long as the leg lasts; once it was older than the
+        # robot's 10 s TF buffer, bt_navigator and the planner logged
+        # "extrapolation into the past" at 10 Hz for the rest of the leg.
+        ps.header.stamp = rclpy.time.Time().to_msg()
         ps.pose.position.x = float(x)
         ps.pose.position.y = float(y)
         ps.pose.position.z = 0.0
@@ -2553,9 +2686,13 @@ class MultiRobotExplorer(Node):
             return 0
         n_before = len(rs.blacklist)
         cx, cy = float(center[0]), float(center[1])
+        # Goals blacklisted for repeating stay: they are reached and yet stay
+        # frontiers (unknown space the robot cannot see into, e.g. under a
+        # desk). Clearing them on every nearby success had Inky select the
+        # same goal a dozen times in a minute.
         rs.blacklist = [
             bl for bl in rs.blacklist
-            if math.hypot(bl[0] - cx, bl[1] - cy) >= r
+            if math.hypot(bl[0] - cx, bl[1] - cy) >= r or bl in rs.repeat_blacklist
         ]
         return n_before - len(rs.blacklist)
 
@@ -2594,6 +2731,7 @@ class MultiRobotExplorer(Node):
             f'(reset {rs.blacklist_resets}/{self.blacklist_reset_max} since last success)'
         )
         rs.blacklist = []
+        rs.repeat_blacklist.clear()
         rs.unassignable_since = None
 
     def _apply_post_success_blacklist_policy(self, rs: RobotState) -> None:
@@ -2756,7 +2894,65 @@ class MultiRobotExplorer(Node):
 
     def _frontier_penalty(self, rs: RobotState, fr: Frontier) -> float:
         gx, gy = self._select_goal_point(rs, fr)
-        return self._clearance_penalty(self._current_goal_map, gx, gy)
+        return (
+            self._clearance_penalty(self._current_goal_map, gx, gy)
+            + self._heading_penalty(rs, gx, gy)
+        )
+
+    def _heading_penalty(self, rs: RobotState, gx: float, gy: float) -> float:
+        if self.heading_penalty_m <= 0.0 or rs.yaw is None or rs.position is None:
+            return 0.0
+        dx, dy = gx - rs.position[0], gy - rs.position[1]
+        if math.hypot(dx, dy) < 0.3:
+            return 0.0
+        diff = abs(math.atan2(math.sin(math.atan2(dy, dx) - rs.yaw),
+                              math.cos(math.atan2(dy, dx) - rs.yaw)))
+        return self.potential_scale * self.heading_penalty_m * diff / math.pi
+
+    def _geodesic_field(self, rs: RobotState) -> Optional[np.ndarray]:
+        """Travel-distance field from the robot on the current goal map, once per map and cell."""
+        m = self._current_goal_map
+        if not self.use_geodesic_distance or m is None or rs.position is None:
+            return None
+        cell = self._world_to_cell(m, rs.position[0], rs.position[1])
+        if cell is None:
+            return None
+        cached = self._geodesic_cache.get(rs.name)
+        if cached is not None and cached[0] is m and cached[1] == cell:
+            return cached[2]
+        grid, _clearance = self._map_arrays(m)
+        res = float(m.info.resolution)
+        field = geodesic_distance_field(
+            grid, (cell[1], cell[0]), res,
+            int(round(self.geodesic_inflate_m / res)), self.geodesic_unknown_cost)
+        self._geodesic_cache[rs.name] = (m, cell, field)
+        return field
+
+    def _travel_dist(self, rs: RobotState, gx: float, gy: float) -> float:
+        """Travel distance from the robot to (gx, gy); straight line without a field."""
+        if rs.position is None:
+            return float('inf')
+        straight = _dist(rs.position, (gx, gy))
+        field = self._geodesic_field(rs)
+        m = self._current_goal_map
+        if field is None or m is None:
+            return straight
+        cell = self._world_to_cell(m, gx, gy)
+        if cell is None:
+            return straight
+        cx, cy = cell
+        g = float(field[cy, cx])
+        if not math.isfinite(g):
+            # Frontier goals next to a wall sit inside the inflated band;
+            # take the nearest reachable cell around them.
+            res = float(m.info.resolution)
+            r = int(round(self.geodesic_inflate_m / res)) + 2
+            win = field[max(0, cy - r):cy + r + 1, max(0, cx - r):cx + r + 1]
+            if np.any(np.isfinite(win)):
+                g = float(np.min(win)) + r * res
+        if not math.isfinite(g):
+            return straight * self.geodesic_unreachable_factor
+        return max(straight, g)
 
     def _frontier_utility(self, rs: RobotState, fr: Frontier) -> float:
         if self._frontier_too_small_for_nav_goal(fr):
@@ -2769,7 +2965,7 @@ class MultiRobotExplorer(Node):
                 rs, gx, gy, context='frontier_utility'
             )
             return -1e9
-        d = _dist(rs.position, (gx, gy))
+        d = self._travel_dist(rs, gx, gy)
         # Degenerate only when essentially same cell; otherwise penalize
         # closeness so retargeting still works after the robot reaches a goal
         # on/near the frontier (same situation as assign_frontiers relaxed pass).
@@ -2779,9 +2975,13 @@ class MultiRobotExplorer(Node):
         close_penalty = 0.0
         if d < self.min_goal_separation:
             close_penalty = (self.min_goal_separation - d) * 3.0
-        gain = self.gain_scale * fr.size_m
+        size_m = min(fr.size_m, self.frontier_gain_cap_m) if self.frontier_gain_cap_m > 0.0 else fr.size_m
+        gain = self.gain_scale * size_m
         cost = self.potential_scale * d
-        penalty = self._clearance_penalty(self._current_goal_map, gx, gy)
+        penalty = (
+            self._clearance_penalty(self._current_goal_map, gx, gy)
+            + self._heading_penalty(rs, gx, gy)
+        )
         return gain - cost - penalty - close_penalty
 
     def _best_frontier_for_robot(self, rs: RobotState, frontiers: List[Frontier]) -> Tuple[Optional[Frontier], float]:
@@ -2978,7 +3178,7 @@ class MultiRobotExplorer(Node):
             return
 
         curr_u = -(
-            self.potential_scale * _dist(rs.position, current_goal)
+            self.potential_scale * self._travel_dist(rs, current_goal[0], current_goal[1])
             + self._clearance_penalty(self._current_goal_map, current_goal[0], current_goal[1])
         )
 
@@ -3128,7 +3328,21 @@ class MultiRobotExplorer(Node):
     def _select_goal_point(self, rs: RobotState, frontier: Frontier) -> Tuple[float, float]:
         """Choose a goal point within a frontier region according to the
         configured strategy. Falls back to the centroid when needed.
+
+        Memoised per map message and robot position: one assignment pass
+        asks for the same frontier's goal from four places.
         """
+        key = (rs.name, frontier.centroid_world, frontier.size)
+        hit = self._goal_point_cache.get(key)
+        if hit is not None and hit[0] is self._current_goal_map and hit[1] == rs.position:
+            return hit[2]
+        if len(self._goal_point_cache) > 2000:
+            self._goal_point_cache.clear()
+        goal = self._select_goal_point_uncached(rs, frontier)
+        self._goal_point_cache[key] = (self._current_goal_map, rs.position, goal)
+        return goal
+
+    def _select_goal_point_uncached(self, rs: RobotState, frontier: Frontier) -> Tuple[float, float]:
         gx, gy = frontier.centroid_world
 
         if self.goal_point_strategy == 'centroid':
@@ -3163,12 +3377,12 @@ class MultiRobotExplorer(Node):
         return gx, gy
 
     def _goal_dist_for_assignment(self, rname: str, fr: Frontier) -> float:
-        """Straight-line distance from robot to the goal pose for this frontier."""
+        """Travel distance from robot to the goal pose for this frontier."""
         rs = self.robots[rname]
         if rs.position is None:
             return float('inf')
         gx, gy = self._select_goal_point(rs, fr)
-        return _dist(rs.position, (gx, gy))
+        return self._travel_dist(rs, gx, gy)
 
     def _assignment_robot_order(self, idle_names: List[str]) -> List[str]:
         """Idle robots in ``robot_names`` order, rotated so the last robot
@@ -3335,8 +3549,9 @@ class MultiRobotExplorer(Node):
             f'[{rs.name}] Repeatedly selecting nearly-identical goal '
             f'({goal_x:.2f}, {goal_y:.2f}); blacklisting and searching elsewhere'
         )
-        rs.blacklist.append((goal_x, goal_y))
-        rs.blacklist.append(frontier.centroid_world)
+        for point in ((goal_x, goal_y), frontier.centroid_world):
+            rs.blacklist.append(point)
+            rs.repeat_blacklist.add(point)
         rs.repeat_goal_count = 0
         return True
 
@@ -3576,6 +3791,39 @@ class MultiRobotExplorer(Node):
         result_future.add_done_callback(
             lambda f, r=rs, e=epoch: self._path_precheck_result_callback(f, r, e))
 
+    def _precheck_boxed_in(
+        self, rs: RobotState, goal_xy: Optional[Tuple[float, float]], now: float
+    ) -> bool:
+        """True when plans to several different goals failed with the robot in place.
+
+        Then the robot's own spot is the problem (remembered low obstacles or
+        stale marks closing it in among chair legs), not the frontiers: on
+        Inky every frontier in the map was blacklisted one after another while
+        the robot stood boxed in. Goals blacklisted during the streak are
+        released and new ones are not added; the robot's stuck_detector
+        clears its costmap and narrows its radius after repeated failed plans,
+        and the explorer retries after boxed_in_wait_sec.
+        """
+        if self.boxed_in_goal_count <= 0 or goal_xy is None or rs.position is None:
+            return False
+        streak = [
+            s for s in rs.precheck_fail_streak
+            if now - s[0] <= self.boxed_in_window_sec and _dist(s[2], rs.position) <= 0.25
+        ]
+        if not any(_dist(s[1], goal_xy) < 0.5 for s in streak):
+            streak.append((now, goal_xy, rs.position))
+        rs.precheck_fail_streak = streak
+        if len(streak) < self.boxed_in_goal_count:
+            return False
+        for _t, g, _p in streak:
+            rs.blacklist = [b for b in rs.blacklist if _dist(b, g) >= 0.05]
+        self.get_logger().warn(
+            f'[{rs.name}] No path to {len(streak)} different goals with the robot in place: '
+            f'the robot is boxed in, not the frontiers. Not blacklisting; retrying in '
+            f'{self.boxed_in_wait_sec:.0f} s while the robot recovers.'
+        )
+        return True
+
     def _path_precheck_result_callback(self, future, rs: RobotState, epoch: int):
         if epoch != rs.path_precheck_epoch:
             return
@@ -3688,6 +3936,12 @@ class MultiRobotExplorer(Node):
                         rs, goal_xy, reason
                     )
                 )
+            if hard_unreachable and self._precheck_boxed_in(rs, bl_xy, now_ts):
+                rs.precheck_transient_goal_xy = None
+                rs.precheck_transient_repeat_count = 0
+                rs.next_assign_allowed_time = max(
+                    rs.next_assign_allowed_time, now_ts + self.boxed_in_wait_sec)
+                return
             if hard_unreachable:
                 self.get_logger().warn(
                     f'[{rs.name}] Path precheck hard failure -> blacklist ({reason})'
@@ -3726,6 +3980,7 @@ class MultiRobotExplorer(Node):
         gwx, gwy = world_goal_xy
         rs.precheck_transient_goal_xy = None
         rs.precheck_transient_repeat_count = 0
+        rs.precheck_fail_streak = []
         self._dispatch_navigate_to_pose(
             rs, frontier, gwx, gwy, from_retarget)
 

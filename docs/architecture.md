@@ -66,8 +66,8 @@ The bridge injects topics through Cyclone's built-in localhost profile (`ROS_LOC
 ## Exploration loop
 
 1. Frontiers: free cells next to unknown cells on the merged `/map` (or a robot's own map early on; `mode: auto` switches when `map_merge/merge_state` reports `MERGED` stably).
-2. Assignment: each idle robot gets the unclaimed frontier with the best size-versus-distance score; robots are kept apart.
-3. Precheck: `compute_path_to_pose` on the robot. Goals with no plan are blacklisted and the next frontier is tried.
+2. Assignment: each idle robot gets the unclaimed frontier with the best size-versus-distance score; robots are kept apart. Distance is travel distance around walls (Dijkstra on the map, `use_geodesic_distance`), size counts only up to `frontier_gain_cap_m`, and turning back costs a little (`heading_penalty_m`), so a robot finishes the room it is in instead of crossing the map for a large frontier behind a wall.
+3. Precheck: `compute_path_to_pose` on the robot. Goals with no plan are blacklisted and the next frontier is tried, unless plans to several different goals fail with the robot in place (`boxed_in_*`): then the robot is boxed in, not the frontiers, so nothing is blacklisted and the explorer waits while the robot's stuck_detector clears its costmap and narrows its radius.
 4. Dispatch: the goal is transformed into `<robot>/map` and sent as `NavigateToPose`. Nav2 on the robot plans and drives.
 5. Watchdogs: stalls, aborts and repeated near-identical goals are cancelled and blacklisted. When no frontiers remain, robots return to their start pose.
 
