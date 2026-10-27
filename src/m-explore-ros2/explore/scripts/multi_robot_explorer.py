@@ -190,6 +190,9 @@ class RobotState:
     return_home_done: bool = False
     # Count of failed homing attempts (precheck abort, Nav2 failure, stall cancel).
     return_home_failures: int = 0
+    # When return home was last given up (0 = not given up); retried after
+    # return_to_start_retry_sec, since what blocked it may have moved.
+    return_home_abandoned_at: float = 0.0
     # Degraded-data hold mode: true when explorer should pause new assignments
     # and avoid treating recent failures as map/frontier issues.
     degraded_active: bool = False
@@ -209,6 +212,9 @@ class RobotState:
     # (time, goal xy, robot xy) for hard precheck failures since the last good
     # plan; see MultiRobotExplorer._precheck_boxed_in.
     precheck_fail_streak: list = field(default_factory=list)
+    # Boxed-in waits in a row at boxed_in_pose without a good plan.
+    boxed_in_waits: int = 0
+    boxed_in_pose: Optional[Tuple[float, float]] = None
     # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
     arrival_probe_in_progress: bool = False
     arrival_probe_goal_handle: Optional[object] = None
@@ -611,6 +617,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('boxed_in_goal_count', 3)
         self.declare_parameter('boxed_in_window_sec', 60.0)
         self.declare_parameter('boxed_in_wait_sec', 10.0)
+        self.declare_parameter('boxed_in_max_waits', 3)
         # Progress timeout is interpreted as "no meaningful distance progress"
         # for this many seconds before a goal is considered stalled.
         self.declare_parameter('progress_timeout', 45.0)
@@ -687,6 +694,11 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('return_to_start_enable', True)
         self.declare_parameter('return_to_start_skip_if_within_m', 0.25)
         self.declare_parameter('return_to_start_max_attempts', 5)
+        self.declare_parameter('return_to_start_use_slam_origin', True)
+        self.declare_parameter('return_to_start_retry_sec', 60.0)
+        self.declare_parameter('map_opening_min_cells', 14)
+        self.declare_parameter('map_opening_ref_sec', 15.0)
+        self.declare_parameter('map_opening_min_interval_sec', 60.0)
         # Goal selection strategy within each frontier region.
         # - 'centroid': centroid of the frontier; if the robot is already very
         #   close to that centroid, pick a cell farther out but within
@@ -879,6 +891,7 @@ class MultiRobotExplorer(Node):
         self.boxed_in_goal_count = int(self.get_parameter('boxed_in_goal_count').value)
         self.boxed_in_window_sec = float(self.get_parameter('boxed_in_window_sec').value)
         self.boxed_in_wait_sec = float(self.get_parameter('boxed_in_wait_sec').value)
+        self.boxed_in_max_waits = int(self.get_parameter('boxed_in_max_waits').value)
         # robot name -> (map message, robot cell, distance field)
         self._geodesic_cache: Dict[str, tuple] = {}
         # (robot, frontier centroid, size) -> (map message, robot position, goal xy)
@@ -949,6 +962,20 @@ class MultiRobotExplorer(Node):
         self.return_to_start_skip_if_within_m = float(
             self.get_parameter('return_to_start_skip_if_within_m').value
         )
+        self.return_to_start_use_slam_origin = bool(
+            self.get_parameter('return_to_start_use_slam_origin').value
+        )
+        self.return_to_start_retry_sec = float(
+            self.get_parameter('return_to_start_retry_sec').value
+        )
+        self.map_opening_min_cells = int(self.get_parameter('map_opening_min_cells').value)
+        self.map_opening_ref_sec = float(self.get_parameter('map_opening_ref_sec').value)
+        self.map_opening_min_interval_sec = float(
+            self.get_parameter('map_opening_min_interval_sec').value)
+        # map key ('global' or robot name) -> (time, OccupancyGrid) the next
+        # map is compared with; see _note_map_openings.
+        self._opening_ref: Dict[str, Tuple[float, OccupancyGrid]] = {}
+        self._last_opening_revival = -1e9
         self.return_to_start_max_attempts = max(
             1, int(self.get_parameter('return_to_start_max_attempts').value)
         )
@@ -1398,6 +1425,7 @@ class MultiRobotExplorer(Node):
 
     def _global_map_callback(self, msg: OccupancyGrid):
         self.latest_global_map = msg
+        self._note_map_openings('global', msg)
         # Track current map physical size in metres for heuristics that behave
         # differently on tiny initial maps vs. larger, more mature maps.
         res = msg.info.resolution
@@ -1408,6 +1436,97 @@ class MultiRobotExplorer(Node):
         # Store the most recent local map per robot. These are only used in
         # local-per-robot mode.
         self.latest_local_maps[robot] = msg
+        self._note_map_openings(robot, msg)
+
+    def _note_map_openings(self, key: str, msg: OccupancyGrid) -> None:
+        """Clear blacklists when an obstacle disappears from the map.
+
+        A frontier behind a closed door fails its path precheck, is
+        blacklisted, and after blacklist_reset_max resets counts as
+        unreachable for good; once every robot is there exploration completes.
+        When the door opens, the robot's live map (live_map_filter on the
+        robot) drops the door cells. Here that shows as occupied cells turned
+        free with no occupied cell within two cells (a wall nudged a cell by
+        SLAM does not count), compared with a reference map up to
+        map_opening_ref_sec old. map_opening_min_cells of them in one patch
+        clear every robot's blacklist and unreachable state so the frontiers
+        are tried again, and exploration resumes if it had completed.
+        """
+        if self.map_opening_min_cells <= 0:
+            return
+        now = self.get_clock().now().nanoseconds / 1e9
+        ref = self._opening_ref.get(key)
+        if ref is None or now - ref[0] >= self.map_opening_ref_sec:
+            self._opening_ref[key] = (now, msg)
+        if ref is None:
+            return
+        if now - self._last_opening_revival < self.map_opening_min_interval_sec:
+            return
+        if not (
+            self.exploration_complete
+            or any(rs.blacklist or rs.frontiers_exhausted for rs in self.robots.values())
+        ):
+            return
+        old = ref[1]
+        res = msg.info.resolution
+        if abs(old.info.resolution - res) > 1e-6 or old.info.width == 0 or msg.info.width == 0:
+            return
+        og = np.asarray(old.data, dtype=np.int8).reshape(old.info.height, old.info.width)
+        ng = np.asarray(msg.data, dtype=np.int8).reshape(msg.info.height, msg.info.width)
+        # Old cell (0, 0) sits at (di, dj) in the new grid.
+        dj = int(round((old.info.origin.position.x - msg.info.origin.position.x) / res))
+        di = int(round((old.info.origin.position.y - msg.info.origin.position.y) / res))
+        oi0, oj0 = max(0, -di), max(0, -dj)
+        ni0, nj0 = max(0, di), max(0, dj)
+        rows = min(og.shape[0] - oi0, ng.shape[0] - ni0)
+        cols = min(og.shape[1] - oj0, ng.shape[1] - nj0)
+        if rows <= 4 or cols <= 4:
+            return
+        o = og[oi0:oi0 + rows, oj0:oj0 + cols]
+        n = ng[ni0:ni0 + rows, nj0:nj0 + cols]
+        n_occ = n >= OCCUPIED_THRESH
+        near_occ = np.zeros_like(n_occ)
+        for a in range(-2, 3):
+            for b in range(-2, 3):
+                near_occ[max(0, a):rows + min(0, a), max(0, b):cols + min(0, b)] |= \
+                    n_occ[max(0, -a):rows + min(0, -a), max(0, -b):cols + min(0, -b)]
+        o_occ = o >= OCCUPIED_THRESH
+        opened = o_occ & (n == FREE) & ~near_occ
+        if int(np.count_nonzero(opened)) < self.map_opening_min_cells:
+            return
+        # Only one patch counts: the robot's live map also drops stray SLAM
+        # specks all over the map, and their total set this off in a room
+        # where nothing had moved. A door goes as one strip.
+        n_lab, lab, stats, _c = cv2.connectedComponentsWithStats(
+            cv2.dilate(opened.astype(np.uint8), np.ones((3, 3), np.uint8)), connectivity=8)
+        if n_lab <= 1:
+            return
+        best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        opened &= lab == best
+        count = int(np.count_nonzero(opened))
+        if count < self.map_opening_min_cells:
+            return
+        # A large share of the map changing at once is map_merge or SLAM
+        # re-aligning the grid, not the world changing.
+        if count > 0.1 * max(1, int(np.count_nonzero(o_occ))):
+            self._opening_ref[key] = (now, msg)
+            return
+        self._opening_ref[key] = (now, msg)
+        self._last_opening_revival = now
+        ii, jj = np.nonzero(opened)
+        cx = msg.info.origin.position.x + (float(jj.mean()) + nj0 + 0.5) * res
+        cy = msg.info.origin.position.y + (float(ii.mean()) + ni0 + 0.5) * res
+        cleared = 0
+        for rs in self.robots.values():
+            cleared += len(rs.blacklist)
+            rs.blacklist = []
+            rs.repeat_blacklist.clear()
+            rs.blacklist_resets = 0
+            rs.frontiers_exhausted = False
+            rs.unassignable_since = None
+        self.get_logger().warning(
+            f'Map opened up near ({cx:.2f}, {cy:.2f}) on {key} map ({count} cells, e.g. '
+            f'a door opened); cleared {cleared} blacklist point(s) so frontiers are retried')
 
     def _rosout_callback(self, msg: Log):
         try:
@@ -1894,6 +2013,10 @@ class MultiRobotExplorer(Node):
                 if rs.held_goal_position is None:
                     continue
                 if rs.goal_active or rs.goal_pending:
+                    # Nav2 kept the goal through the hold: nothing to resend.
+                    # Left set, it was resent after the goal later succeeded
+                    # or was aborted and blacklisted.
+                    rs.held_goal_position = None
                     continue
                 if not self._robot_may_assign_now(rs, now):
                     continue
@@ -2017,15 +2140,28 @@ class MultiRobotExplorer(Node):
             rs.return_home_done = False
             rs.homing_active = False
             rs.return_home_failures = 0
+            rs.return_home_abandoned_at = 0.0
 
     def _return_home_tick(self, use_global: bool, now: float):
         if not self.return_to_start_enable or not self.exploration_complete:
             return
 
         for rs in self.robots.values():
+            if (
+                rs.return_home_done
+                and rs.return_home_abandoned_at > 0.0
+                and self.return_to_start_retry_sec > 0.0
+                and now - rs.return_home_abandoned_at >= self.return_to_start_retry_sec
+            ):
+                self.get_logger().info(f'[{rs.name}] Retrying return home')
+                rs.return_home_done = False
+                rs.return_home_failures = 0
+                rs.return_home_abandoned_at = 0.0
+                self._return_home_status_published = ''
             if rs.return_home_done:
                 continue
-            if rs.start_pose_xy is None:
+            home = self._home_xy(rs)
+            if home is None:
                 if rs.name not in self._return_home_no_pose_logged:
                     self._return_home_no_pose_logged.add(rs.name)
                     self.get_logger().warn(
@@ -2046,12 +2182,15 @@ class MultiRobotExplorer(Node):
                 self.get_logger().warn(
                     f'[{rs.name}] Return home abandoned after '
                     f'{self.return_to_start_max_attempts} failed attempt(s)'
+                    + (f'; retrying in {self.return_to_start_retry_sec:.0f}s'
+                       if self.return_to_start_retry_sec > 0.0 else '')
                 )
                 rs.return_home_done = True
+                rs.return_home_abandoned_at = now
                 continue
-            sx, sy = rs.start_pose_xy
+            sx, sy = home
             if rs.position is not None:
-                if _dist(rs.position, rs.start_pose_xy) <= self.return_to_start_skip_if_within_m:
+                if _dist(rs.position, home) <= self.return_to_start_skip_if_within_m:
                     self.get_logger().info(
                         f'[{rs.name}] Within {self.return_to_start_skip_if_within_m:.2f}m of '
                         'start — skipping NavigateToPose for return home'
@@ -2087,6 +2226,27 @@ class MultiRobotExplorer(Node):
                 and not rs.arrival_probe_in_progress
             ):
                 rs.homing_active = False
+
+    def _home_xy(self, rs: RobotState) -> Optional[Tuple[float, float]]:
+        """Where the robot started, in the world frame.
+
+        SLAM puts the origin of <robot>/map where the robot stood when it
+        started, before the startup seeding move. The world pose of that
+        origin moves whenever map_merge re-estimates the merge, so it is
+        looked up again on every use; the first world pose seen by the
+        explorer is only the fallback.
+        """
+        if self.return_to_start_use_slam_origin:
+            frame = self.nav_goal_frame_pattern.format(robot=rs.name)
+            try:
+                t = self.tf_buffer.lookup_transform(
+                    self.world_frame, frame, rclpy.time.Time())
+                return (t.transform.translation.x, t.transform.translation.y)
+            except (tf2_ros.LookupException,
+                    tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException):
+                pass
+        return rs.start_pose_xy
 
     def _maybe_publish_return_home_status(self):
         if not self.return_to_start_enable or not self.exploration_complete:
@@ -2735,11 +2895,14 @@ class MultiRobotExplorer(Node):
         if rs.unassignable_since is None:
             rs.unassignable_since = now
             return
-        if self.blacklist_reset_idle_sec <= 0.0 or not rs.blacklist:
+        if self.blacklist_reset_idle_sec <= 0.0:
             return
         if now - rs.unassignable_since < self.blacklist_reset_idle_sec:
             return
-        if rs.blacklist_resets >= self.blacklist_reset_max:
+        # With an empty blacklist there is nothing to reset: the frontiers
+        # left fail the goal safety gate or are too small (Inky idled for good
+        # beside one 0.10 m from a wall, and never went home).
+        if not rs.blacklist or rs.blacklist_resets >= self.blacklist_reset_max:
             # The same frontiers failed again after every reset. On Inky the
             # last two lay behind a wall, seen through glass, and the robot
             # stood idle for good; they count as unreachable, and once every
@@ -2748,7 +2911,10 @@ class MultiRobotExplorer(Node):
                 rs.frontiers_exhausted = True
                 self.get_logger().warning(
                     f'[{rs.name}] Frontiers left are still unreachable after '
-                    f'{rs.blacklist_resets} blacklist reset(s); treating them as unreachable')
+                    f'{rs.blacklist_resets} blacklist reset(s); treating them as unreachable'
+                    if rs.blacklist else
+                    f'[{rs.name}] Idle {now - rs.unassignable_since:.0f}s with no usable '
+                    'frontier; treating them as unreachable')
             return
         rs.blacklist_resets += 1
         self.get_logger().warning(
@@ -2769,10 +2935,13 @@ class MultiRobotExplorer(Node):
         success pose, then (optionally) blacklist the visited frontier so the
         same assignment is not re-emitted on the next tick.
         """
-        rs.blacklist_resets = 0
-        rs.frontiers_exhausted = False
+        # Reaching home says nothing about the frontiers left: resetting
+        # here sent a robot that had just got home straight back out to the
+        # same unreachable frontiers.
         if rs.homing_active:
             return
+        rs.blacklist_resets = 0
+        rs.frontiers_exhausted = False
         if rs.goal_position is None:
             return
         gpx, gpy = rs.goal_position
@@ -2815,6 +2984,12 @@ class MultiRobotExplorer(Node):
         if goal is None:
             return
         gx, gy = goal
+        # After exploration completes, _return_home_tick owns the robot. A
+        # held home goal resent from here went out as an exploration goal, and
+        # when it aborted the explorer blacklisted the robot's home.
+        if self._goal_point_blacklisted(rs, gx, gy) or self.exploration_complete:
+            rs.held_goal_position = None
+            return
         self.get_logger().info(
             f'[{rs.name}] Nav2 lethal cleared; resending held goal ({gx:.2f}, {gy:.2f})'
         )
@@ -3846,6 +4021,21 @@ class MultiRobotExplorer(Node):
         rs.precheck_fail_streak = streak
         if len(streak) < self.boxed_in_goal_count:
             return False
+        if rs.boxed_in_pose is None or _dist(rs.boxed_in_pose, rs.position) > 0.25:
+            rs.boxed_in_pose = rs.position
+            rs.boxed_in_waits = 0
+        if self.boxed_in_max_waits > 0 and rs.boxed_in_waits >= self.boxed_in_max_waits:
+            # The robot's recoveries have had their chance and it still plans
+            # nowhere it is sent. Inky stood in an open room for minutes, every
+            # frontier left being behind a closed door; with no blacklisting
+            # exploration never completed and it never went home.
+            if rs.boxed_in_waits == self.boxed_in_max_waits:
+                rs.boxed_in_waits += 1
+                self.get_logger().warn(
+                    f'[{rs.name}] Still no path after {self.boxed_in_max_waits} boxed-in waits; '
+                    'treating the goals as unreachable')
+            return False
+        rs.boxed_in_waits += 1
         for _t, g, _p in streak:
             rs.blacklist = [b for b in rs.blacklist if _dist(b, g) >= 0.05]
         self.get_logger().warn(
@@ -4012,6 +4202,7 @@ class MultiRobotExplorer(Node):
         rs.precheck_transient_goal_xy = None
         rs.precheck_transient_repeat_count = 0
         rs.precheck_fail_streak = []
+        rs.boxed_in_waits = 0
         self._dispatch_navigate_to_pose(
             rs, frontier, gwx, gwy, from_retarget)
 

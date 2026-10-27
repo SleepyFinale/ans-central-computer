@@ -32,7 +32,7 @@ cd ~/central-computer
 
 It stays in the foreground; Ctrl+C stops every process it started, here and on the robots. The terminal shows stage progress plus warnings and errors (`--verbose` prints everything). Full per-process logs go to `$XDG_RUNTIME_DIR/fleet-bringup/<timestamp>/` (override with `FLEET_LOG_DIR`). Robots log in with `ROBOT_SSH_PASSWORD` (default `ubuntu`); robots dial this PC by its short hostname (`--central-host <name>` to override).
 
-Each robot does a short forward move when its Nav2 comes up (map seeding), then waits for goals. Exploration ends when no reachable frontiers remain; robots then return to their start poses.
+Each robot does a short forward move when its Nav2 comes up (map seeding), then waits for goals. Exploration ends when no reachable frontiers remain; robots then drive back to where they started (their SLAM map origin). If an obstacle later disappears (a door opens), exploration resumes. See [Changing surroundings](docs/architecture.md#changing-surroundings).
 
 ### Running the pieces by hand
 

@@ -100,6 +100,11 @@ multi_robot_explorer:
     boxed_in_goal_count: 3
     boxed_in_window_sec: 60.0
     boxed_in_wait_sec: 10.0
+    # After this many waits in a row at one spot with no good plan, failures
+    # blacklist again: the frontiers left really are unreachable (Inky stood
+    # in an open room for minutes with every frontier behind a closed door,
+    # and exploration never completed). 0 = wait forever.
+    boxed_in_max_waits: 3
 
     # Near-goal arrival probe: after the robot is close to the goal (or stuck
     # short of it with low distance_remaining), call compute_path_to_pose with
@@ -278,8 +283,10 @@ multi_robot_explorer:
     blacklist_reset_idle_sec: 60.0
     # After this many resets with the same frontiers still failing, the ones
     # left count as unreachable (e.g. behind glass): once every robot is in
-    # that state, exploration completes and robots return to start.
-    blacklist_reset_max: 2
+    # that state, exploration completes and robots return to start. One reset
+    # is enough now that a door opening revives them (map_opening_*); at 2 a
+    # finished robot stood still for ~4 minutes before heading home.
+    blacklist_reset_max: 1
 
     # When a robot successfully reaches a goal, blacklist points within this
     # distance (m) of the success pose are removed. Revives spurious
@@ -412,6 +419,29 @@ multi_robot_explorer:
     return_to_start_enable: true
     return_to_start_skip_if_within_m: 0.25
     return_to_start_max_attempts: 5
+    # Home is the origin of the robot's own SLAM map (<robot>/map), where it
+    # stood when SLAM started, looked up in the world frame each time: the
+    # world pose of a robot's map moves whenever map_merge re-estimates the
+    # merge, and the explorer's first TF comes after the startup seeding
+    # move. false = the first world pose the explorer saw.
+    return_to_start_use_slam_origin: true
+    # After max_attempts failures (a person or chair in the way), try again
+    # this many seconds later. 0 = give up for good.
+    return_to_start_retry_sec: 60.0
+
+    # Dynamic environments: a frontier behind a closed door is blacklisted and,
+    # after blacklist_reset_max resets, counted unreachable. When an obstacle
+    # disappears from a map (the robot's live_map_filter drops SLAM cells the
+    # LiDAR now sees through, e.g. the door opened), every robot's blacklist
+    # and unreachable state are cleared and exploration resumes, even from
+    # home. Counted against a reference map up to map_opening_ref_sec old:
+    # at least map_opening_min_cells occupied cells turned free with nothing
+    # occupied within two cells (so SLAM nudging a wall does not count).
+    # 14 cells is about 0.7 m of door; at 8, a person walking past a robot
+    # on its way home counted, and it went back to exploring. 0 disables.
+    map_opening_min_cells: 14
+    map_opening_ref_sec: 15.0
+    map_opening_min_interval_sec: 60.0
 
     # Multi-robot status publishing and pause/resume control, analogous to
     # explore/status and explore/resume in m-explore-ros2.
