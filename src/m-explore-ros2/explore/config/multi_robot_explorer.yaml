@@ -276,7 +276,10 @@ multi_robot_explorer:
     # blacklists everything beyond it, then otherwise idles for good.
     # At most blacklist_reset_max resets between successful goals. 0 disables.
     blacklist_reset_idle_sec: 60.0
-    blacklist_reset_max: 3
+    # After this many resets with the same frontiers still failing, the ones
+    # left count as unreachable (e.g. behind glass): once every robot is in
+    # that state, exploration completes and robots return to start.
+    blacklist_reset_max: 2
 
     # When a robot successfully reaches a goal, blacklist points within this
     # distance (m) of the success pose are removed. Revives spurious

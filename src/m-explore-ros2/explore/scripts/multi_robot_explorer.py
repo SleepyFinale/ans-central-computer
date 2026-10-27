@@ -96,6 +96,9 @@ class RobotState:
     # Idle with frontiers left but none assignable, since this time (None
     # while assigning normally); blacklist resets since the last success.
     unassignable_since: Optional[float] = None
+    # Blacklist resets used up and still nothing assignable: the frontiers
+    # left are out of reach for this robot (see _note_assignable).
+    frontiers_exhausted: bool = False
     blacklist_resets: int = 0
     server_unavailable_logged: bool = False
     last_distance_remaining: Optional[float] = None
@@ -2125,13 +2128,15 @@ class MultiRobotExplorer(Node):
             pose_frame_id=gframe,
         )
 
-        if not frontiers:
+        exhausted = bool(frontiers) and self._all_frontiers_exhausted()
+        if not frontiers or exhausted:
             if not self.exploration_complete:
                 self.get_logger().info(
-                    'No frontiers remaining — exploration complete!')
+                    f'Only unreachable frontiers left ({len(frontiers)}) — exploration complete!'
+                    if exhausted else 'No frontiers remaining — exploration complete!')
                 self.exploration_complete = True
                 self._publish_status('COMPLETE')
-            elif n_idle > 0:
+            elif n_idle > 0 and not exhausted:
                 if now - self._last_no_frontier_idle_log_time >= 15.0:
                     self._last_no_frontier_idle_log_time = now
                     self.get_logger().warning(
@@ -2266,13 +2271,24 @@ class MultiRobotExplorer(Node):
                     'on/near frontier after a goal); repeat-goal blacklist still applies'
                 )
             self._note_assignable(rs, bool(frontiers) and name not in sub_assignments, now)
-            if name not in sub_assignments and frontiers:
+            if name not in sub_assignments and frontiers and not rs.frontiers_exhausted \
+                    and now - self._last_no_assignment_log_time >= 15.0:
                 # Mirror global-mode diagnostics so local mode does not appear
-                # "stuck" when frontiers exist but all candidates are gated.
+                # "stuck" when frontiers exist but all candidates are gated
+                # (throttled like global mode; it repeated every tick).
+                self._last_no_assignment_log_time = now
                 self._log_why_no_assignment(frontiers, 1, now)
             if name in sub_assignments:
                 fr = frontiers[sub_assignments[name]]
                 self._send_goal(rs, fr)
+
+        if any_frontiers and self._all_frontiers_exhausted():
+            if not self.exploration_complete:
+                self.get_logger().info(
+                    'Only unreachable frontiers left on the local maps — exploration complete!')
+                self.exploration_complete = True
+                self._publish_status('COMPLETE')
+            return
 
         if any_frontiers:
             if self.exploration_complete:
@@ -2714,6 +2730,7 @@ class MultiRobotExplorer(Node):
         clear its blacklist once that has lasted blacklist_reset_idle_sec."""
         if not stuck:
             rs.unassignable_since = None
+            rs.frontiers_exhausted = False
             return
         if rs.unassignable_since is None:
             rs.unassignable_since = now
@@ -2723,6 +2740,15 @@ class MultiRobotExplorer(Node):
         if now - rs.unassignable_since < self.blacklist_reset_idle_sec:
             return
         if rs.blacklist_resets >= self.blacklist_reset_max:
+            # The same frontiers failed again after every reset. On Inky the
+            # last two lay behind a wall, seen through glass, and the robot
+            # stood idle for good; they count as unreachable, and once every
+            # robot is here exploration completes and the robots go home.
+            if not rs.frontiers_exhausted:
+                rs.frontiers_exhausted = True
+                self.get_logger().warning(
+                    f'[{rs.name}] Frontiers left are still unreachable after '
+                    f'{rs.blacklist_resets} blacklist reset(s); treating them as unreachable')
             return
         rs.blacklist_resets += 1
         self.get_logger().warning(
@@ -2734,12 +2760,17 @@ class MultiRobotExplorer(Node):
         rs.repeat_blacklist.clear()
         rs.unassignable_since = None
 
+    def _all_frontiers_exhausted(self) -> bool:
+        located = [rs for rs in self.robots.values() if rs.position is not None]
+        return bool(located) and all(rs.frontiers_exhausted for rs in located)
+
     def _apply_post_success_blacklist_policy(self, rs: RobotState) -> None:
         """After a successful exploration leg, relax stale blacklists near the
         success pose, then (optionally) blacklist the visited frontier so the
         same assignment is not re-emitted on the next tick.
         """
         rs.blacklist_resets = 0
+        rs.frontiers_exhausted = False
         if rs.homing_active:
             return
         if rs.goal_position is None:
