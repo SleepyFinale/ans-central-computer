@@ -12,7 +12,7 @@ flowchart LR
     slam["slam_toolbox<br/>/<robot>/map, map->odom"]
     nav2["Nav2<br/>plans in <robot>/map"]
     wire["map_wire_compressed_republisher"]
-    tfz["tf_zenoh_publish.py"]
+    tfz["tf_zenoh_relay"]
     zr["zenoh-bridge-ros2dds (client)"]
     bring --> norm --> slam --> nav2
     slam --> wire --> zr
@@ -55,9 +55,9 @@ Nav2 actions `/<robot>/navigate_to_pose` and `/<robot>/compute_path_to_pose` are
 
 Robot frames already carry the robot prefix (`inky/odom`, `inky/base_footprint`, `inky/map`), so every robot's TF lands in one `/tf` tree without renaming. The world frame `map` belongs to the central PC: `map_merge` publishes `map -> <robot>/map`, or with one robot `single_robot_world_tf_bridge.py` publishes it as identity.
 
-### Why TF goes through `tf_zenoh_publish.py`
+### Why TF goes through `tf_zenoh_relay`
 
-The Zenoh bridge subscribes with the publisher's QoS. A reliable reader on `/<robot>/tf` back-pressures slam_toolbox, `map -> odom` goes stale, and Nav2 reports false goal success. The helper reads best-effort and republishes on `*_zenoh` topics instead.
+The Zenoh bridge subscribes with the publisher's QoS. A reliable reader on `/<robot>/tf` back-pressures slam_toolbox, `map -> odom` goes stale, and Nav2 reports false goal success. The helper (C++ `tf_zenoh_relay` in the robot's `turtlebot3_navigation2`; `scripts/comms/tf_zenoh_publish.py` is the fallback) reads best-effort and republishes on `*_zenoh` topics instead.
 
 ### DDS settings on the central PC
 
