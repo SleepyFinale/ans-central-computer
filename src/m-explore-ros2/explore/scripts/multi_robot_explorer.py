@@ -214,6 +214,9 @@ class RobotState:
     precheck_fail_streak: list = field(default_factory=list)
     # Boxed-in waits in a row at boxed_in_pose without a good plan.
     boxed_in_waits: int = 0
+    # Exploration goals reached since the last map opening; see
+    # MultiRobotExplorer._apply_post_success_blacklist_policy.
+    visited_goals: list = field(default_factory=list)
     boxed_in_pose: Optional[Tuple[float, float]] = None
     # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
     arrival_probe_in_progress: bool = False
@@ -635,7 +638,7 @@ class MultiRobotExplorer(Node):
         # blacklist is cleared and they are tried again; at most
         # blacklist_reset_max times between successes, so a map that is
         # really finished still ends. 0 disables.
-        self.declare_parameter('blacklist_reset_idle_sec', 60.0)
+        self.declare_parameter('blacklist_reset_idle_sec', 10.0)
         self.declare_parameter('blacklist_reset_max', 3)
         # On exploration success, drop blacklist points near the goal (revives
         # stale failure flags), then (if true) add the just-visited frontier
@@ -1524,6 +1527,7 @@ class MultiRobotExplorer(Node):
             rs.blacklist_resets = 0
             rs.frontiers_exhausted = False
             rs.unassignable_since = None
+            rs.visited_goals.clear()
         self.get_logger().warning(
             f'Map opened up near ({cx:.2f}, {cy:.2f}) on {key} map ({count} cells, e.g. '
             f'a door opened); cleared {cleared} blacklist point(s) so frontiers are retried')
@@ -2376,6 +2380,14 @@ class MultiRobotExplorer(Node):
             lm = self.latest_local_maps.get(name)
             if lm is None:
                 continue
+            # Counted before frontier detection: with it set only once a
+            # robot had frontiers, a map with none left never completed and
+            # the robot stood idle instead of going home.
+            if (
+                not rs.goal_active and not rs.goal_pending
+                and self._robot_may_assign_now(rs, self.get_clock().now().nanoseconds / 1e9)
+            ):
+                any_idle = True
             # Use this robot's local map for goal selection while we process
             # its frontiers in this tick.
             self._current_goal_map = lm
@@ -2398,6 +2410,13 @@ class MultiRobotExplorer(Node):
 
             if self.visualize:
                 self._publish_frontier_markers(frontiers)
+
+            # Frontiers this robot has given up on stay given up on until a
+            # map opening revives them (_note_map_openings), as in global
+            # mode. Assigning them once it was home and idle cleared the state
+            # and sent the robot straight back out.
+            if rs.frontiers_exhausted:
+                continue
 
             now = self.get_clock().now().nanoseconds / 1e9
             self._maybe_retarget_active_robot(rs, frontiers, now)
@@ -2938,13 +2957,23 @@ class MultiRobotExplorer(Node):
         # Reaching home says nothing about the frontiers left: resetting
         # here sent a robot that had just got home straight back out to the
         # same unreachable frontiers.
-        if rs.homing_active:
-            return
-        rs.blacklist_resets = 0
-        rs.frontiers_exhausted = False
-        if rs.goal_position is None:
+        if rs.homing_active or rs.goal_position is None:
             return
         gpx, gpy = rs.goal_position
+        # Reaching a goal reached before is no progress: the frontier there
+        # is one the robot cannot see into (under furniture). Counted as
+        # progress it reset blacklist_resets every time, and Inky shuttled
+        # between two such frontiers for good instead of going home.
+        revisit = any(
+            _dist((gpx, gpy), v) < self.repeat_goal_dist_threshold for v in rs.visited_goals)
+        if revisit:
+            if self.post_success_frontier_avoidance:
+                self._append_blacklist_if_distant(rs, (gpx, gpy))
+            rs.last_target_frontier_centroid = None
+            return
+        rs.visited_goals.append((gpx, gpy))
+        rs.blacklist_resets = 0
+        rs.frontiers_exhausted = False
         if self.blacklist_clear_radius > 0.0:
             removed = self._clear_blacklist_points_within_radius(
                 rs, (gpx, gpy), self.blacklist_clear_radius

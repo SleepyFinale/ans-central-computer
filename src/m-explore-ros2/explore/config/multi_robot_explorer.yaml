@@ -280,7 +280,10 @@ multi_robot_explorer:
     # boxed in by a bump or a low-obstacle mark (kept 2-3 min on the robot)
     # blacklists everything beyond it, then otherwise idles for good.
     # At most blacklist_reset_max resets between successful goals. 0 disables.
-    blacklist_reset_idle_sec: 60.0
+    # 10 s, not 60: a door opening revives frontiers by itself
+    # (map_opening_*), and at 60 a finished robot stood still a minute at a
+    # time before giving up and going home.
+    blacklist_reset_idle_sec: 10.0
     # After this many resets with the same frontiers still failing, the ones
     # left count as unreachable (e.g. behind glass): once every robot is in
     # that state, exploration completes and robots return to start. One reset
@@ -296,7 +299,12 @@ multi_robot_explorer:
     # If true, after a successful *exploration* (non-return-home) leg, the
     # just-assigned frontier centroid is blacklisted so a new map tick does
     # not immediately re-send the same target while the grid is unchanged.
-    post_success_frontier_avoidance: false
+    # On: a frontier still there after the robot reached it is one it cannot
+    # see into (under furniture the LiDAR sees beneath), and Inky shuttled
+    # between two such frontiers by a box, "reaching" each ten times in two
+    # minutes. Blacklisted, they go through the normal reset, then count as
+    # unreachable.
+    post_success_frontier_avoidance: true
 
     # Safety net: if the planner selects a goal within this many metres of the
     # previous one this many times in a row, blacklist and pick elsewhere.
