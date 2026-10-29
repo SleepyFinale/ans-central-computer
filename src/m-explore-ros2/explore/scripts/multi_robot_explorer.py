@@ -21,6 +21,7 @@ until map overlap is detected.
 """
 
 import math
+import time
 import re
 import traceback
 from collections import deque
@@ -1403,8 +1404,14 @@ class MultiRobotExplorer(Node):
         self._logged_waiting_for_map = False
 
         # -- planning timer --
-        period = 1.0 / freq if freq > 0 else 3.0
-        self.plan_timer = self.create_timer(period, self._plan_tick)
+        # A full planning pass runs every 1/explore_frequency, or on the next
+        # 0.25 s tick after a goal ends (_kick_plan): at 0.7 Hz alone a robot
+        # that had just reached its goal stood up to 1.4 s before the next
+        # one was even chosen, once per goal.
+        self._plan_period = 1.0 / freq if freq > 0 else 3.0
+        self._plan_kicked = False
+        self._last_plan_pass = 0.0
+        self.plan_timer = self.create_timer(min(self._plan_period, 0.25), self._plan_timer_tick)
         if self.terminal_summary_enable:
             self.summary_timer = self.create_timer(
                 self.terminal_summary_period_sec, self._emit_terminal_summary
@@ -1769,6 +1776,18 @@ class MultiRobotExplorer(Node):
     # -----------------------------------------------------------------------
     # Main planning loop
     # -----------------------------------------------------------------------
+
+    def _kick_plan(self) -> None:
+        """Run a planning pass on the next timer tick instead of waiting a full period."""
+        self._plan_kicked = True
+
+    def _plan_timer_tick(self) -> None:
+        now = time.monotonic()
+        if not self._plan_kicked and now - self._last_plan_pass < self._plan_period:
+            return
+        self._plan_kicked = False
+        self._last_plan_pass = now
+        self._plan_tick()
 
     def _plan_tick(self):
         # Decide whether we should operate in global or local mode on this tick.
@@ -3756,6 +3775,12 @@ class MultiRobotExplorer(Node):
         """If True, skip sending: blacklist exhausted goal and try elsewhere."""
         if self.repeat_goal_count_limit <= 0:
             return False
+        if rs.homing_active:
+            # Going home resends the same point by design; its failures are
+            # counted from Nav2's results. Counted here, the home goals of one
+            # round filled recent_goals, and every retry 60 s later "failed"
+            # five times in 6 s without moving, then waited another minute.
+            return False
         dthresh = self.repeat_goal_dist_threshold
         if dthresh <= 0.0:
             return False
@@ -3779,14 +3804,6 @@ class MultiRobotExplorer(Node):
 
         if rs.repeat_goal_count < self.repeat_goal_count_limit:
             return False
-
-        if rs.homing_active:
-            self.get_logger().warn(
-                f'[{rs.name}] Return-home goal repeated too often; counting failure'
-            )
-            self._return_home_note_failure(rs)
-            rs.repeat_goal_count = 0
-            return True
 
         self.get_logger().warn(
             f'[{rs.name}] Repeatedly selecting nearly-identical goal '
@@ -5021,6 +5038,7 @@ class MultiRobotExplorer(Node):
             return
         # Fresh pose for tacit near-goal checks on ABORTED/CANCELED.
         self._update_robot_positions()
+        self._kick_plan()
         was_homing = rs.homing_active
         now = self.get_clock().now().nanoseconds / 1e9
         status_text_map = {
