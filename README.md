@@ -165,7 +165,7 @@ Summary: inky[goal_active] reached=4(+1) failed=0(+0) status=executing cancel=- 
 
 **RViz shows no map or TF.** Use `start_rviz_central.sh`, not plain `rviz2`: it selects Cyclone and the participant-cap profile. A FastDDS RViz is on a different graph.
 
-**Robot stops making progress / goals fail repeatedly.** Some failures are normal: frontiers behind obstacles fail the path precheck and get blacklisted. Look at the robot's SLAM log (`<logs>/<robot>-slam.log`) for `Control loop missed its desired rate` (Pi out of CPU; check `top` on the robot) or `Starting point in lethal space` (robot too close to a wall; recoveries usually free it).
+**Robot stops making progress / goals fail repeatedly.** Some failures are normal: frontiers behind obstacles fail the path precheck and get blacklisted. Look at the robot's SLAM log (`<logs>/<robot>-slam.log`) for `Control loop missed its desired rate` (Pi out of CPU; check `top` on the robot), `Starting point in lethal space` (robot too close to a wall; its stuck detector moves it clear), `collision ahead` verdicts from `collision_resolver`, or `Stereo cameras are out of alignment`. The robot README's troubleshooting covers each, and its `scripts/diagnostics/analyze_motion_bag.py` scores a run (jitter, time standing still with a goal, recovery events).
 
 `map_merge` **logs "Grid pose estimation disabled permanently"** after an OpenCV/FLANN exception: restart `start_central.sh`.
 

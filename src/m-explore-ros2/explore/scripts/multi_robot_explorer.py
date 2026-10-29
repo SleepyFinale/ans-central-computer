@@ -827,6 +827,11 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('goal_arrival_max_cell_cost', 80)
         self.declare_parameter('goal_arrival_max_bad_fraction', 0.35)
         self.declare_parameter('goal_arrival_sample_step_scale', 0.5)
+        # A probe that fails while the robot stands this close to an occupied
+        # map cell (or reports nav2_lethal_inflation) is inconclusive: Humble's
+        # planner aborts with "Starting point in lethal space" whatever the
+        # goal, and its result carries no reason. 0 disables.
+        self.declare_parameter('goal_arrival_probe_start_clearance_m', 0.26)
         # Degraded-data hold: suppress blacklist / stall cancel when data quality
         # is clearly bad (stale TF or repeated precheck issues) rather than true
         # map/frontier failure.
@@ -1211,6 +1216,9 @@ class MultiRobotExplorer(Node):
         )
         self.goal_arrival_sample_step_scale: float = float(
             self.get_parameter('goal_arrival_sample_step_scale').value
+        )
+        self.goal_arrival_probe_start_clearance_m: float = float(
+            self.get_parameter('goal_arrival_probe_start_clearance_m').value
         )
         self.merge_stable_hold_sec: float = max(
             0.0, float(self.get_parameter('merge_stable_hold_sec').value)
@@ -4487,6 +4495,14 @@ class MultiRobotExplorer(Node):
                 GoalStatus.STATUS_UNKNOWN: 'UNKNOWN',
             }
             st = labels.get(int(status), f'status_{int(status)}')
+            if self._arrival_probe_start_blocked(rs, map_snapshot):
+                # The robot's stuck_detector moves it clear; probe again later.
+                self.get_logger().info(
+                    f'[{rs.name}] Arrival probe planner failed ({st}) with the robot '
+                    'too close to an obstacle to plan from; inconclusive, goal kept'
+                )
+                rs.last_progress_time = now
+                return
             self.get_logger().info(
                 f'[{rs.name}] Arrival probe planner failed ({st})'
             )
@@ -4522,6 +4538,21 @@ class MultiRobotExplorer(Node):
                 f'[{rs.name}] Arrival probe failed map check: {why}'
             )
             self._arrival_probe_fail(rs, tacit_follow)
+
+    def _arrival_probe_start_blocked(
+        self, rs: RobotState, m: Optional[OccupancyGrid]
+    ) -> bool:
+        """True when the planner probably refused the robot's own pose."""
+        if self.goal_arrival_probe_start_clearance_m <= 0.0:
+            return False
+        if rs.nav2_lethal_active:
+            return True
+        if m is None or rs.position is None:
+            return False
+        return (
+            self._goal_clearance_m(m, float(rs.position[0]), float(rs.position[1]))
+            < self.goal_arrival_probe_start_clearance_m
+        )
 
     def _arrival_probe_fail(
         self,

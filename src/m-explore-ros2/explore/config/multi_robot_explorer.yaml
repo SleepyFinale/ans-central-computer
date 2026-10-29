@@ -78,10 +78,15 @@ multi_robot_explorer:
     nav2_path_precheck_timeout_sec: 30.0
     nav2_path_min_poses: 2
     # If ABORTED precheck returns no explicit error detail, escalate to
-    # blacklist after this many repeats for the same goal.
-    nav2_path_precheck_transient_abort_repeat_limit: 5
+    # blacklist after this many repeats for the same goal. Humble's planner
+    # never returns error codes, so every "no path" is "transient": at 5 an
+    # unreachable last frontier took ~40 s (two rounds) to be given up.
+    nav2_path_precheck_transient_abort_repeat_limit: 3
     # Parse planner-server rosout "failed to generate a valid path to (x, y)"
     # and treat matching precheck ABORTED goals as hard failures.
+    # The robots' /rosout is not in the Zenoh allowlists (it would carry
+    # every robot log over Wi-Fi), so in the fleet setup these hints never
+    # fire; repeated aborts are counted instead (transient_abort_repeat_limit).
     nav2_path_precheck_use_rosout_no_path_hint: true
     nav2_path_precheck_rosout_no_path_window_sec: 6.0
     nav2_path_precheck_rosout_goal_match_tol_m: 0.30
@@ -131,6 +136,14 @@ multi_robot_explorer:
     goal_arrival_max_bad_fraction: 0.35
     # Sample step = map_resolution * this (metres), with a small floor.
     goal_arrival_sample_step_scale: 0.5
+    # A probe that fails with the robot this close to an occupied cell (or
+    # while it reports nav2_lethal_inflation) is inconclusive: Nav2 refuses
+    # to plan from inside its robot_radius ("Starting point in lethal space")
+    # whatever the goal, and Humble's result says nothing about why. Without
+    # this, a robot that stopped near a chair 0.8 m from its goal had that
+    # goal cancelled and blacklisted. 0.26 m is stuck_detector's
+    # clearance_radius_m: closer than that, the robot moves itself clear.
+    goal_arrival_probe_start_clearance_m: 0.26
     # Debounced Bool from robot nav2_controller_collision_watch (controller_server
     # "collision ahead" via /rosout). When true, arrival probe runs sooner.
     nav2_collision_ahead_topic_pattern: "/{robot}/nav2_collision_ahead"
@@ -141,8 +154,10 @@ multi_robot_explorer:
     goal_arrival_probe_stagnation_sec_collision: 0.5
 
     # After abort, reject, watchdog cancel, or other failure paths, wait this
-    # many seconds before assigning a new frontier (per robot).
-    post_failure_cooldown_sec: 5.0
+    # many seconds before assigning a new frontier (per robot). The robot's
+    # own recoveries (stuck_detector, collision_resolver) run within a second
+    # or two of a failure; longer only left it standing.
+    post_failure_cooldown_sec: 2.0
     # Ignore initial action-goal rejects during Nav2 warm-up for this long
     # after NavigateToPose action server first appears.
     goal_reject_warmup_sec: 30.0
@@ -277,13 +292,14 @@ multi_robot_explorer:
     # Blacklist points never expire on their own. When a robot has sat idle
     # this long (s) with frontiers left but every one blacklisted or gated,
     # its blacklist is cleared and they are tried again: a robot briefly
-    # boxed in by a bump or a low-obstacle mark (kept 2-3 min on the robot)
+    # boxed in by a bump or a low-obstacle mark (kept up to 20 min on the robot)
     # blacklists everything beyond it, then otherwise idles for good.
     # At most blacklist_reset_max resets between successful goals. 0 disables.
-    # 10 s, not 60: a door opening revives frontiers by itself
+    # 5 s, not 60: a door opening revives frontiers by itself
     # (map_opening_*), and at 60 a finished robot stood still a minute at a
-    # time before giving up and going home.
-    blacklist_reset_idle_sec: 10.0
+    # time before giving up and going home. At 10 s the end of every run
+    # still had two 10 s waits with the robot standing still.
+    blacklist_reset_idle_sec: 5.0
     # After this many resets with the same frontiers still failing, the ones
     # left count as unreachable (e.g. behind glass): once every robot is in
     # that state, exploration completes and robots return to start. One reset

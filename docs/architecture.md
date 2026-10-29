@@ -12,10 +12,11 @@ flowchart LR
     slam["slam_toolbox<br/>/<robot>/map, map->odom"]
     live["live_map_filter<br/>/<robot>/map_live"]
     nav2["Nav2<br/>plans in <robot>/map"]
+    mux["cmd_vel_mux<br/>only cmd_vel publisher"]
     wire["map_wire_compressed_republisher"]
     tfz["tf_zenoh_relay"]
     zr["zenoh-bridge-ros2dds (client)"]
-    bring --> norm --> slam --> live --> nav2
+    bring --> norm --> slam --> live --> nav2 --> mux --> bring
     norm --> live
     live --> wire --> zr
     bring --> tfz --> zr
@@ -38,6 +39,8 @@ flowchart LR
   end
   zr <-->|"Tailscale TCP"| zc
 ```
+
+On the robot, `cmd_vel_mux` is the only node that drives the base: Nav2's controller and behaviors, the stuck detector's reflexes and the stereo stop gate all go through it (turtlebot3 `docs/navigation.md`, "Motion commands").
 
 A robot never receives TF or maps from the central PC. It only receives action goals, so it keeps its own consistent view and a dropped link stops new goals without confusing Nav2.
 
