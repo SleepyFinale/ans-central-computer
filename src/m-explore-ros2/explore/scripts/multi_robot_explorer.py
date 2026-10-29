@@ -833,6 +833,13 @@ class MultiRobotExplorer(Node):
         # planner aborts with "Starting point in lethal space" whatever the
         # goal, and its result carries no reason. 0 disables.
         self.declare_parameter('goal_arrival_probe_start_clearance_m', 0.26)
+        # A precheck that aborts with no reason while the robot stands clear
+        # of obstacles (farther than goal_arrival_probe_start_clearance_m) is
+        # "no path to that goal": Nav2 Humble gives no error code, and the
+        # other causes (start in lethal space, stale TF) are excluded or held
+        # elsewhere. Blacklist at once instead of after
+        # nav2_path_precheck_transient_abort_repeat_limit tries.
+        self.declare_parameter('nav2_path_precheck_hard_fail_when_robot_clear', True)
         # Degraded-data hold: suppress blacklist / stall cancel when data quality
         # is clearly bad (stale TF or repeated precheck issues) rather than true
         # map/frontier failure.
@@ -1220,6 +1227,9 @@ class MultiRobotExplorer(Node):
         )
         self.goal_arrival_probe_start_clearance_m: float = float(
             self.get_parameter('goal_arrival_probe_start_clearance_m').value
+        )
+        self.nav2_path_precheck_hard_fail_when_robot_clear: bool = bool(
+            self.get_parameter('nav2_path_precheck_hard_fail_when_robot_clear').value
         )
         self.merge_stable_hold_sec: float = max(
             0.0, float(self.get_parameter('merge_stable_hold_sec').value)
@@ -4206,11 +4216,20 @@ class MultiRobotExplorer(Node):
                 and int(status) == GoalStatus.STATUS_ABORTED
                 and 'precheck_transient_non_explicit' in reason
             ):
-                hard_unreachable, reason = (
-                    self._note_transient_precheck_abort_and_maybe_escalate(
-                        rs, goal_xy, reason
+                if (
+                    self.nav2_path_precheck_hard_fail_when_robot_clear
+                    and self._current_goal_map is not None
+                    and rs.position is not None
+                    and not self._arrival_probe_start_blocked(rs, self._current_goal_map)
+                ):
+                    hard_unreachable = True
+                    reason = f'precheck_hard_abort_robot_clear ({reason})'
+                else:
+                    hard_unreachable, reason = (
+                        self._note_transient_precheck_abort_and_maybe_escalate(
+                            rs, goal_xy, reason
+                        )
                     )
-                )
             if hard_unreachable and self._precheck_boxed_in(rs, bl_xy, now_ts):
                 rs.precheck_transient_goal_xy = None
                 rs.precheck_transient_repeat_count = 0

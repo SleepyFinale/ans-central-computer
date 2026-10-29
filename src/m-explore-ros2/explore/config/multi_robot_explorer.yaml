@@ -82,6 +82,11 @@ multi_robot_explorer:
     # never returns error codes, so every "no path" is "transient": at 5 an
     # unreachable last frontier took ~40 s (two rounds) to be given up.
     nav2_path_precheck_transient_abort_repeat_limit: 3
+    # ...unless the robot stands clear of obstacles (farther than
+    # goal_arrival_probe_start_clearance_m): then an abort can only mean no
+    # path, and the goal is blacklisted at the first one. Each unreachable
+    # frontier at the end of a run cost three prechecks plus a reset round.
+    nav2_path_precheck_hard_fail_when_robot_clear: true
     # Parse planner-server rosout "failed to generate a valid path to (x, y)"
     # and treat matching precheck ABORTED goals as hard failures.
     # The robots' /rosout is not in the Zenoh allowlists (it would carry
