@@ -94,9 +94,10 @@ class RobotState:
     # Blacklist points from repeated-goal detection; a nearby success does
     # not release them (only an idle blacklist reset does).
     repeat_blacklist: set = field(default_factory=set)
-    # Blacklist points at goals the robot reached (post-success avoidance):
-    # frontiers it stood at and still could not see into.
-    reached_blacklist: set = field(default_factory=set)
+    # Blacklist points a reset would not revive: goals the robot reached and
+    # still could not see into (post-success avoidance), and goals with no
+    # path while it stood clear of obstacles (so not boxed in).
+    settled_blacklist: set = field(default_factory=set)
     # Idle with frontiers left but none assignable, since this time (None
     # while assigning normally); blacklist resets since the last success.
     unassignable_since: Optional[float] = None
@@ -1552,7 +1553,7 @@ class MultiRobotExplorer(Node):
             cleared += len(rs.blacklist)
             rs.blacklist = []
             rs.repeat_blacklist.clear()
-            rs.reached_blacklist.clear()
+            rs.settled_blacklist.clear()
             rs.blacklist_resets = 0
             rs.frontiers_exhausted = False
             rs.unassignable_since = None
@@ -2959,15 +2960,23 @@ class MultiRobotExplorer(Node):
             return
         if now - rs.unassignable_since < self.blacklist_reset_idle_sec:
             return
+        # Only settled frontiers are left (reached and still unseen, or no
+        # path while the robot stood clear): a reset would retry what is
+        # already known. The retry round cost the end of every run 15-25 s of
+        # prechecks that failed again and a second idle wait; the one wait
+        # above still lets a person step out of a doorway.
+        only_settled = bool(rs.blacklist) and all(p in rs.settled_blacklist for p in rs.blacklist)
+        if only_settled:
+            if not rs.frontiers_exhausted:
+                rs.frontiers_exhausted = True
+                self.get_logger().warning(
+                    f'[{rs.name}] Frontiers left are ones already reached or with no path; '
+                    'treating them as unreachable')
+            return
         # With an empty blacklist there is nothing to reset: the frontiers
         # left fail the goal safety gate or are too small (Inky idled for good
         # beside one 0.10 m from a wall, and never went home).
-        # Only frontiers the robot has already reached are left: it stood
-        # there and could not see into them (under a desk, behind a chair
-        # base). Retrying them cost the end of every run ~25 s: a reset,
-        # prechecks that fail next to the furniture, another idle wait.
-        only_reached = bool(rs.blacklist) and all(p in rs.reached_blacklist for p in rs.blacklist)
-        if not rs.blacklist or only_reached or rs.blacklist_resets >= self.blacklist_reset_max:
+        if not rs.blacklist or rs.blacklist_resets >= self.blacklist_reset_max:
             # The same frontiers failed again after every reset. On Inky the
             # last two lay behind a wall, seen through glass, and the robot
             # stood idle for good; they count as unreachable, and once every
@@ -2975,9 +2984,6 @@ class MultiRobotExplorer(Node):
             if not rs.frontiers_exhausted:
                 rs.frontiers_exhausted = True
                 self.get_logger().warning(
-                    f'[{rs.name}] Frontiers left are only ones already reached; '
-                    'treating them as unreachable'
-                    if only_reached else
                     f'[{rs.name}] Frontiers left are still unreachable after '
                     f'{rs.blacklist_resets} blacklist reset(s); treating them as unreachable'
                     if rs.blacklist else
@@ -2992,7 +2998,7 @@ class MultiRobotExplorer(Node):
         )
         rs.blacklist = []
         rs.repeat_blacklist.clear()
-        rs.reached_blacklist.clear()
+        rs.settled_blacklist.clear()
         rs.unassignable_since = None
 
     def _all_frontiers_exhausted(self) -> bool:
@@ -3019,7 +3025,7 @@ class MultiRobotExplorer(Node):
         if revisit:
             if self.post_success_frontier_avoidance:
                 self._append_blacklist_if_distant(rs, (gpx, gpy))
-                self._mark_reached(rs, (gpx, gpy))
+                self._mark_settled(rs, (gpx, gpy))
             rs.last_target_frontier_centroid = None
             return
         rs.visited_goals.append((gpx, gpy))
@@ -3038,18 +3044,18 @@ class MultiRobotExplorer(Node):
             c = rs.last_target_frontier_centroid
             if c is not None:
                 self._append_blacklist_if_distant(rs, c)
-                self._mark_reached(rs, c)
+                self._mark_settled(rs, c)
             # Also avoid immediately re-selecting the exact goal pose, which can
             # differ from centroid due to fallback goal-point strategies.
             self._append_blacklist_if_distant(rs, (gpx, gpy))
-            self._mark_reached(rs, (gpx, gpy))
+            self._mark_settled(rs, (gpx, gpy))
         rs.last_target_frontier_centroid = None
 
-    def _mark_reached(self, rs: RobotState, xy: Tuple[float, float]) -> None:
-        """Remember the blacklist points blocking xy as reached ones."""
+    def _mark_settled(self, rs: RobotState, xy: Tuple[float, float]) -> None:
+        """Remember the blacklist points blocking xy as settled (see settled_blacklist)."""
         for bl in rs.blacklist:
             if _dist((xy[0], xy[1]), bl) < self.blacklist_radius:
-                rs.reached_blacklist.add(bl)
+                rs.settled_blacklist.add(bl)
 
     def _arm_post_failure_cooldown(self, rs: RobotState) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
@@ -4264,6 +4270,8 @@ class MultiRobotExplorer(Node):
                 )
                 if not rs.degraded_active:
                     self._blacklist_or_home_fail(rs, bl_xy)
+                    if bl_xy is not None and 'precheck_hard_abort_robot_clear' in reason:
+                        self._mark_settled(rs, bl_xy)
                     self._arm_post_failure_cooldown(rs)
                     rs.precheck_transient_goal_xy = None
                     rs.precheck_transient_repeat_count = 0
