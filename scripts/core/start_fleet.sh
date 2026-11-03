@@ -327,13 +327,15 @@ prefix_follow() {
   local tag="$1"
   local file="$2"
   # ROS uses [ERROR]/[WARN]. Zenoh tracing uses a space-padded ERROR/WARN level.
-  local alert_re='\[(ERROR|WARN|WARNING|FATAL)\]|(^|[[:space:]])(ERROR|WARN|WARNING|FATAL)([[:space:]]|:)'
+  # A Python node that crashes prints neither; its traceback header and the
+  # final "SomethingError: ..." line are matched too.
+  local alert_re='\[(ERROR|WARN|WARNING|FATAL)\]|(^|[[:space:]])(ERROR|WARN|WARNING|FATAL)([[:space:]]|:)|Traceback \(most recent call last\)|(^|[[:space:]])[A-Za-z_][A-Za-z0-9_.]*(Error|Exception): '
   # Known-harmless startup lines, hidden from the terminal (the log keeps
   # them): v4l2_camera looks for a per-camera calibration file and probes
   # controls the Arducams refuse (stereo uses config/stereo/<robot>.yaml)
-  # and notes its YUYV -> mono8 conversion, and RViz's software GL prints an
-  # empty GLSL link log.
-  local noise_re='camera_calibration_parsers|[Cc]amera calibration file|Failed getting value for control|Control type not currently supported|possibly slow conversion|GLSL link result'
+  # and notes its YUYV -> mono8 conversion; Nav2 notes once that it uses its
+  # only goal checker; RViz prints an empty GLSL link log and ignores Wayland.
+  local noise_re='camera_calibration_parsers|[Cc]amera calibration file|Failed getting value for control|Control type not currently supported|possibly slow conversion|No goal checker was specified|GLSL link result|Ignoring XDG_SESSION_TYPE=wayland'
   if (( VERBOSE )); then
     setsid bash -c '
       file=$1

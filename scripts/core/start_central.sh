@@ -143,13 +143,16 @@ cleanup() {
     trap - SIGHUP SIGINT SIGTERM EXIT
     echo ""
     echo "Shutting down..."
+    # || true: under set -e a kill of an already-dead process (the one that
+    # crashed) would end the trap before the rest were stopped.
     for pid in "${PIDS[@]}"; do
-        kill "$pid" 2>/dev/null
+        kill "$pid" 2>/dev/null || true
     done
-    wait 2>/dev/null
+    wait 2>/dev/null || true
     echo "Done."
 }
-trap cleanup SIGHUP SIGINT SIGTERM EXIT
+trap 'cleanup; exit 0' SIGHUP SIGINT SIGTERM
+trap cleanup EXIT
 
 EXPLORER_ARGS=(
     "$EXPLORER_SCRIPT" --ros-args
@@ -212,4 +215,9 @@ echo "=========================================="
 echo "  All services running.  Press Ctrl+C to stop."
 echo "=========================================="
 echo ""
-wait
+# Stop as soon as any of them exits: with a plain wait a crashed explorer
+# left the relays running, the robots idle, and start_fleet.sh none the wiser.
+status=0
+wait -n || status=$?
+echo "ERROR: a central process exited (status ${status}); stopping the others." >&2
+exit 1
