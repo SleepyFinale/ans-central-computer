@@ -51,6 +51,7 @@ from rcl_interfaces.msg import Log
 from lifecycle_msgs.msg import TransitionEvent
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid, Path
+from sensor_msgs.msg import BatteryState
 from std_msgs.msg import String as StringMsg
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
 from visualization_msgs.msg import Marker, MarkerArray
@@ -98,6 +99,10 @@ class RobotState:
     # still could not see into (post-success avoidance), and goals with no
     # path while it stood clear of obstacles (so not boxed in).
     settled_blacklist: set = field(default_factory=set)
+    # (time, voltage) from /<robot>/battery_state; battery_low latches once
+    # the median drops below battery_return_home_voltage.
+    battery_samples: deque = field(default_factory=lambda: deque(maxlen=60))
+    battery_low: bool = False
     # Idle with frontiers left but none assignable, since this time (None
     # while assigning normally); blacklist resets since the last success.
     unassignable_since: Optional[float] = None
@@ -208,6 +213,10 @@ class RobotState:
     precheck_fail_events: int = 0
     precheck_timeout_events: int = 0
     precheck_server_unavailable_events: int = 0
+    # First time compute_path_to_pose was found unavailable in the current
+    # episode (0 while it is available); see
+    # nav2_path_precheck_unavailable_fallback_sec.
+    precheck_unavailable_since: float = 0.0
     # Last known planner lifecycle state label ("active", "inactive", ...).
     planner_state_label: str = ''
     planner_state_update_time: float = 0.0
@@ -702,6 +711,10 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('return_to_start_enable', True)
         self.declare_parameter('return_to_start_skip_if_within_m', 0.25)
         self.declare_parameter('return_to_start_max_attempts', 5)
+        # Seconds between return-home attempts. At ~1.5 s Inky used all of
+        # them in 44 s from a cluttered corner, while stuck_detector was still
+        # backing it off and clearing its costmap; then it waited a minute.
+        self.declare_parameter('return_to_start_attempt_interval_sec', 8.0)
         self.declare_parameter('return_to_start_use_slam_origin', True)
         self.declare_parameter('return_to_start_retry_sec', 60.0)
         self.declare_parameter('map_opening_min_cells', 14)
@@ -837,6 +850,13 @@ class MultiRobotExplorer(Node):
         # planner aborts with "Starting point in lethal space" whatever the
         # goal, and its result carries no reason. 0 disables.
         self.declare_parameter('goal_arrival_probe_start_clearance_m', 0.26)
+        # A robot whose battery voltage (median of the last
+        # battery_window_sec) falls below this gets no more frontiers and
+        # goes home, while the others keep exploring. Inky simply slowed and
+        # then stood still mid-run on a flat pack. 0 disables.
+        self.declare_parameter('battery_topic_pattern', '/{robot}/battery_state')
+        self.declare_parameter('battery_return_home_voltage', 11.0)
+        self.declare_parameter('battery_window_sec', 30.0)
         # A precheck that aborts with no reason while the robot stands clear
         # of obstacles (farther than goal_arrival_probe_start_clearance_m) is
         # "no path to that goal": Nav2 Humble gives no error code, and the
@@ -844,6 +864,12 @@ class MultiRobotExplorer(Node):
         # elsewhere. Blacklist at once instead of after
         # nav2_path_precheck_transient_abort_repeat_limit tries.
         self.declare_parameter('nav2_path_precheck_hard_fail_when_robot_clear', True)
+        # With nav2_path_precheck_required, a planner that stays unreachable
+        # this long (s) no longer blocks goals: NavigateToPose is sent without
+        # the precheck (Nav2 plans anyway). On Inky the robot's Zenoh bridge
+        # once missed the planner's action server at start, and the robot
+        # never moved. 0 = wait forever.
+        self.declare_parameter('nav2_path_precheck_unavailable_fallback_sec', 30.0)
         # Degraded-data hold: suppress blacklist / stall cancel when data quality
         # is clearly bad (stale TF or repeated precheck issues) rather than true
         # map/frontier failure.
@@ -1232,8 +1258,15 @@ class MultiRobotExplorer(Node):
         self.goal_arrival_probe_start_clearance_m: float = float(
             self.get_parameter('goal_arrival_probe_start_clearance_m').value
         )
+        self.battery_return_home_voltage: float = float(
+            self.get_parameter('battery_return_home_voltage').value)
+        self.battery_window_sec: float = float(self.get_parameter('battery_window_sec').value)
+        self.battery_subs = {}
         self.nav2_path_precheck_hard_fail_when_robot_clear: bool = bool(
             self.get_parameter('nav2_path_precheck_hard_fail_when_robot_clear').value
+        )
+        self.nav2_path_precheck_unavailable_fallback_sec: float = float(
+            self.get_parameter('nav2_path_precheck_unavailable_fallback_sec').value
         )
         self.merge_stable_hold_sec: float = max(
             0.0, float(self.get_parameter('merge_stable_hold_sec').value)
@@ -1376,6 +1409,13 @@ class MultiRobotExplorer(Node):
             rs.path_precheck_client = ActionClient(
                 self, ComputePathToPose, f'/{name}/compute_path_to_pose')
             self.robots[name] = rs
+            if self.battery_return_home_voltage > 0.0:
+                self.battery_subs[name] = self.create_subscription(
+                    BatteryState,
+                    str(self.get_parameter('battery_topic_pattern').value).format(robot=name),
+                    lambda msg, rname=name: self._battery_callback(msg, rname),
+                    5,
+                )
             if self.lethal_hold_enabled:
                 topic = self.nav2_lethal_topic_pattern.format(robot=name)
                 self.lethal_subs[name] = self.create_subscription(
@@ -2181,6 +2221,8 @@ class MultiRobotExplorer(Node):
         self._return_home_status_published = ''
         self._return_home_no_pose_logged.clear()
         for rs in self.robots.values():
+            if rs.battery_low:
+                continue  # still going home
             if rs.homing_active and (rs.goal_active or rs.goal_pending):
                 self._cancel_goal(rs, reason='return_home_reset')
             rs.return_home_done = False
@@ -2189,10 +2231,15 @@ class MultiRobotExplorer(Node):
             rs.return_home_abandoned_at = 0.0
 
     def _return_home_tick(self, use_global: bool, now: float):
-        if not self.return_to_start_enable or not self.exploration_complete:
+        if not self.return_to_start_enable:
+            return
+        if not self.exploration_complete and not any(
+                rs.battery_low for rs in self.robots.values()):
             return
 
         for rs in self.robots.values():
+            if not self.exploration_complete and not rs.battery_low:
+                continue
             if (
                 rs.return_home_done
                 and rs.return_home_abandoned_at > 0.0
@@ -2385,8 +2432,8 @@ class MultiRobotExplorer(Node):
             utility_penalty_fn=lambda rname, fr: self._frontier_penalty(self.robots[rname], fr),
             skip_frontier_fn=lambda rname, fr: self._should_skip_frontier_for_assignment(
                 self.robots[rname], fr),
-            robot_ready_fn=lambda rname: self._robot_may_assign_now(
-                self.robots[rname], now),
+            robot_ready_fn=lambda rname: not self.robots[rname].battery_low
+            and self._robot_may_assign_now(self.robots[rname], now),
             goal_dist_fn=self._goal_dist_for_assignment,
             assignment_robot_order_fn=self._assignment_robot_order,
         )
@@ -2457,7 +2504,7 @@ class MultiRobotExplorer(Node):
             # map opening revives them (_note_map_openings), as in global
             # mode. Assigning them once it was home and idle cleared the state
             # and sent the robot straight back out.
-            if rs.frontiers_exhausted:
+            if rs.frontiers_exhausted or rs.battery_low:
                 continue
 
             now = self.get_clock().now().nanoseconds / 1e9
@@ -2889,6 +2936,10 @@ class MultiRobotExplorer(Node):
             return
         rs.homing_active = False
         rs.return_home_failures += 1
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.next_assign_allowed_time = max(
+            rs.next_assign_allowed_time,
+            now + float(self.get_parameter('return_to_start_attempt_interval_sec').value))
         self.get_logger().warn(
             f'[{rs.name}] Return home attempt failed '
             f'({rs.return_home_failures}/{self.return_to_start_max_attempts})'
@@ -3059,7 +3110,8 @@ class MultiRobotExplorer(Node):
 
     def _arm_post_failure_cooldown(self, rs: RobotState) -> None:
         now = self.get_clock().now().nanoseconds / 1e9
-        rs.next_assign_allowed_time = now + max(0.0, self.post_failure_cooldown_sec)
+        rs.next_assign_allowed_time = max(
+            rs.next_assign_allowed_time, now + max(0.0, self.post_failure_cooldown_sec))
 
     def _should_skip_blacklist_due_to_lethal(self, rs: RobotState) -> bool:
         lethal_skip = (
@@ -3100,6 +3152,28 @@ class MultiRobotExplorer(Node):
         self._send_goal(rs, proxy_frontier)
         if rs.goal_active or rs.goal_pending:
             rs.held_goal_position = None
+
+    def _battery_callback(self, msg: BatteryState, robot_name: str) -> None:
+        rs = self.robots.get(robot_name)
+        if rs is None or rs.battery_low or not (msg.voltage > 1.0):
+            return
+        now = self.get_clock().now().nanoseconds / 1e9
+        rs.battery_samples.append((now, float(msg.voltage)))
+        while rs.battery_samples and now - rs.battery_samples[0][0] > self.battery_window_sec:
+            rs.battery_samples.popleft()
+        # A full window, so motor-load sags and a single bad reading do not count.
+        if now - rs.battery_samples[0][0] < 0.8 * self.battery_window_sec:
+            return
+        volts = sorted(v for _t, v in rs.battery_samples)
+        median = volts[len(volts) // 2]
+        if median >= self.battery_return_home_voltage:
+            return
+        rs.battery_low = True
+        self.get_logger().warning(
+            f'[{robot_name}] Battery low ({median:.2f} V < {self.battery_return_home_voltage:.2f} V): '
+            'no more frontiers for this robot; returning home')
+        if rs.goal_active and not rs.homing_active:
+            self._cancel_goal(rs, reason='battery_low')
 
     def _nav2_lethal_callback(self, msg: Bool, robot_name: str):
         rs = self.robots.get(robot_name)
@@ -4272,7 +4346,12 @@ class MultiRobotExplorer(Node):
                     self._blacklist_or_home_fail(rs, bl_xy)
                     if bl_xy is not None and 'precheck_hard_abort_robot_clear' in reason:
                         self._mark_settled(rs, bl_xy)
-                    self._arm_post_failure_cooldown(rs)
+                    # The robot has not moved and has nothing to recover
+                    # from: try the next frontier right away. The 2 s
+                    # post-failure cooldown here made every failed precheck
+                    # cost ~3 s, several times at the end of each run.
+                    rs.next_assign_allowed_time = max(
+                        rs.next_assign_allowed_time, now_ts + 0.3)
                     rs.precheck_transient_goal_xy = None
                     rs.precheck_transient_repeat_count = 0
                 else:
@@ -4883,10 +4962,29 @@ class MultiRobotExplorer(Node):
                 now_ts = self.get_clock().now().nanoseconds / 1e9
                 if rs.path_precheck_server_seen_time <= 0.0:
                     rs.path_precheck_server_seen_time = now_ts
+                if rs.precheck_unavailable_since > 0.0:
+                    self.get_logger().info(
+                        f'[{rs.name}] compute_path_to_pose available again; prechecking goals')
+                rs.precheck_unavailable_since = 0.0
                 self._begin_nav2_path_precheck(
                     rs, frontier, wx, wy, from_retarget)
                 return
-            if self.nav2_path_precheck_required:
+            now_ts = self.get_clock().now().nanoseconds / 1e9
+            if rs.precheck_unavailable_since <= 0.0:
+                rs.precheck_unavailable_since = now_ts
+            unavailable_for = now_ts - rs.precheck_unavailable_since
+            fallback = (
+                self.nav2_path_precheck_unavailable_fallback_sec > 0.0
+                and unavailable_for >= self.nav2_path_precheck_unavailable_fallback_sec)
+            if self.nav2_path_precheck_required and fallback:
+                # Logged once: the counter is zero from here on.
+                if rs.precheck_server_unavailable_events > 0:
+                    self.get_logger().warn(
+                        f'[{rs.name}] compute_path_to_pose unavailable for '
+                        f'{unavailable_for:.0f}s; sending NavigateToPose without the precheck '
+                        'until it is back')
+                rs.precheck_server_unavailable_events = 0
+            elif self.nav2_path_precheck_required:
                 self.get_logger().warn(
                     f'[{rs.name}] compute_path_to_pose unavailable; '
                     'deferring NavigateToPose because precheck is required '

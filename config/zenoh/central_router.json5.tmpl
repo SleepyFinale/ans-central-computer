@@ -36,6 +36,8 @@
           // stuck_detector: idle where Nav2 cannot plan; the explorer holds
           // the goal instead of blacklisting.
           "/__ROBOTS__/nav2_lethal_inflation",
+          // Battery voltage: the explorer sends a robot home when it runs low.
+          "/__ROBOTS__/battery_state",
           // RViz only; the robot sends them only while someone subscribes.
           "/__ROBOTS__/plan",
           "/__ROBOTS__/scan_normalized",
@@ -62,6 +64,7 @@
       },
       pub_max_frequencies: [
         "/__ROBOTS__/map_wire_z=1",
+        "/__ROBOTS__/battery_state=0.5",
         "/__ROBOTS__/tf_zenoh=10",
         "/__ROBOTS__/tf_static_zenoh=1",
         "/__ROBOTS__/plan=2",

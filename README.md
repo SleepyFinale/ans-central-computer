@@ -159,6 +159,8 @@ Summary: inky[goal_active] reached=4(+1) failed=0(+0) status=executing cancel=- 
 
 `start_central.sh`**: "no robot map arrived".** Work outward from the robot: SLAM running on the robot (`ros2 topic echo --once /<robot>/map` there), `start_zenoh_robot.sh` running and showing `TF zenoh publish`, `start_zenoh_central.sh` running here, then `source scripts/env/central_env.bash; ros2 topic echo --once /<robot>/map_wire_z --field layout`. `tailscale ping <robot>` checks the link.
 
+**Robot never moves; the explorer logs "compute_path_to_pose unavailable".** The robot's Zenoh bridge missed Nav2's planner action server at start (a DDS discovery race). `start_fleet.sh` now waits for the robot bridge to report both Nav2 action servers and restarts that stage once if it does not (`TIMEOUT_ZENOH_ACTIONS`, 30 s), and the explorer sends goals without its precheck after 30 s of this (`nav2_path_precheck_unavailable_fallback_sec`).
+
 `start_fleet.sh` **times out at a stage.** It prints the last 40 lines of that stage's log and the line it was waiting for. Stage logs are in the `Logs:` directory it printed at start.
 
 **"A central stack is already running".** A previous run left processes. Answer `y` to kill them, or stop them yourself; non-interactive shells need `CENTRAL_AUTO_KILL=true`.

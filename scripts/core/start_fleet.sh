@@ -27,6 +27,7 @@ TIMEOUT_ZENOH_CENTRAL="${TIMEOUT_ZENOH_CENTRAL:-90}"
 TIMEOUT_BRINGUP="${TIMEOUT_BRINGUP:-180}"
 TIMEOUT_SLAM="${TIMEOUT_SLAM:-300}"
 TIMEOUT_ZENOH_ROBOT="${TIMEOUT_ZENOH_ROBOT:-90}"
+TIMEOUT_ZENOH_ACTIONS="${TIMEOUT_ZENOH_ACTIONS:-30}"
 TIMEOUT_CENTRAL="${TIMEOUT_CENTRAL:-180}"
 TIMEOUT_RVIZ="${TIMEOUT_RVIZ:-60}"
 
@@ -72,6 +73,8 @@ Environment:
   TIMEOUT_BRINGUP         Seconds to wait for robot bringup (default: 180)
   TIMEOUT_SLAM            Seconds to wait for startup map seeding (default: 300)
   TIMEOUT_ZENOH_ROBOT     Seconds to wait for robot Zenoh (default: 90)
+  TIMEOUT_ZENOH_ACTIONS   Seconds for the robot bridge to find Nav2's action
+                          servers before that stage is restarted once (default: 30)
   TIMEOUT_CENTRAL         Seconds to wait for start_central.sh (default: 180)
   TIMEOUT_RVIZ            Seconds to wait for RViz to start (default: 60)
 
@@ -192,6 +195,25 @@ ready_zenoh_robot() {
   printf 'TF zenoh publish: /%s/tf -> /%s/tf_zenoh' "$robot" "$robot"
 }
 
+# The robot bridge must also have discovered both Nav2 action servers. On
+# 2026-11-03 it missed the planner's (a DDS discovery race at bridge start):
+# the explorer then waited for compute_path_to_pose forever and the robot
+# never moved. One line per action, printed by the bridge on discovery.
+ready_zenoh_actions() {
+  local robot="$1"
+  printf 'declares Action Server /%s/navigate_to_pose\n' "$robot"
+  printf 'declares Action Server /%s/compute_path_to_pose\n' "$robot"
+}
+
+forget_pid() {
+  local gone="$1" pid
+  local -a kept=()
+  for pid in "${PIDS[@]}"; do
+    [[ "$pid" == "$gone" ]] || kept+=("$pid")
+  done
+  PIDS=("${kept[@]}")
+}
+
 print_plan() {
   local robot
   echo "Fleet bringup"
@@ -227,6 +249,7 @@ print_plan() {
   echo "  4. on each robot, in parallel:"
   echo "       ./scripts/comms/start_zenoh_robot.sh ${CENTRAL_HOST}"
   echo "     wait for: $(ready_zenoh_robot '<robot>')"
+  echo "     and both Nav2 action servers discovered (restarted once if not)"
   echo "  5. ./scripts/core/start_central.sh -${SELECTION}"
   echo "     wait for: All services running.  Press Ctrl+C to stop."
   if (( WITH_RVIZ )); then
@@ -509,6 +532,20 @@ done
 for robot in "${ROBOTS[@]}"; do
   wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-zenoh.log" \
     "$TIMEOUT_ZENOH_ROBOT" "${robot} zenoh" "$(ready_zenoh_robot "$robot")"
+  readarray -t action_patterns < <(ready_zenoh_actions "$robot")
+  if ! wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-zenoh.log" \
+      "$TIMEOUT_ZENOH_ACTIONS" "${robot} Nav2 actions over Zenoh" "${action_patterns[@]}"; then
+    echo "WARNING: ${robot}'s Zenoh bridge did not find both Nav2 action servers; restarting it once." >&2
+    kill_pid "${STAGE_PID[$robot]}" TERM
+    forget_pid "${STAGE_PID[$robot]}"
+    sleep 3
+    start_robot_stage "$robot" "zenoh-retry" \
+      "./scripts/comms/start_zenoh_robot.sh ${CENTRAL_HOST}"
+    STAGE_PID["$robot"]="$LAST_PID"
+    wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-zenoh-retry.log" \
+      "$TIMEOUT_ZENOH_ROBOT" "${robot} zenoh (retry)" \
+      "$(ready_zenoh_robot "$robot")" "${action_patterns[@]}"
+  fi
 done
 
 central_log="${RUN_DIR}/central.log"

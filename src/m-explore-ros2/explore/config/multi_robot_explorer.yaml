@@ -70,6 +70,11 @@ multi_robot_explorer:
     # If true, never dispatch NavigateToPose when precheck server is unavailable.
     # Explorer defers assignment and retries instead of bypassing planner precheck.
     nav2_path_precheck_required: true
+    # ...but after compute_path_to_pose has been unreachable this long (s),
+    # goals go out without the precheck until it is back (Nav2 plans anyway).
+    # The robot's Zenoh bridge once missed the planner's action server at
+    # start and the robot never moved. 0 = wait forever.
+    nav2_path_precheck_unavailable_fallback_sec: 30.0
     # Wait duration (s) for compute_path_to_pose server readiness before defer.
     # Longer waits reduce false skips while Nav2 lifecycle / planner warms up (fleet Pi load).
     nav2_path_precheck_server_wait_sec: 3.0
@@ -81,7 +86,7 @@ multi_robot_explorer:
     # blacklist after this many repeats for the same goal. Humble's planner
     # never returns error codes, so every "no path" is "transient": at 5 an
     # unreachable last frontier took ~40 s (two rounds) to be given up.
-    nav2_path_precheck_transient_abort_repeat_limit: 3
+    nav2_path_precheck_transient_abort_repeat_limit: 2
     # ...unless the robot stands clear of obstacles (farther than
     # goal_arrival_probe_start_clearance_m): then an abort can only mean no
     # path, and the goal is blacklisted at the first one. Each unreachable
@@ -300,11 +305,11 @@ multi_robot_explorer:
     # boxed in by a bump or a low-obstacle mark (kept up to 20 min on the robot)
     # blacklists everything beyond it, then otherwise idles for good.
     # At most blacklist_reset_max resets between successful goals. 0 disables.
-    # 5 s, not 60: a door opening revives frontiers by itself
+    # 3 s, not 60: a door opening revives frontiers by itself
     # (map_opening_*), and at 60 a finished robot stood still a minute at a
-    # time before giving up and going home. At 10 s the end of every run
-    # still had two 10 s waits with the robot standing still.
-    blacklist_reset_idle_sec: 5.0
+    # time before giving up and going home. At 10 s, then 5 s, the end of
+    # every run still had two such waits with the robot standing still.
+    blacklist_reset_idle_sec: 3.0
     # After this many resets with the same frontiers still failing, the ones
     # left count as unreachable (e.g. behind glass): once every robot is in
     # that state, exploration completes and robots return to start. One reset
@@ -448,6 +453,10 @@ multi_robot_explorer:
     return_to_start_enable: true
     return_to_start_skip_if_within_m: 0.25
     return_to_start_max_attempts: 5
+    # Seconds between attempts, so the robot's own recoveries (back-offs,
+    # costmap clear, squeeze) get to work before the next one: at ~1.5 s all
+    # five went in 44 s from a cluttered corner. Then a minute's wait.
+    return_to_start_attempt_interval_sec: 8.0
     # Home is the origin of the robot's own SLAM map (<robot>/map), where it
     # stood when SLAM started, looked up in the world frame each time: the
     # world pose of a robot's map moves whenever map_merge re-estimates the
@@ -457,6 +466,14 @@ multi_robot_explorer:
     # After max_attempts failures (a person or chair in the way), try again
     # this many seconds later. 0 = give up for good.
     return_to_start_retry_sec: 60.0
+
+    # Low battery: a robot whose /<robot>/battery_state voltage (median over
+    # battery_window_sec, so load sags do not count) drops below this gets no
+    # more frontiers and goes home while the others keep exploring. Inky's 3S
+    # pack read 11.6 V fresh; a flat one let it slow and then stand still
+    # mid-run. 0 disables.
+    battery_return_home_voltage: 11.0
+    battery_window_sec: 30.0
 
     # Dynamic environments: a frontier behind a closed door is blacklisted and,
     # after blacklist_reset_max resets, counted unreachable. When an obstacle
