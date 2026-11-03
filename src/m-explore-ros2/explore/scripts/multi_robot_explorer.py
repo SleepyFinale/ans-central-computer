@@ -4182,7 +4182,10 @@ class MultiRobotExplorer(Node):
             s for s in rs.precheck_fail_streak
             if now - s[0] <= self.boxed_in_window_sec and _dist(s[2], rs.position) <= 0.25
         ]
-        if not any(_dist(s[1], goal_xy) < 0.5 for s in streak):
+        # Distinct goals from the blacklist radius on: at 0.5 m, frontiers
+        # bunched around a boxed-in robot never counted as several, and Inky
+        # failed ~30 prechecks in 90 s without the boxed-in pause.
+        if not any(_dist(s[1], goal_xy) < max(self.blacklist_radius, 0.05) for s in streak):
             streak.append((now, goal_xy, rs.position))
         rs.precheck_fail_streak = streak
         if len(streak) < self.boxed_in_goal_count:
