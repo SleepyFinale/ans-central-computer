@@ -94,14 +94,17 @@ multi_robot_explorer:
     nav2_path_precheck_hard_fail_when_robot_clear: true
     # Parse planner-server rosout "failed to generate a valid path to (x, y)"
     # and treat matching precheck ABORTED goals as hard failures.
-    # The robots' /rosout is not in the Zenoh allowlists (it would carry
-    # every robot log over Wi-Fi), so in the fleet setup these hints never
-    # fire; repeated aborts are counted instead (transient_abort_repeat_limit).
-    nav2_path_precheck_use_rosout_no_path_hint: true
+    # The robots' /rosout and planner_server/transition_event are not in the
+    # Zenoh allowlists (rosout would carry every robot log over Wi-Fi), so in
+    # the fleet setup these hints never fire; repeated aborts are counted
+    # instead (transient_abort_repeat_limit). Off, so the explorer does not
+    # parse every central log line for a message that never arrives. Turn
+    # them on only for a single-machine setup that shares the robot's DDS.
+    nav2_path_precheck_use_rosout_no_path_hint: false
     nav2_path_precheck_rosout_no_path_window_sec: 6.0
     nav2_path_precheck_rosout_goal_match_tol_m: 0.30
     nav2_path_precheck_rosout_immediate_blacklist: false
-    nav2_path_precheck_use_planner_lifecycle_hint: true
+    nav2_path_precheck_use_planner_lifecycle_hint: false
     nav2_path_precheck_planner_state_stale_sec: 8.0
     nav2_path_precheck_abort_active_planner_is_hard_fail: false
     # Must match planner_server.ros__parameters.planner_plugins entry (burger.yaml).

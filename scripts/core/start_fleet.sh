@@ -328,6 +328,12 @@ prefix_follow() {
   local file="$2"
   # ROS uses [ERROR]/[WARN]. Zenoh tracing uses a space-padded ERROR/WARN level.
   local alert_re='\[(ERROR|WARN|WARNING|FATAL)\]|(^|[[:space:]])(ERROR|WARN|WARNING|FATAL)([[:space:]]|:)'
+  # Known-harmless startup lines, hidden from the terminal (the log keeps
+  # them): v4l2_camera looks for a per-camera calibration file and probes
+  # controls the Arducams refuse (stereo uses config/stereo/<robot>.yaml)
+  # and notes its YUYV -> mono8 conversion, and RViz's software GL prints an
+  # empty GLSL link log.
+  local noise_re='camera_calibration_parsers|[Cc]amera calibration file|Failed getting value for control|Control type not currently supported|possibly slow conversion|GLSL link result'
   if (( VERBOSE )); then
     setsid bash -c '
       file=$1
@@ -342,11 +348,13 @@ prefix_follow() {
       file=$1
       tag=$2
       alert_re=$3
+      noise_re=$4
       while [[ ! -f "$file" ]]; do
         sleep 0.2
       done
-      tail -n +1 -F "$file" | sed -u "s/\r\$//" | grep -iE --line-buffered "$alert_re" | sed -u "s/^/[${tag}] /"
-    ' _ "$file" "$tag" "$alert_re" </dev/null &
+      tail -n +1 -F "$file" | sed -u "s/\r\$//" | grep -iE --line-buffered "$alert_re" \
+        | grep -vE --line-buffered "$noise_re" | sed -u "s/^/[${tag}] /"
+    ' _ "$file" "$tag" "$alert_re" "$noise_re" </dev/null &
   fi
   TAIL_PIDS+=("$!")
 }

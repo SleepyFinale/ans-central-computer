@@ -5512,7 +5512,10 @@ class MultiRobotExplorer(Node):
                     'stall_watchdog',
                     'retrace_escape',
                 }
-                cancel_reason = rs.last_cancel_reason or 'unspecified'
+                # Every explorer cancel sets a reason (_cancel_goal), so an empty
+                # one came from the robot: collision_resolver gives up on a spot
+                # it keeps getting blocked at, or nav2_retrace_escape retreats.
+                cancel_reason = rs.last_cancel_reason or 'robot_side'
                 pose_dist = (
                     _dist(rs.position, rs.goal_position)
                     if rs.position is not None and rs.goal_position is not None
