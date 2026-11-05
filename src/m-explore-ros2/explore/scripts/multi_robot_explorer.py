@@ -5619,6 +5619,10 @@ class MultiRobotExplorer(Node):
                 rs.goal_handle.cancel_goal_async()
             except Exception:
                 pass
+            # bt_navigator aborts a goal that arrives before it has finished
+            # cancelling (a trip home 60 ms after a cancel counted as a failed
+            # attempt and waited 9 s), so let the cancel land first.
+            rs.next_assign_allowed_time = max(rs.next_assign_allowed_time, now + 0.5)
         rs.goal_active = False
         rs.goal_pending = False
         rs.goal_status = 'canceled'

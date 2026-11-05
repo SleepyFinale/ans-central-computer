@@ -205,6 +205,16 @@ ready_zenoh_actions() {
   printf 'declares Action Server /%s/compute_path_to_pose\n' "$robot"
 }
 
+# A central bridge that is still shutting down holds the port, and a new one
+# then exits at once with "Address already in use".
+wait_zenoh_port_free() {
+  local waited=0
+  while ss -tln 2>/dev/null | grep -q ':7447 ' && ((waited < 15)); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
 forget_pid() {
   local gone="$1" pid
   local -a kept=()
@@ -499,6 +509,7 @@ echo "Logs: ${RUN_DIR}"
 print_plan
 echo ""
 
+wait_zenoh_port_free
 zenoh_central_log="${RUN_DIR}/zenoh-central.log"
 start_central_stage "zenoh-central" "$zenoh_central_log" \
   "./scripts/comms/start_zenoh_central.sh -${SELECTION}"
@@ -545,10 +556,23 @@ for robot in "${ROBOTS[@]}"; do
   readarray -t action_patterns < <(ready_zenoh_actions "$robot")
   if ! wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-zenoh.log" \
       "$TIMEOUT_ZENOH_ACTIONS" "${robot} Nav2 actions over Zenoh" "${action_patterns[@]}"; then
-    echo "WARNING: ${robot}'s Zenoh bridge did not find both Nav2 action servers; restarting it once." >&2
+    echo "WARNING: ${robot}'s Zenoh bridge did not find both Nav2 action servers; restarting it and the central bridge once." >&2
     kill_pid "${STAGE_PID[$robot]}" TERM
     forget_pid "${STAGE_PID[$robot]}"
+    # The central bridge has to restart too. It keeps a second DDS reader for
+    # each action route the old robot bridge announced, so every goal reaches
+    # Nav2 twice, and Nav2 dies on the duplicate: "goal ID already exists"
+    # (crashed 3 of 3 times when forced). Other robots' bridges reconnect.
+    kill_pid "$zenoh_central_pid" TERM
+    forget_pid "$zenoh_central_pid"
     sleep 3
+    wait_zenoh_port_free
+    zenoh_central_log="${RUN_DIR}/zenoh-central-retry.log"
+    start_central_stage "zenoh-central-retry" "$zenoh_central_log" \
+      "./scripts/comms/start_zenoh_central.sh -${SELECTION}"
+    zenoh_central_pid="$LAST_PID"
+    wait_ready "$zenoh_central_pid" "$zenoh_central_log" "$TIMEOUT_ZENOH_CENTRAL" \
+      "central Zenoh (retry)" "${zenoh_patterns[@]}"
     start_robot_stage "$robot" "zenoh-retry" \
       "./scripts/comms/start_zenoh_robot.sh ${CENTRAL_HOST}"
     STAGE_PID["$robot"]="$LAST_PID"
