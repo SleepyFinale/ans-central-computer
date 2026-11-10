@@ -369,9 +369,12 @@ void MapMerge::publishTransforms()
   } else {
     // Estimated poses: metric transforms matching the grid just composed.
     std::vector<geometry_msgs::msg::Transform> transforms;
+    // Per robot: placed by a feature match (new or held), not side by side.
+    std::vector<bool> matched;
     {
       std::lock_guard<std::mutex> lock(pipeline_mutex_);
       transforms = pipeline_.getWorldTransforms();
+      matched = pipeline_.getMatchedFlags();
     }
 
     // Build parallel vectors of robot names and grid pointers in the same
@@ -480,7 +483,11 @@ void MapMerge::publishTransforms()
         health_payload += ";";
       }
       health_payload += robot_names[i];
-      health_payload += have_metric_tf ? ":1" : ":0";
+      // 1 only when the TF is metric AND comes from a feature match. A map
+      // that is merely placed beside the others has a stable TF too, and the
+      // merge-state monitor must not read that as MERGED.
+      const bool is_matched = i < matched.size() && matched[i];
+      health_payload += (have_metric_tf && is_matched) ? ":1" : ":0";
     }
   }
 

@@ -18,8 +18,11 @@ State machine:
 
   Pose health: map_merge publishes ``/robot_tf_estimate_health`` (``robot:0|1``).
   A ``0`` means that cycle reused a provisional / last TF instead of a fresh
-  metric estimate — MERGED is capped at PARTIAL so the explorer does not rely on
-  global mode while inter-map poses are invalid.
+  metric estimate, or that the robot's map is only placed beside the others
+  rather than aligned by a feature match (a side-by-side placement is stable
+  too, so TF stability alone cannot tell them apart). MERGED is capped at
+  PARTIAL so the explorer does not rely on global mode while inter-map poses
+  are invalid.
 
 This avoids having to introspect internal map_merge diagnostics while still
 providing a robust signal for "maps are now consistently merged".
