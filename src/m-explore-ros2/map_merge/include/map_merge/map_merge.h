@@ -135,15 +135,10 @@ private:
     /**
      * @brief Publish TF from world_frame to each robot's map frame.
      * @details For known poses, publishes the user-provided init_pose directly.
-     *          For estimated poses, converts pixel-space pipeline transforms to
-     *          metric TF using grid origins and resolution.
-     * @param merged_origin_x  X origin of the merged grid (pre-margin), in meters
-     * @param merged_origin_y  Y origin of the merged grid (pre-margin), in meters
-     * @param resolution       Resolution of the merged grid (meters/pixel)
+     *          For estimated poses, publishes the metric transforms the
+     *          pipeline recorded for the grid it last composed.
      */
-    void publishTransforms(
-      double merged_origin_x, double merged_origin_y,
-      float resolution);
+    void publishTransforms();
 
     /** When composeGrids has not produced a merged map yet, publish identity
      *  world_frame -> <robot>/map for each robot that has a map so tf2 registers ``map``.

@@ -38,9 +38,14 @@
 #include <combine_grids/grid_compositor.h>
 #include <combine_grids/grid_warper.h>
 #include <combine_grids/merging_pipeline.h>
+
+#include <algorithm>
+#include <cmath>
+
 #include <rclcpp/rclcpp.hpp>
 #include <rcpputils/asserts.hpp>
 
+#include <opencv2/imgproc.hpp>
 #include <opencv2/stitching/detail/matchers.hpp>
 #include <opencv2/stitching/detail/motion_estimators.hpp>
 
@@ -97,18 +102,9 @@ bool MergingPipeline::estimateTransforms(
     RCLCPP_INFO(
       logger,
       "[estimateTransforms] %zu map(s) have fewer than 2 features; "
-      "placing maps independently",
+      "keeping the last accepted alignment if there is one",
       sparse_maps);
-    transforms_.clear();
-    transforms_.resize(images_.size());
-    matched_.assign(images_.size(), false);
-    for (size_t i = 0; i < images_.size(); ++i) {
-      if (!images_[i].empty()) {
-        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
-        break;
-      }
-    }
-    assignFallbackTransforms();
+    placeWithoutMatch();
     return true;
   }
 
@@ -120,18 +116,9 @@ bool MergingPipeline::estimateTransforms(
     RCLCPP_WARN(
       logger,
       "[estimateTransforms] Feature matching failed (%s); "
-      "placing maps independently",
+      "keeping the last accepted alignment if there is one",
       e.what());
-    transforms_.clear();
-    transforms_.resize(images_.size());
-    matched_.assign(images_.size(), false);
-    for (size_t i = 0; i < images_.size(); ++i) {
-      if (!images_[i].empty()) {
-        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
-        break;
-      }
-    }
-    assignFallbackTransforms();
+    placeWithoutMatch();
     return true;
   }
   matcher = {};
@@ -170,28 +157,14 @@ bool MergingPipeline::estimateTransforms(
       logger,
       "[estimateTransforms] Best feature match too weak "
       "(inliers=%d, matches=%d, ratio=%.3f, confidence=%.3f); "
-      "placing maps independently",
+      "keeping the last accepted alignment if there is one",
       best_inliers, best_matches, best_ratio, best_confidence);
 
-    transforms_.clear();
-    transforms_.resize(images_.size());
-    matched_.assign(images_.size(), false);
-
-    // set identity for the first non-empty grid (reference frame)
-    for (size_t i = 0; i < images_.size(); ++i) {
-      if (!images_[i].empty()) {
-        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
-        break;
-      }
-    }
-
-    // place remaining grids at non-overlapping positions
-    assignFallbackTransforms();
+    placeWithoutMatch();
 
     RCLCPP_DEBUG(
       logger,
-      "[estimateTransforms] All maps placed independently due to "
-      "weak feature matches");
+      "[estimateTransforms] No new alignment due to weak feature matches");
     return true;
   }
 
@@ -202,20 +175,7 @@ bool MergingPipeline::estimateTransforms(
 
   // no match found between any pair of maps.
   if (good_indices.size() <= 1) {
-    transforms_.clear();
-    transforms_.resize(images_.size());
-    matched_.assign(images_.size(), false);
-
-    // set identity for the first non-empty grid (reference frame)
-    for (size_t i = 0; i < images_.size(); ++i) {
-      if (!images_[i].empty()) {
-        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
-        break;
-      }
-    }
-
-    // place remaining grids at non-overlapping positions
-    assignFallbackTransforms();
+    placeWithoutMatch();
 
     RCLCPP_DEBUG(
       logger,
@@ -275,6 +235,8 @@ bool MergingPipeline::estimateTransforms(
     ++i;
   }
 
+  rememberAlignment();
+
   // place any unmatched grids at non-overlapping fallback positions
   assignFallbackTransforms();
 
@@ -305,6 +267,8 @@ nav_msgs::msg::OccupancyGrid::SharedPtr MergingPipeline::composeGrids(rclcpp::Lo
   // for checking states. Throws a rcpputils::IllegalStateException if the condition fails.
   rcpputils::check_true(images_.size() == transforms_.size());
   rcpputils::check_true(images_.size() == grids_.size());
+
+  world_transforms_.clear();
 
   if (images_.empty()) {
     return nullptr;
@@ -359,6 +323,48 @@ nav_msgs::msg::OccupancyGrid::SharedPtr MergingPipeline::composeGrids(rclcpp::Lo
     -(result->info.height / 2.0) * double(result->info.resolution);
   result->info.origin.orientation.w = 1.0;
 
+  // Record where each grid was actually drawn, as a metric transform from the
+  // grid's own frame to the merged frame. GridWarper draws grid i with the
+  // INVERSE of transforms_[i], and GridCompositor then shifts every grid by
+  // the top-left corner of the union of the warped ROIs, so
+  //   merged_px = inv(T_i) * grid_px - tl
+  // Cell (c, r) is centred at origin + (c + 0.5, r + 0.5) * resolution in both
+  // grids. All grids are assumed to share the merged resolution.
+  cv::Point tl = rois.front().tl();
+  for (const cv::Rect & roi : rois) {
+    tl.x = std::min(tl.x, roi.x);
+    tl.y = std::min(tl.y, roi.y);
+  }
+  const double res = static_cast<double>(result->info.resolution);
+  geometry_msgs::msg::Transform unplaced;
+  unplaced.rotation.w = 0.;  // zero quaternion marks "no placement"
+  world_transforms_.assign(transforms_.size(), unplaced);
+  for (size_t i = 0; i < transforms_.size(); ++i) {
+    if (transforms_[i].empty() || images_[i].empty()) {
+      continue;
+    }
+    cv::Mat H;
+    cv::invertAffineTransform(transforms_[i].rowRange(0, 2), H);
+    const double h00 = H.at<double>(0, 0), h01 = H.at<double>(0, 1);
+    const double h10 = H.at<double>(1, 0), h11 = H.at<double>(1, 1);
+    const double ox = grids_[i]->info.origin.position.x;
+    const double oy = grids_[i]->info.origin.position.y;
+    const double theta = std::atan2(h10, h00);
+
+    geometry_msgs::msg::Transform & t = world_transforms_[i];
+    t.translation.x = result->info.origin.position.x +
+      (H.at<double>(0, 2) - tl.x + 0.5 - 0.5 * (h00 + h01)) * res -
+      (h00 * ox + h01 * oy);
+    t.translation.y = result->info.origin.position.y +
+      (H.at<double>(1, 2) - tl.y + 0.5 - 0.5 * (h10 + h11)) * res -
+      (h10 * ox + h11 * oy);
+    t.translation.z = 0.;
+    t.rotation.x = 0.;
+    t.rotation.y = 0.;
+    t.rotation.z = std::sin(theta * 0.5);
+    t.rotation.w = std::cos(theta * 0.5);
+  }
+
   return result;
 }
 
@@ -369,6 +375,81 @@ size_t MergingPipeline::matchedCount() const
     if (m) {++count;}
   }
   return count;
+}
+
+void MergingPipeline::rememberAlignment()
+{
+  if (matchedCount() < 2) {
+    return;
+  }
+  // transforms_ are in pixels of each grid and go stale as soon as a grid
+  // grows (its origin moves), so keep the alignment in metres instead:
+  //   P_common = R * P_grid + c,  with  [R | t] = inv(T_i),  c = t * res - R * O_i
+  held_.assign(transforms_.size(), HeldAlignment());
+  for (size_t i = 0; i < transforms_.size(); ++i) {
+    if (!matched_[i] || transforms_[i].empty() || !grids_[i]) {
+      continue;
+    }
+    cv::Mat H;
+    cv::invertAffineTransform(transforms_[i].rowRange(0, 2), H);
+    const double res = static_cast<double>(grids_[i]->info.resolution);
+    const cv::Vec2d origin(
+      grids_[i]->info.origin.position.x, grids_[i]->info.origin.position.y);
+    HeldAlignment & held = held_[i];
+    held.R = cv::Matx22d(
+      H.at<double>(0, 0), H.at<double>(0, 1),
+      H.at<double>(1, 0), H.at<double>(1, 1));
+    held.c = cv::Vec2d(H.at<double>(0, 2), H.at<double>(1, 2)) * res - held.R * origin;
+    held.valid = true;
+  }
+}
+
+void MergingPipeline::placeWithoutMatch()
+{
+  transforms_.clear();
+  transforms_.resize(images_.size());
+  matched_.assign(images_.size(), false);
+
+  // Reuse the last accepted alignment for the grids that had one, rebuilt for
+  // the grids as they are now. One weak estimate must not throw away a good
+  // alignment: the grid and TF would jump apart and back on every such pass.
+  size_t reusable = 0;
+  if (held_.size() == images_.size()) {
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (held_[i].valid && !images_[i].empty()) {
+        ++reusable;
+      }
+    }
+  }
+  if (reusable >= 2) {
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!held_[i].valid || images_[i].empty()) {
+        continue;
+      }
+      const double res = static_cast<double>(grids_[i]->info.resolution);
+      const cv::Vec2d origin(
+        grids_[i]->info.origin.position.x, grids_[i]->info.origin.position.y);
+      const cv::Vec2d t = (held_[i].c + held_[i].R * origin) * (1.0 / res);
+      cv::Mat H = (cv::Mat_<double>(2, 3) <<
+        held_[i].R(0, 0), held_[i].R(0, 1), t[0],
+        held_[i].R(1, 0), held_[i].R(1, 1), t[1]);
+      transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+      cv::Mat forward = transforms_[i].rowRange(0, 2);
+      cv::invertAffineTransform(H, forward);
+      matched_[i] = true;
+    }
+  } else {
+    // nothing to reuse: identity for the first non-empty grid (reference frame)
+    for (size_t i = 0; i < images_.size(); ++i) {
+      if (!images_[i].empty()) {
+        transforms_[i] = cv::Mat::eye(3, 3, CV_64F);
+        break;
+      }
+    }
+  }
+
+  // place remaining grids at non-overlapping positions
+  assignFallbackTransforms();
 }
 
 void MergingPipeline::assignFallbackTransforms()

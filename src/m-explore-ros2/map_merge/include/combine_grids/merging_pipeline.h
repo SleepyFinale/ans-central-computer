@@ -72,6 +72,19 @@ public:
     bool setTransforms(InputIt transforms_begin, InputIt transforms_end);
 
     /**
+     * @brief Metric pose of each input grid's frame in the frame of the grid
+     *        last returned by composeGrids() (before any margin is added).
+     * @details Unlike getTransforms(), which returns the raw pixel-space
+     *          estimates, these describe where each grid was actually drawn:
+     *          P_merged = R(theta) * P_grid + t.  Same indexing as the fed
+     *          grids; entries without a placement have a zero quaternion.
+     */
+    const std::vector < geometry_msgs::msg::Transform > & getWorldTransforms() const
+    {
+      return world_transforms_;
+    }
+
+    /**
      * @brief Per-grid flag: true if the transform was computed by feature
      *        matching, false if it is a fallback (independent placement).
      * @details Valid after estimateTransforms().  Empty before first call.
@@ -86,6 +99,26 @@ private:
     std::vector < cv::Mat > images_;
     std::vector < cv::Mat > transforms_;
     std::vector < bool > matched_;
+    std::vector < geometry_msgs::msg::Transform > world_transforms_;
+
+    /** Last feature-matched alignment of a grid, in metres (see rememberAlignment). */
+    struct HeldAlignment
+    {
+      cv::Matx22d R = cv::Matx22d::eye();
+      cv::Vec2d c = cv::Vec2d(0., 0.);
+      bool valid = false;
+    };
+    std::vector < HeldAlignment > held_;
+
+    /** Store the alignment just estimated so a later weak estimate can reuse it. */
+    void rememberAlignment();
+
+    /**
+     * @brief Fill transforms_ when this pass produced no usable match: reuse
+     *        the last accepted alignment if there is one, otherwise place the
+     *        grids independently.
+     */
+    void placeWithoutMatch();
     double max_confidence_achieved_ = 0.0;
 
     /**
