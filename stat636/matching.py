@@ -194,14 +194,16 @@ def _as_image(grid):
     return grid.astype(np.int8).view(np.uint8).copy()
 
 
-def akaze_baseline(grid_a, origin_a, grid_b, origin_b, resolution, confidence=0.65):
-    """map_merge's estimator on two grids, with its gates, without the bundle-adjust polish.
+def akaze_estimate(grid_a, origin_a, grid_b, origin_b, resolution):
+    """map_merge's AKAZE estimate for two grids, before any of its gates.
 
-    Returns (T or None, info). T maps B's frame into A's frame.
+    Returns (T or None, info). T maps B's frame into A's frame. Scale is removed
+    about the centre of grid B, as map_merge does (makeTransformsRigid), and
+    info['scale'] keeps it so the scale gate can be applied afterwards.
     """
     finder = cv2.AKAZE_create()
     features = [cv2.detail.computeImageFeatures2(finder, _as_image(g)) for g in (grid_a, grid_b)]
-    info = {'inliers': 0, 'matches': 0, 'confidence': 0.0}
+    info = {'inliers': 0, 'matches': 0, 'ratio': 0.0, 'confidence': 0.0, 'scale': 0.0}
     if min(len(f.getKeypoints()) for f in features) < 2:
         return None, info
     matcher = cv2.detail_AffineBestOf2NearestMatcher(False, False, 0.3, 6)
@@ -213,19 +215,36 @@ def akaze_baseline(grid_a, origin_a, grid_b, origin_b, resolution, confidence=0.
     match = next((m for m in pairwise if m.src_img_idx == 1 and m.dst_img_idx == 0), None)
     if match is None or match.H is None or match.H.size == 0:
         return None, info
-    info = {'inliers': int(match.num_inliers), 'matches': len(match.getMatches()),
-            'confidence': float(match.confidence)}
-    ratio = info['inliers'] / info['matches'] if info['matches'] else 0.0
-    if info['inliers'] < 8 or ratio < 0.5 or info['confidence'] < confidence:
-        return None, info
+    n = len(match.getMatches())
     H = np.asarray(match.H, dtype=float)
-    # Replace the partial-affine scale with a pure rotation; maps are metric.
-    theta = np.arctan2(H[1, 0], H[0, 0])
+    info = {'inliers': int(match.num_inliers), 'matches': n,
+            'ratio': match.num_inliers / n if n else 0.0,
+            'confidence': float(match.confidence),
+            'scale': float(np.sqrt(abs(np.linalg.det(H[:2, :2]))))}
+    theta = np.arctan2(H[1, 0] - H[0, 1], H[0, 0] + H[1, 1])
     R = Rigid(theta, np.zeros(2)).R
-    # x_a = R x_b + t in world coordinates, from p_a = R p_b + h in pixels.
-    t = origin_a + resolution * H[:2, 2] - R @ origin_b
-    return Rigid(theta, t), info
+    # p_a = H p_b in pixels; keep B's grid centre c where H puts it: p_a = R p_b + (H c - R c).
+    c = 0.5 * np.array([grid_b.shape[1], grid_b.shape[0]], dtype=float)
+    shift = H[:2, :2] @ c + H[:2, 2] - R @ c
+    return Rigid(theta, origin_a + resolution * shift - R @ origin_b), info
 
+
+def akaze_passes(info, confidence=0.65, min_ratio=0.5, min_inliers=8, max_scale_error=None):
+    """map_merge's gates on one estimate. Defaults are its gates before 2026-11-12."""
+    if info['inliers'] < min_inliers or info['ratio'] < min_ratio or info['confidence'] < confidence:
+        return False
+    return max_scale_error is None or abs(info['scale'] - 1.0) <= max_scale_error
+
+
+def akaze_baseline(grid_a, origin_a, grid_b, origin_b, resolution, confidence=0.65):
+    """map_merge's estimator with its original gates (inlier ratio 0.5), no bundle adjustment.
+
+    Returns (T or None, info). T maps B's frame into A's frame.
+    """
+    T, info = akaze_estimate(grid_a, origin_a, grid_b, origin_b, resolution)
+    if T is None or not akaze_passes(info, confidence=confidence):
+        return None, info
+    return T, info
 
 def consistency_match(graph_a, graph_b, distance='euclidean', top_k=8, sigma=0.15, keep=0.2):
     """Partial matching on the association graph (Leordeanu and Hebert's spectral matching).

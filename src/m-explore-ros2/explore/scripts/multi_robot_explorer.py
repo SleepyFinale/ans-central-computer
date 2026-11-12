@@ -233,6 +233,14 @@ class RobotState:
     # MultiRobotExplorer._apply_post_success_blacklist_policy.
     visited_goals: list = field(default_factory=list)
     boxed_in_pose: Optional[Tuple[float, float]] = None
+    # Reachability probe (a plan to an open point next to the robot) sent
+    # before calling the robot boxed in; see _precheck_boxed_in.
+    boxed_probe_pending: bool = False
+    boxed_probe_started: float = 0.0
+    boxed_probe_epoch: int = 0
+    boxed_probe_goals: list = field(default_factory=list)
+    # Where that probe last planned fine: failures here are the goals' fault.
+    boxed_ok_pose: Optional[Tuple[float, float]] = None
     # Near-goal arrival feasibility: ComputePathToPose(use_start=True) + map score.
     arrival_probe_in_progress: bool = False
     arrival_probe_goal_handle: Optional[object] = None
@@ -682,6 +690,17 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('boxed_in_window_sec', 60.0)
         self.declare_parameter('boxed_in_wait_sec', 10.0)
         self.declare_parameter('boxed_in_max_waits', 3)
+        # Before calling a robot boxed in, plan to an open point this far
+        # (m) from it on the map; a plan there means the goals are what is
+        # unreachable. 0 disables the probe.
+        self.declare_parameter('boxed_in_probe_dist', 1.2)
+        # A precheck plan running more than this (m) through cells unknown on
+        # the goal map, not counting the last nav2_path_unknown_tail_m before
+        # the goal, is a detour around the outside of the mapped area (Nav2
+        # plans through unknown space) and the goal counts as unreachable.
+        # 0 disables.
+        self.declare_parameter('nav2_path_max_unknown_m', 2.5)
+        self.declare_parameter('nav2_path_unknown_tail_m', 1.5)
         # Progress timeout is interpreted as "no meaningful distance progress"
         # for this many seconds before a goal is considered stalled.
         self.declare_parameter('progress_timeout', 45.0)
@@ -990,6 +1009,9 @@ class MultiRobotExplorer(Node):
         self.boxed_in_window_sec = float(self.get_parameter('boxed_in_window_sec').value)
         self.boxed_in_wait_sec = float(self.get_parameter('boxed_in_wait_sec').value)
         self.boxed_in_max_waits = int(self.get_parameter('boxed_in_max_waits').value)
+        self.boxed_in_probe_dist = float(self.get_parameter('boxed_in_probe_dist').value)
+        self.nav2_path_max_unknown_m = float(self.get_parameter('nav2_path_max_unknown_m').value)
+        self.nav2_path_unknown_tail_m = float(self.get_parameter('nav2_path_unknown_tail_m').value)
         # robot name -> (map message, robot cell, distance field)
         self._geodesic_cache: Dict[str, tuple] = {}
         # (robot, frontier centroid, size) -> (map message, robot position, goal xy)
@@ -1343,6 +1365,7 @@ class MultiRobotExplorer(Node):
         # robot -> (local map msg, world TF key, world-frame view); see
         # _local_map_world_view.
         self._local_view_cache: Dict[str, tuple] = {}
+        self._use_global_now = False
         # Map message currently associated with goal selection; set by the
         # frontier-step helpers before assigning goals so _select_goal_point
         # can convert frontier cells into world coordinates without assuming
@@ -1922,6 +1945,7 @@ class MultiRobotExplorer(Node):
         else:
             # auto mode: follow merge_state flag
             use_global = self.in_global_phase
+        self._use_global_now = use_global
 
         if use_global and self.latest_global_map is None:
             if not self._logged_waiting_for_map:
@@ -2831,7 +2855,7 @@ class MultiRobotExplorer(Node):
             'last_target_frontier_centroid', 'last_goal_world',
             'last_pose_when_goal_sent', 'last_motion_sample_pose', 'start_pose_xy',
             'path_precheck_world_goal_xy', 'precheck_transient_goal_xy',
-            'boxed_in_pose', 'position',
+            'boxed_in_pose', 'boxed_ok_pose', 'position',
         ):
             setattr(rs, attr, mv(getattr(rs, attr)))
         rs.recent_goals = deque(
@@ -3469,6 +3493,10 @@ class MultiRobotExplorer(Node):
     def _robot_may_assign_now(self, rs: RobotState, now: float) -> bool:
         if self.retrace_hold_enabled and rs.nav2_retrace_active:
             return False
+        if rs.boxed_probe_pending:
+            if now - rs.boxed_probe_started < 20.0:
+                return False
+            self._boxed_probe_done(rs, None, 'timed out')
         return now >= rs.next_assign_allowed_time
 
     def _goal_point_blacklisted(
@@ -3588,8 +3616,32 @@ class MultiRobotExplorer(Node):
         penalty = (
             self._clearance_penalty(self._current_goal_map, gx, gy)
             + self._heading_penalty(rs, gx, gy)
+            + self._others_crowding_penalty(rs, fr.centroid_world)
         )
         return gain - cost - penalty - close_penalty
+
+    def _others_crowding_penalty(self, rs: RobotState, xy: Tuple[float, float]) -> float:
+        """assign_frontiers' crowding penalty from the other robots' goals.
+
+        Retargeting scored frontiers without it, so a robot already driving
+        could switch to the frontier next to the other robot's goal.
+        """
+        if not self._use_global_now or len(self.robots) <= 1 or self.nearby_penalty_dist <= 0.0:
+            return 0.0
+        pen = 0.0
+        for other in self.robots.values():
+            if other is rs:
+                continue
+            if other.goal_pending and other.path_precheck_world_goal_xy is not None:
+                g = other.path_precheck_world_goal_xy
+            elif other.goal_active and other.goal_position is not None:
+                g = other.goal_position
+            else:
+                continue
+            d = _dist(xy, g)
+            if d < self.nearby_penalty_dist:
+                pen += (self.nearby_penalty_dist - d) * self.nearby_penalty_weight
+        return pen
 
     def _best_frontier_for_robot(self, rs: RobotState, frontiers: List[Frontier]) -> Tuple[Optional[Frontier], float]:
         best = None
@@ -4411,6 +4463,12 @@ class MultiRobotExplorer(Node):
         """
         if self.boxed_in_goal_count <= 0 or goal_xy is None or rs.position is None:
             return False
+        if rs.boxed_ok_pose is not None:
+            if _dist(rs.boxed_ok_pose, rs.position) <= 0.25:
+                # A plan from this spot worked moments ago: the goals failing
+                # now are unreachable themselves.
+                return False
+            rs.boxed_ok_pose = None
         streak = [
             s for s in rs.precheck_fail_streak
             if now - s[0] <= self.boxed_in_window_sec and _dist(s[2], rs.position) <= 0.25
@@ -4437,15 +4495,179 @@ class MultiRobotExplorer(Node):
                     f'[{rs.name}] Still no path after {self.boxed_in_max_waits} boxed-in waits; '
                     'treating the goals as unreachable')
             return False
-        rs.boxed_in_waits += 1
         for _t, g, _p in streak:
             rs.blacklist = [b for b in rs.blacklist if _dist(b, g) >= 0.05]
+        if self._start_boxed_probe(rs, [g for _t, g, _p in streak], now):
+            # When every frontier left is behind a wall or glass, plans to
+            # each fail with the robot free to move. Read as boxed in, both
+            # robots stood 30 s at a time at the ends of corridors and then
+            # cleared their blacklists and started over (hall3, 2026-11-12).
+            return True
+        rs.boxed_in_waits += 1
         self.get_logger().warn(
             f'[{rs.name}] No path to {len(streak)} different goals with the robot in place: '
             f'the robot is boxed in, not the frontiers. Not blacklisting; retrying in '
             f'{self.boxed_in_wait_sec:.0f} s while the robot recovers.'
         )
         return True
+
+    def _boxed_probe_point(self, rs: RobotState) -> Optional[Tuple[float, float]]:
+        """An open map cell about boxed_in_probe_dist from the robot, reachable on known free space."""
+        m = self._goal_map_for(rs)
+        if m is None or rs.position is None or self.boxed_in_probe_dist <= 0.0:
+            return None
+        cell = self._world_to_cell(m, rs.position[0], rs.position[1])
+        if cell is None:
+            return None
+        res = float(m.info.resolution)
+        grid = np.asarray(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+        r = int(math.ceil((self.boxed_in_probe_dist + 0.6) / res))
+        cx, cy = cell
+        y0, y1 = max(0, cy - r), min(grid.shape[0], cy + r + 1)
+        x0, x1 = max(0, cx - r), min(grid.shape[1], cx + r + 1)
+        win = grid[y0:y1, x0:x1]
+        known_free = ((win >= 0) & (win < OCCUPIED_THRESH)).astype(np.uint8)
+        clear = cv2.distanceTransform(
+            (win < OCCUPIED_THRESH).astype(np.uint8), cv2.DIST_L2, 3) * res
+        passable = (known_free > 0) & (clear >= 0.2)
+        ry, rx = cy - y0, cx - x0
+        k = int(round(0.25 / res))
+        passable[max(0, ry - k):ry + k + 1, max(0, rx - k):rx + k + 1] |= (
+            known_free[max(0, ry - k):ry + k + 1, max(0, rx - k):rx + k + 1] > 0)
+        _n, lab = cv2.connectedComponents(passable.astype(np.uint8), connectivity=8)
+        if lab[ry, rx] == 0:
+            return None
+        yy, xx = np.mgrid[0:win.shape[0], 0:win.shape[1]]
+        d = np.hypot(yy - ry, xx - rx) * res
+        cand = (lab == lab[ry, rx]) & (np.abs(d - self.boxed_in_probe_dist) <= 0.4) & (clear >= 0.3)
+        if not np.any(cand):
+            return None
+        score = np.where(cand, clear, -1.0)
+        j, i = np.unravel_index(int(np.argmax(score)), score.shape)
+        ox, oy = m.info.origin.position.x, m.info.origin.position.y
+        return (ox + (x0 + i + 0.5) * res, oy + (y0 + j + 0.5) * res)
+
+    def _start_boxed_probe(self, rs: RobotState, goals: list, now: float) -> bool:
+        """Plan to an open point next to the robot; the result decides boxed in or not."""
+        if rs.boxed_probe_pending or rs.path_precheck_client is None:
+            return False
+        pt = self._boxed_probe_point(rs)
+        if pt is None:
+            return False
+        nav_goal = self._pose_stamped_for_nav_dispatch(rs, str(self.world_frame), pt[0], pt[1], 0.0)
+        if nav_goal is None:
+            return False
+        rs.boxed_probe_epoch += 1
+        epoch = rs.boxed_probe_epoch
+        rs.boxed_probe_pending = True
+        rs.boxed_probe_started = now
+        rs.boxed_probe_goals = list(goals)
+        cp_goal = ComputePathToPose.Goal()
+        cp_goal.use_start = False
+        cp_goal.planner_id = self.nav2_path_precheck_planner_id
+        cp_goal.goal = nav_goal
+
+        def on_response(fut, r=rs, e=epoch):
+            if e != r.boxed_probe_epoch or not r.boxed_probe_pending:
+                return
+            try:
+                gh = fut.result()
+            except Exception as exc:
+                self._boxed_probe_done(r, None, f'send failed ({exc})')
+                return
+            if gh is None or not gh.accepted:
+                self._boxed_probe_done(r, None, 'rejected')
+                return
+            gh.get_result_async().add_done_callback(
+                lambda f2, r2=r, e2=e: self._boxed_probe_result(f2, r2, e2))
+
+        rs.path_precheck_client.send_goal_async(cp_goal).add_done_callback(on_response)
+        self.get_logger().warn(
+            f'[{rs.name}] No path to {len(goals)} different goals with the robot in place; '
+            f'checking with a plan to an open point {_dist(pt, rs.position):.1f} m away '
+            'whether the robot or the goals are the problem')
+        return True
+
+    def _boxed_probe_result(self, future, rs: RobotState, epoch: int) -> None:
+        if epoch != rs.boxed_probe_epoch or not rs.boxed_probe_pending:
+            return
+        try:
+            wrapped = future.result()
+        except Exception as exc:
+            self._boxed_probe_done(rs, None, f'result error ({exc})')
+            return
+        ok = False
+        if wrapped.status == GoalStatus.STATUS_SUCCEEDED and wrapped.result is not None:
+            path = wrapped.result.path
+            ok = path is not None and len(path.poses) >= max(2, self.nav2_path_min_poses)
+        self._boxed_probe_done(rs, ok, 'planned' if ok else 'no path either')
+
+    def _boxed_probe_done(self, rs: RobotState, ok: Optional[bool], why: str) -> None:
+        """ok True: goals unreachable (blacklist them). False/None: robot boxed in (wait)."""
+        rs.boxed_probe_pending = False
+        rs.boxed_probe_epoch += 1
+        goals, rs.boxed_probe_goals = rs.boxed_probe_goals, []
+        now = self.get_clock().now().nanoseconds / 1e9
+        if ok:
+            rs.boxed_ok_pose = rs.position
+            rs.precheck_fail_streak = []
+            rs.boxed_in_waits = 0
+            for g in goals:
+                self._blacklist_or_home_fail(rs, g)
+                self._mark_settled(rs, g)
+            rs.next_assign_allowed_time = now + 0.3
+            self.get_logger().warn(
+                f'[{rs.name}] The robot can plan to open space next to it, so it is not boxed in: '
+                f'blacklisting the {len(goals)} goal(s) it could not reach')
+            return
+        rs.boxed_in_waits += 1
+        rs.next_assign_allowed_time = max(rs.next_assign_allowed_time, now + self.boxed_in_wait_sec)
+        self.get_logger().warn(
+            f'[{rs.name}] Reachability probe {why}: the robot is boxed in, not the frontiers. '
+            f'Not blacklisting; retrying in {self.boxed_in_wait_sec:.0f} s while the robot recovers.')
+
+    def _goal_map_for(self, rs: RobotState) -> Optional[OccupancyGrid]:
+        """The map this robot's goals are chosen on, in world_frame."""
+        if self._use_global_now and self.latest_global_map is not None:
+            return self.latest_global_map
+        lm = self.latest_local_maps.get(rs.name)
+        return self._local_map_world_view(rs.name, lm) if lm is not None else None
+
+    def _plan_unknown_m(self, rs: RobotState, path: Optional[Path]) -> Optional[Tuple[float, float]]:
+        """(plan length, metres of it on unknown cells before the last nav2_path_unknown_tail_m)."""
+        m = self._goal_map_for(rs)
+        if m is None or path is None or len(path.poses) < 2:
+            return None
+        pframe = (path.header.frame_id or '').strip()
+        if pframe and pframe != str(self.world_frame):
+            try:
+                t = self.tf_buffer.lookup_transform(self.world_frame, pframe, rclpy.time.Time())
+            except (tf2_ros.LookupException, tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException):
+                return None
+            q = t.transform.rotation
+            T = (t.transform.translation.x, t.transform.translation.y,
+                 math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)))
+        else:
+            T = (0.0, 0.0, 0.0)
+        res = float(m.info.resolution)
+        step = max(res, 0.05)
+        pts = [_se2_apply(T, p) for p in self._sample_nav_path_points(path, step)]
+        if len(pts) < 2:
+            return None
+        grid = np.asarray(m.data, dtype=np.int16).reshape((m.info.height, m.info.width))
+        seg = [_dist(pts[i - 1], pts[i]) for i in range(1, len(pts))]
+        total = float(sum(seg))
+        unknown = 0.0
+        from_end = 0.0
+        for i in range(len(pts) - 1, 0, -1):
+            from_end += seg[i - 1]
+            if from_end <= self.nav2_path_unknown_tail_m:
+                continue
+            c = self._world_to_cell(m, pts[i][0], pts[i][1])
+            if c is None or grid[c[1], c[0]] < 0:
+                unknown += seg[i - 1]
+        return total, unknown
 
     def _path_precheck_result_callback(self, future, rs: RobotState, epoch: int):
         if epoch != rs.path_precheck_epoch:
@@ -4621,6 +4843,22 @@ class MultiRobotExplorer(Node):
         rs.precheck_transient_repeat_count = 0
         rs.precheck_fail_streak = []
         rs.boxed_in_waits = 0
+        if self.nav2_path_max_unknown_m > 0.0 and not rs.homing_active:
+            # Nav2 plans through unknown space, so a frontier behind a wall
+            # or glass still gets a plan: around the outside of the mapped
+            # area. Inky followed one to a goal 5.6 m away for 258 s, across
+            # the whole map, and aborted 24 m from it (hall3, 2026-11-12).
+            pu = self._plan_unknown_m(rs, path)
+            if pu is not None and pu[1] > self.nav2_path_max_unknown_m:
+                self.get_logger().warn(
+                    f'[{rs.name}] Plan to ({gwx:.2f}, {gwy:.2f}) runs {pu[1]:.1f} m of its '
+                    f'{pu[0]:.1f} m through unmapped space: a detour outside the map; '
+                    'blacklisting the goal')
+                self._blacklist_or_home_fail(rs, world_goal_xy)
+                self._mark_settled(rs, world_goal_xy)
+                now_ts = self.get_clock().now().nanoseconds / 1e9
+                rs.next_assign_allowed_time = max(rs.next_assign_allowed_time, now_ts + 0.3)
+                return
         self._dispatch_navigate_to_pose(
             rs, frontier, gwx, gwy, from_retarget)
 

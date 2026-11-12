@@ -119,6 +119,41 @@ run. (`results/hall2_central_only.json` is the earlier scoring from the central 
 - The reference is less distinctive than in other runs (best score 1.46x the best rival orientation,
   against 1.8-2.5 elsewhere), but the live merger agrees with it to within 0.08 m.
 
+## Does map_merge's confirmation rule make the graph methods safe? (2026-11-12)
+
+`confirm_rule.py` replays the rule `map_merge` uses since commit `c44811b` over each method's accepted
+answers in time: the first alignment needs two estimates in a row that agree (within 0.5 m and 8 deg
+at the centre of Clyde's grid), and a switch needs three. These numbers are `map_merge`'s, fixed
+before the replay. AKAZE is replayed under the same rule with `map_merge`'s current gates (8
+inliers, ratio 0.25, confidence 0.65, scale within 5%). Answers come every 15 s here, against about
+1 s live, so compare methods with each other, not with live timings.
+
+Time points at which the held alignment was right / wrong, and when it was first right:
+
+| Run | AKAZE | Clearance only | FAQ geodesic + clearance | Partial, geodesic | Partial, Euclidean |
+| --- | --- | --- | --- | --- | --- |
+| `twobot1` | 30 / 0, 210 s | 29 / 0, 225 s | 29 / 0, 225 s | 0 / 0, never | 30 / 0, 210 s |
+| `twobot4` | 12 / 0, 180 s | 17 / 0, 105 s | 16 / 0, 120 s | 15 / 0, 135 s | 16 / 0, 120 s |
+| `small1` | 27 / 0, 180 s | 29 / 0, 150 s | 31 / 0, 120 s | 27 / 0, 180 s | 30 / 0, 135 s |
+| `linktest1` | 9 / 0, 165 s | 7 / 0, 195 s | 11 / 0, 135 s | 10 / 0, 150 s | 8 / 0, 180 s |
+| `hall1` | 30 / 0, 345 s | 25 / 0, 420 s | 32 / 0, 315 s | 29 / 0, 360 s | 32 / 1, 300 s |
+| `hall2` | 32 / 0, 645 s | 30 / 42, 630 s | 37 / 35, 570 s | 30 / 35, 660 s | 31 / 36, 660 s |
+| All six | 140 / 0 | 137 / 42 | 156 / 35 | 111 / 35 | 147 / 37 |
+
+- The rule removes every wrong commitment in the three-room runs and `hall1` (one 0.3-0.5 m near miss
+  remains for Euclidean partial matching in `hall1`). FAQ geodesic + clearance then answers first in
+  five of six runs: 15-60 s before AKAZE in the three-room runs, 30 s in `hall1`.
+- It does not help in `hall2`. Every graph method commits at 45 s, at 7-18% overlap, to an alignment
+  rotated by about 90 deg, and holds a wrong alignment for about 9 minutes. The early estimates are
+  wrong in the same way each time (the corridor loop looks alike turned by a right angle), so they
+  agree with each other and pass a rule built to filter out noise.
+- AKAZE never held a wrong alignment in any run, but it answers later.
+- Conclusion so far: confirming over time fixes random wrong answers, not systematic ones. Graph
+  structure built from these free-space graphs does not tell apart a corridor loop and its rotation.
+  A rule that would have prevented `hall2` (for example a minimum shared area before the first
+  commitment) would be fitted to that one run; it needs a new hallway run to test.
+- `linktest1` (2026-11-12, three-room area, the Wi-Fi failsafe test) is new held-out data here.
+
 How far each row is a fair test:
 
 - Spacing, restarts and the conflict gate were frozen on the single-robot runs before either
@@ -187,7 +222,8 @@ python3 run_real.py && python3 summarize_real.py
 python3 graph_noise.py
 python3 simulate.py
 python3 spacing_sweep.py && python3 paired_edges.py
-python3 eval_twobot.py twobot1 twobot4 hall1 small1 hall2
+python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2
+python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py

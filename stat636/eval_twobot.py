@@ -20,8 +20,8 @@ from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 from map_graph import build_graph
-from matching import akaze_baseline, clearance_similarity, consistency_match, faq, geodesic_kernel, \
-    map_agreement, ransac_rigid
+from matching import akaze_baseline, akaze_estimate, clearance_similarity, consistency_match, faq, \
+    geodesic_kernel, map_agreement, ransac_rigid
 from registration import Rigid, register_refined
 from run_real import build_jobs, evaluate, free_overlap
 
@@ -121,11 +121,18 @@ def test_case(job):
                free_a=float(np.sum(ga == 0) * res ** 2), free_b=float(np.sum(gb == 0) * res ** 2))
     if B.n == 0:
         return row
+    # Centre of Clyde's grid, where map_merge measures how far two alignments disagree.
+    row['centre_b'] = (ob + 0.5 * res * np.array([gb.shape[1], gb.shape[0]])).tolist()
     T, info = akaze_baseline(ga, oa, gb, ob, res)
     row['akaze'] = dict(answered=T is not None, error=None if T is None else evaluate(T, T_ref, B.xy), **info)
+    T, info = akaze_estimate(ga, oa, gb, ob, res)
+    row['akaze_raw'] = dict(info, error=None if T is None else evaluate(T, T_ref, B.xy),
+                            theta=None if T is None else float(T.theta),
+                            t=None if T is None else T.t.tolist())
     for name, (T, conflict, shared) in found.items():
         row[name] = dict(error=evaluate(T, T_ref, B.xy), conflict=conflict, shared=shared,
-                         accepted=bool(conflict <= gates[name] and shared >= MIN_SHARED_M2))
+                         accepted=bool(conflict <= gates[name] and shared >= MIN_SHARED_M2),
+                         theta=float(T.theta), t=T.t.tolist())
     return row
 
 

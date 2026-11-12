@@ -126,6 +126,19 @@ multi_robot_explorer:
     # in an open room for minutes with every frontier behind a closed door,
     # and exploration never completed). 0 = wait forever.
     boxed_in_max_waits: 3
+    # Before the wait, plan to an open map point this far (m) from the robot:
+    # a plan there means the goals, not the robot, are unreachable, and they
+    # are blacklisted at once. With every frontier left behind glass or a
+    # wall, both robots in hall3 otherwise waited 3 x 10 s per round at the
+    # ends of corridors. 0 disables the probe.
+    boxed_in_probe_dist: 1.2
+    # A precheck plan with more than this (m) on cells unknown on the map,
+    # not counting its last nav2_path_unknown_tail_m, detours around the
+    # outside of the map (Nav2 plans through unknown space); the goal is
+    # blacklisted. Inky followed such a plan for 258 s to a goal 5.6 m away.
+    # 0 disables.
+    nav2_path_max_unknown_m: 2.5
+    nav2_path_unknown_tail_m: 1.5
 
     # Near-goal arrival probe: after the robot is close to the goal (or stuck
     # short of it with low distance_remaining), call compute_path_to_pose with
@@ -305,9 +318,12 @@ multi_robot_explorer:
     # penalty of (nearby_penalty_dist - d) * nearby_penalty_weight, in the
     # same units as potential_scale * metres. At 2.0 m the two robots ended
     # run 1 (2026-11-12) working within a metre of each other; LiDAR sees a
-    # whole room, so a robot 2 m off maps the same space.
-    nearby_penalty_dist: 3.0
-    nearby_penalty_weight: 2.0
+    # whole room, so a robot 2 m off maps the same space. At 3 m x 2 the
+    # most it took off was 3 m of travel, nothing against 15-20 m hallway
+    # trips: after the merge in hall3 both robots crossed the map to goals
+    # 1.4 m apart. Now worth up to 12.5 m. Retargeting applies it too.
+    nearby_penalty_dist: 5.0
+    nearby_penalty_weight: 5.0
 
     # Blacklist radius (m): goals whose centroids fall within this distance
     # of a blacklisted point will be skipped for that robot.
