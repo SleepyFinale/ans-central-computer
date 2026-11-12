@@ -208,6 +208,9 @@ class RobotState:
     # and avoid treating recent failures as map/frontier issues.
     degraded_active: bool = False
     degraded_since: float = 0.0
+    # Time of the last good TF before this robot went stale: the start of a
+    # link outage, which the stale-TF threshold only notices seconds later.
+    tf_lost_at: float = 0.0
     degraded_reason: str = ''
     # Rolling counters for transient degradation signals.
     tf_degraded_events: int = 0
@@ -947,8 +950,12 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('degraded_recovery_stable_sec', 4.0)
         # A robot whose TF stayed stale this long was probably off the network
         # long enough for its own failsafe (fleet_link_watchdog.py on the
-        # robot, 15 s) to send it home, replacing our goal.
-        self.declare_parameter('link_outage_reset_sec', 15.0)
+        # robot, 30 s) to send it home, replacing our goal.
+        self.declare_parameter('link_outage_reset_sec', 30.0)
+        # A goal Nav2 has not accepted after this long is treated as lost: its
+        # reply can go missing when the link drops (Clyde, hall4 2026-11-12,
+        # was then never given another goal).
+        self.declare_parameter('goal_accept_timeout_sec', 10.0)
         # Merge-state hysteresis (auto mode only): require MERGED to remain
         # stable for a short hold before switching to global, and fall back to
         # local if merge degrades for long enough. This avoids thrashing when
@@ -1262,6 +1269,9 @@ class MultiRobotExplorer(Node):
         )
         self.link_outage_reset_sec: float = float(
             self.get_parameter('link_outage_reset_sec').value
+        )
+        self.goal_accept_timeout_sec: float = float(
+            self.get_parameter('goal_accept_timeout_sec').value
         )
         self.nav2_path_min_poses: int = max(
             1, int(self.get_parameter('nav2_path_min_poses').value)
@@ -2112,6 +2122,24 @@ class MultiRobotExplorer(Node):
                 if self._begin_arrival_probe(rs, tacit_followup=False):
                     rs.arrival_stagnation_probe_fired_seq = rs.active_goal_seq
 
+        # Acceptance watchdog: the stall watchdog below skips goals Nav2 has not
+        # accepted yet, so a lost reply would leave the robot waiting forever.
+        # Not while the robot is out of contact: its reply may still arrive.
+        for rs in self.robots.values():
+            if not (rs.goal_active and rs.goal_pending) or rs.path_precheck_in_progress:
+                continue
+            if rs.active_goal_sent_time <= 0.0:
+                continue
+            if self.degraded_hold_enabled and rs.degraded_active:
+                continue
+            waited = now - rs.active_goal_sent_time
+            if waited > self.goal_accept_timeout_sec:
+                self.get_logger().warn(
+                    f'[{rs.name}] Nav2 has not accepted the goal after {waited:.0f} s; '
+                    'treating its reply as lost and assigning the robot again')
+                self._cancel_goal(rs, reason='accept_timeout')
+                rs.active_goal_seq = 0
+
         # Stall watchdog: cancel only when movement is expected but TF pose has
         # remained effectively stagnant for progress_timeout seconds. Skip while
         # degraded hold is active so transient data problems don't cause
@@ -2289,7 +2317,9 @@ class MultiRobotExplorer(Node):
                     and (now_recover - rs.degraded_since)
                     >= self.degraded_recovery_stable_sec
                 ):
-                    outage = now_recover - rs.degraded_since
+                    # Count from the last good TF, not from when the stale
+                    # threshold noticed: that misses the first seconds.
+                    outage = now_recover - (rs.tf_lost_at or rs.degraded_since)
                     if (
                         rs.degraded_reason == 'tf_stale'
                         and outage >= self.link_outage_reset_sec
@@ -2312,6 +2342,7 @@ class MultiRobotExplorer(Node):
                     rs.degraded_active = False
                     rs.degraded_since = 0.0
                     rs.degraded_reason = ''
+                    rs.tf_lost_at = 0.0
                     rs.precheck_fail_events = 0
                     rs.precheck_timeout_events = 0
                     rs.precheck_server_unavailable_events = 0
@@ -2790,6 +2821,7 @@ class MultiRobotExplorer(Node):
                         rs.degraded_active = True
                         rs.degraded_since = now
                         rs.degraded_reason = 'tf_stale'
+                        rs.tf_lost_at = rs.last_tf_update_time
                         self.get_logger().warn(
                             f'[{rs.name}] Entering degraded hold due to stale TF '
                             f'(age={now - rs.last_tf_update_time:.2f}s)'

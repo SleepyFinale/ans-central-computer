@@ -138,7 +138,9 @@ Time points at which the held alignment was right / wrong, and when it was first
 | `linktest1` | 9 / 0, 165 s | 7 / 0, 195 s | 11 / 0, 135 s | 10 / 0, 150 s | 8 / 0, 180 s |
 | `hall1` | 30 / 0, 345 s | 25 / 0, 420 s | 32 / 0, 315 s | 29 / 0, 360 s | 32 / 1, 300 s |
 | `hall2` | 32 / 0, 645 s | 30 / 42, 630 s | 37 / 35, 570 s | 30 / 35, 660 s | 31 / 36, 660 s |
-| All six | 140 / 0 | 137 / 42 | 156 / 35 | 111 / 35 | 147 / 37 |
+| `hall3` | 82 / 0, 225 s | 77 / 0, 300 s | 77 / 3, 255 s | 72 / 13, 345 s | 79 / 7, 270 s |
+| `hall4` | 20 / 0, 675 s | 22 / 36, 645 s | 24 / 0, 615 s | 0 / 55, never | 0 / 53, never |
+| All eight | 242 / 0 | 236 / 78 | 257 / 38 | 183 / 103 | 226 / 97 |
 
 - The rule removes every wrong commitment in the three-room runs and `hall1` (one 0.3-0.5 m near miss
   remains for Euclidean partial matching in `hall1`). FAQ geodesic + clearance then answers first in
@@ -153,6 +155,21 @@ Time points at which the held alignment was right / wrong, and when it was first
   A rule that would have prevented `hall2` (for example a minimum shared area before the first
   commitment) would be fitted to that one run; it needs a new hallway run to test.
 - `linktest1` (2026-11-12, three-room area, the Wi-Fi failsafe test) is new held-out data here.
+- `hall3` (2026-11-12, hallways, scored after the rule was fixed) is the held-out repeat of `hall2`.
+  FAQ geodesic + clearance held no gross wrong alignment this time (3 time points 0.3-2 m off), but
+  answered 30 s after AKAZE (255 s against 225 s; the live merger was right from 195 s). Both partial
+  matching methods again committed to gross wrong alignments early (11 and 7 time points 2 m or more
+  off). So in hallways the graph methods are not faster than AKAZE and some are still unsafe; in the
+  three-room runs FAQ geodesic + clearance stays faster and safe.
+- `hall4` (2026-11-12, hallways, stopped by hand after about 17 min; Clyde mapped only one corridor,
+  43 m2). The reference is the least distinctive so far (best score 1.34x the best rival orientation)
+  but puts Clyde's corridor on Inky's top corridor as in `hall2` and `hall3`, with 95% of Clyde's walls
+  within 10 cm. FAQ geodesic + clearance was right first (615 s) and never wrong; both partial
+  matching methods held gross wrong alignments the whole run. The live merger never merged: it
+  rejected estimates whose scale was 6.5-7% off. That gate is right: across all eight runs every AKAZE
+  estimate with scale 5-10% off was wrong (7 of 7) and every one within 5% was right. Offline, under
+  the same gates, AKAZE was first right at 675 s; why the live merger still had not merged by the end
+  is not explained (the offline baseline skips bundle adjustment and map padding).
 
 How far each row is a fair test:
 
@@ -222,8 +239,8 @@ python3 run_real.py && python3 summarize_real.py
 python3 graph_noise.py
 python3 simulate.py
 python3 spacing_sweep.py && python3 paired_edges.py
-python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2
-python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2
+python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4
+python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py

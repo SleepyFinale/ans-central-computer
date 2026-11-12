@@ -309,9 +309,14 @@ multi_robot_explorer:
     # Require this many seconds of healthy signals before clearing degraded hold.
     degraded_recovery_stable_sec: 5.0
     # A robot out of contact (stale TF) this long has likely driven itself
-    # home (fleet_link_watchdog.py on the robot, after 15 s without the
+    # home (fleet_link_watchdog.py on the robot, after 30 s without the
     # central PC). On its return its old goal is dropped, not blacklisted.
-    link_outage_reset_sec: 15.0
+    # Counted from its last good TF.
+    link_outage_reset_sec: 30.0
+    # A goal Nav2 has not accepted after this long is dropped (not
+    # blacklisted) and the robot assigned again: the reply can be lost when
+    # the link drops (Clyde sat idle for 13 minutes in hall4, 2026-11-12).
+    goal_accept_timeout_sec: 10.0
 
     # Distance (m) at which a frontier near another robot's goal (active,
     # in its path precheck, or handed out earlier in the same pass) gets a
