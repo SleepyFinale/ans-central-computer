@@ -102,6 +102,9 @@ MapMerge::MapMerge()
   if (!this->has_parameter("estimation_confidence")) {
     this->declare_parameter<double>("estimation_confidence", 1.0);
   }
+  if (!this->has_parameter("estimation_min_inliers")) {
+    this->declare_parameter<int>("estimation_min_inliers", 8);
+  }
   if (!this->has_parameter("estimation_min_inlier_ratio")) {
     this->declare_parameter<double>("estimation_min_inlier_ratio", 0.5);
   }
@@ -137,6 +140,7 @@ MapMerge::MapMerge()
   this->get_parameter("known_init_poses", have_initial_poses_);
   this->get_parameter("estimation_confidence", confidence_threshold_);
   this->get_parameter("estimation_min_inlier_ratio", min_inlier_ratio_);
+  this->get_parameter("estimation_min_inliers", min_inliers_);
   this->get_parameter("robot_map_topic", robot_map_topic_);
   this->get_parameter("robot_map_updates_topic", robot_map_updates_topic_);
   this->get_parameter("robot_namespace", robot_namespace_);
@@ -718,7 +722,7 @@ void MapMerge::poseEstimation()
     // TODO allow user to change feature type
     bool success = pipeline_.estimateTransforms(
       logger_, combine_grids::FeatureType::AKAZE, confidence_threshold_,
-      min_inlier_ratio_);
+      min_inlier_ratio_, min_inliers_);
 
     if (!success) {
       RCLCPP_INFO(logger_, "No grid poses estimated");

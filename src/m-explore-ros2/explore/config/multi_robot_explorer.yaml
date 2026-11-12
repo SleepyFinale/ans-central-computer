@@ -40,7 +40,10 @@ multi_robot_explorer:
     # - fall back to local after non-MERGED persists for this long
     # This avoids global-planning thrash when map_merge briefly reports MERGED
     # during weak/unstable feature matches.
-    merge_stable_hold_sec: 20.0
+    # 6 s, not 20: map_merge now confirms the first alignment with a second
+    # agreeing estimate and holds it through weak passes, and every second
+    # here is a second the robots explore without seeing each other's maps.
+    merge_stable_hold_sec: 6.0
     # Longer grace when map_merge/monitor briefly reports PARTIAL so we do not
     # thrash global vs local exploration on TF jitter (see map_merge_state_monitor).
     merge_degrade_grace_sec: 8.0
@@ -293,9 +296,14 @@ multi_robot_explorer:
     # Require this many seconds of healthy signals before clearing degraded hold.
     degraded_recovery_stable_sec: 5.0
 
-    # Distance (m) at which a frontier near another robot's active goal
-    # gets a penalty (discourages sending robots to the same area).
-    nearby_penalty_dist: 2.0
+    # Distance (m) at which a frontier near another robot's goal (active,
+    # in its path precheck, or handed out earlier in the same pass) gets a
+    # penalty of (nearby_penalty_dist - d) * nearby_penalty_weight, in the
+    # same units as potential_scale * metres. At 2.0 m the two robots ended
+    # run 1 (2026-11-12) working within a metre of each other; LiDAR sees a
+    # whole room, so a robot 2 m off maps the same space.
+    nearby_penalty_dist: 3.0
+    nearby_penalty_weight: 2.0
 
     # Blacklist radius (m): goals whose centroids fall within this distance
     # of a blacklisted point will be skipped for that robot.

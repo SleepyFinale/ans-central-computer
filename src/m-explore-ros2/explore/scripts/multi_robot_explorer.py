@@ -20,6 +20,7 @@ robot sees frontiers on its own portion and explores independently
 until map overlap is detected.
 """
 
+import copy
 import math
 import time
 import re
@@ -243,6 +244,12 @@ class RobotState:
     arrival_stagnation_probe_fired_seq: int = -1
     arrival_probe_for_goal_seq: int = 0
     arrival_probe_map_ref: Optional[OccupancyGrid] = None
+    # Last world_frame -> <robot>/map transform (x, y, yaw) seen on TF. Every
+    # stored world point of this robot (blacklist, goals, anchors) lies in
+    # its own map, so when map_merge moves that map in the world (a merge, a
+    # re-estimate, the side-by-side placement shifting as another map grows)
+    # they are moved with it; see MultiRobotExplorer._track_world_alignment.
+    world_tf: Optional[Tuple[float, float, float]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +379,28 @@ def _dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def _se2_apply(t: Tuple[float, float, float], p: Tuple[float, float]) -> Tuple[float, float]:
+    c, s = math.cos(t[2]), math.sin(t[2])
+    return (t[0] + c * p[0] - s * p[1], t[1] + s * p[0] + c * p[1])
+
+
+def _se2_inverse_apply(t: Tuple[float, float, float], p: Tuple[float, float]) -> Tuple[float, float]:
+    c, s = math.cos(t[2]), math.sin(t[2])
+    dx, dy = p[0] - t[0], p[1] - t[1]
+    return (c * dx + s * dy, -s * dx + c * dy)
+
+
+class _GridView:
+    """OccupancyGrid look-alike (header, info, data) for a re-placed grid."""
+
+    __slots__ = ('header', 'info', 'data')
+
+    def __init__(self, header, info, data):
+        self.header = header
+        self.info = info
+        self.data = data
+
+
 def geodesic_distance_field(
     grid: np.ndarray,
     start_rc: Tuple[int, int],
@@ -440,6 +469,7 @@ def assign_frontiers(
     assignment_robot_order_fn: Optional[Callable[[List[str]], List[str]]] = None,
     gain_cap_m: float = 0.0,
     relaxed_min_goal_separation: float = 0.0,
+    nearby_penalty_weight: float = 2.0,
 ) -> Tuple[Dict[str, int], bool]:
     """Assign one frontier to each idle robot.
 
@@ -474,12 +504,23 @@ def assign_frontiers(
     if not idle_robots or not frontiers:
         return {}, False
 
-    # already-assigned goal positions (from robots that ARE active)
-    active_goals = [
-        rs.goal_position
-        for rs in robots.values()
-        if rs.goal_active and rs.goal_position is not None
-    ]
+    # Goals other robots are heading for. A goal still in its Nav2 path
+    # precheck (goal_pending, a round trip over Wi-Fi) counts too: left out,
+    # the next robot to go idle was free to pick the frontier next to it.
+    active_goals = []
+    for rs in robots.values():
+        if rs.goal_pending and rs.path_precheck_world_goal_xy is not None:
+            active_goals.append(rs.path_precheck_world_goal_xy)
+        elif rs.goal_active and rs.goal_position is not None:
+            active_goals.append(rs.goal_position)
+
+    def crowding_penalty(xy, goals):
+        pen = 0.0
+        for ag in goals:
+            ad = _dist(xy, ag)
+            if ad < nearby_penalty_dist:
+                pen += (nearby_penalty_dist - ad) * nearby_penalty_weight
+        return pen
 
     robot_list = list(idle_robots.keys())
     relaxed = False
@@ -510,11 +551,7 @@ def assign_frontiers(
                 size_m = min(fr.size_m, gain_cap_m) if gain_cap_m > 0.0 else fr.size_m
                 gain = gain_scale * size_m
                 cost = potential_scale * dist
-                penalty = 0.0
-                for ag in active_goals:
-                    ad = _dist(fr.centroid_world, ag)
-                    if ad < nearby_penalty_dist:
-                        penalty += (nearby_penalty_dist - ad) * 2.0
+                penalty = crowding_penalty(fr.centroid_world, active_goals)
                 if utility_penalty_fn is not None:
                     penalty += float(utility_penalty_fn(rname, fr))
                 utilities[ri, fi] = gain - cost - penalty
@@ -528,6 +565,11 @@ def assign_frontiers(
     name_to_ri = {n: i for i, n in enumerate(robot_list)}
 
     if assignment_robot_order_fn is not None:
+        # Goals handed out earlier in this pass crowd later robots' choices
+        # like active goals do: two robots idle at once (at start, or after
+        # finishing together) otherwise took neighbouring pieces of the same
+        # frontier and drove off side by side.
+        pass_goals: List[Tuple[float, float]] = []
         for rname in assignment_robot_order_fn(list(robot_list)):
             if rname not in name_to_ri:
                 continue
@@ -538,12 +580,17 @@ def assign_frontiers(
                 if fi in assigned_f:
                     continue
                 u = utilities[ri, fi]
+                if not np.isfinite(u):
+                    continue
+                if pass_goals:
+                    u -= crowding_penalty(frontiers[fi].centroid_world, pass_goals)
                 if u > best_u:
                     best_u = u
                     best_fi = fi
             if best_fi is not None and best_u > -1e9:
                 assignments[rname] = best_fi
                 assigned_f.add(best_fi)
+                pass_goals.append(frontiers[best_fi].centroid_world)
     else:
         assigned_r: set = set()
         flat = np.argsort(utilities.ravel())[::-1]
@@ -642,6 +689,7 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('motion_progress_min_delta_m', 0.03)
         self.declare_parameter('motion_progress_window_sec', 2.0)
         self.declare_parameter('nearby_penalty_dist', 2.0)
+        self.declare_parameter('nearby_penalty_weight', 2.0)
         self.declare_parameter('blacklist_radius', 0.5)
         self.declare_parameter('blacklist_clear_radius', 0.5)
         # Blacklist entries never expire on their own. A robot briefly boxed
@@ -956,6 +1004,8 @@ class MultiRobotExplorer(Node):
         )
         self.nearby_penalty_dist = (
             self.get_parameter('nearby_penalty_dist').value)
+        self.nearby_penalty_weight = float(
+            self.get_parameter('nearby_penalty_weight').value)
         self.blacklist_radius = self.get_parameter('blacklist_radius').value
         self.blacklist_clear_radius = float(
             self.get_parameter('blacklist_clear_radius').value)
@@ -1283,6 +1333,9 @@ class MultiRobotExplorer(Node):
         # Per-robot local maps. In many setups these are the same as the maps
         # consumed by map_merge (/<robot>/map).
         self.latest_local_maps: Dict[str, OccupancyGrid] = {}
+        # robot -> (local map msg, world TF key, world-frame view); see
+        # _local_map_world_view.
+        self._local_view_cache: Dict[str, tuple] = {}
         # Map message currently associated with goal selection; set by the
         # frontier-step helpers before assigning goals so _select_goal_point
         # can convert frontier cells into world coordinates without assuming
@@ -1363,6 +1416,13 @@ class MultiRobotExplorer(Node):
         use_local_maps = (
             self.local_map_subscriptions_enable and self.mode != 'global_only'
         )
+        # Openings are looked for on each robot's own map when those are
+        # subscribed. On the merged map they were all false: every one of 29
+        # in six two-robot runs came from it (alignment re-estimates and
+        # overlapping maps redrawing walls), each wiping every blacklist,
+        # so the robots went back to the same unreachable frontiers about
+        # once a minute and exploration never finished.
+        self._openings_on_global_map = not use_local_maps or len(self.robot_names) <= 1
         if use_local_maps:
             for name in self.robot_names:
                 topic = self.local_map_topic_pattern.format(robot=name)
@@ -1497,7 +1557,8 @@ class MultiRobotExplorer(Node):
 
     def _global_map_callback(self, msg: OccupancyGrid):
         self.latest_global_map = msg
-        self._note_map_openings('global', msg)
+        if self._openings_on_global_map:
+            self._note_map_openings('global', msg)
         # Track current map physical size in metres for heuristics that behave
         # differently on tiny initial maps vs. larger, more mature maps.
         res = msg.info.resolution
@@ -2293,7 +2354,9 @@ class MultiRobotExplorer(Node):
             if use_global:
                 self._current_goal_map = self.latest_global_map
             else:
-                self._current_goal_map = self.latest_local_maps.get(rs.name)
+                lm = self.latest_local_maps.get(rs.name)
+                self._current_goal_map = (
+                    self._local_map_world_view(rs.name, lm) if lm is not None else None)
             if self._current_goal_map is None:
                 continue
 
@@ -2436,6 +2499,7 @@ class MultiRobotExplorer(Node):
             and self._robot_may_assign_now(self.robots[rname], now),
             goal_dist_fn=self._goal_dist_for_assignment,
             assignment_robot_order_fn=self._assignment_robot_order,
+            nearby_penalty_weight=self.nearby_penalty_weight,
         )
         for rname, rs_i in self.robots.items():
             if rs_i.goal_active or rs_i.goal_pending or rs_i.position is None:
@@ -2469,6 +2533,9 @@ class MultiRobotExplorer(Node):
             lm = self.latest_local_maps.get(name)
             if lm is None:
                 continue
+            lm = self._local_map_world_view(name, lm)
+            if lm is None:
+                continue
             # Counted before frontier detection: with it set only once a
             # robot had frontiers, a map with none left never completed and
             # the robot stood idle instead of going home.
@@ -2482,7 +2549,7 @@ class MultiRobotExplorer(Node):
             self._current_goal_map = lm
             self._map_size_x = lm.info.width * lm.info.resolution
             self._map_size_y = lm.info.height * lm.info.resolution
-            lframe = (lm.header.frame_id or '').strip() or f'{name}/map'
+            lframe = str(self.world_frame)
             frontiers = detect_frontiers(
                 lm.data,
                 lm.info.width,
@@ -2628,11 +2695,14 @@ class MultiRobotExplorer(Node):
             #   map -> <robot>/map -> <robot>/odom -> <robot>/base_footprint
             # (map_merge in multi-robot; single_robot_world_tf_bridge + SLAM in
             # single-robot central mode.)
+            self._track_world_alignment(rs)
             base_frame = f'{rs.name}/{self.robot_base_frame}'
             try:
+                # Latest transform, no timeout: every callback of this node
+                # shares one callback group, so a blocking wait here could
+                # not receive new TF anyway and only stalled the planner.
                 t = self.tf_buffer.lookup_transform(
-                    self.world_frame, base_frame, rclpy.time.Time(),
-                    timeout=Duration(seconds=0.5))
+                    self.world_frame, base_frame, rclpy.time.Time())
                 rs.position = (
                     t.transform.translation.x,
                     t.transform.translation.y,
@@ -2679,6 +2749,147 @@ class MultiRobotExplorer(Node):
                             f'(age={now - rs.last_tf_update_time:.2f}s)'
                         )
 
+    def _lookup_world_tf(self, name: str) -> Optional[Tuple[float, float, float]]:
+        """Latest world_frame -> <robot>/map as (x, y, yaw), or None."""
+        frame = self.nav_goal_frame_pattern.format(robot=name)
+        if frame == str(self.world_frame):
+            return (0.0, 0.0, 0.0)
+        try:
+            t = self.tf_buffer.lookup_transform(
+                self.world_frame, frame, rclpy.time.Time())
+        except (tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException):
+            return None
+        q = t.transform.rotation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        return (t.transform.translation.x, t.transform.translation.y, yaw)
+
+    def _track_world_alignment(self, rs: RobotState) -> None:
+        """Move this robot's stored world points when its map moves in the world.
+
+        Blacklist points, goals and anchors are kept in world_frame, but they
+        are places in the robot's own map. Before the maps merge, map_merge
+        places each map side by side and shifts a map whenever the one before
+        it grows; at the merge, a map jumps by metres. Left alone, every
+        stored point then named the wrong place: Clyde's goal from before the
+        first merge was blacklisted 10 m from where it failed.
+        """
+        new = self._lookup_world_tf(rs.name)
+        if new is None:
+            return
+        old = rs.world_tf
+        rs.world_tf = new
+        if old is None:
+            return
+        dth = math.atan2(math.sin(new[2] - old[2]), math.cos(new[2] - old[2]))
+        if math.hypot(new[0] - old[0], new[1] - old[1]) < 0.01 and abs(dth) < math.radians(0.2):
+            return
+
+        def mv(p):
+            if p is None:
+                return None
+            return _se2_apply(new, _se2_inverse_apply(old, (float(p[0]), float(p[1]))))
+
+        moved = {}
+
+        def mv_bl(p):
+            # Same tuple in, same tuple out: blacklist and the two sets share
+            # entries and are compared by equality.
+            key = (float(p[0]), float(p[1]))
+            if key not in moved:
+                moved[key] = mv(key)
+            return moved[key]
+
+        rs.blacklist = [mv_bl(p) for p in rs.blacklist]
+        rs.repeat_blacklist = {mv_bl(p) for p in rs.repeat_blacklist}
+        rs.settled_blacklist = {mv_bl(p) for p in rs.settled_blacklist}
+        for attr in (
+            'goal_position', 'held_goal_position', 'retarget_anchor',
+            'last_target_frontier_centroid', 'last_goal_world',
+            'last_pose_when_goal_sent', 'last_motion_sample_pose', 'start_pose_xy',
+            'path_precheck_world_goal_xy', 'precheck_transient_goal_xy',
+            'boxed_in_pose', 'position',
+        ):
+            setattr(rs, attr, mv(getattr(rs, attr)))
+        rs.recent_goals = deque(
+            ((*mv((g[0], g[1])), g[2]) for g in rs.recent_goals),
+            maxlen=rs.recent_goals.maxlen)
+        rs.visited_goals = [mv(v) for v in rs.visited_goals]
+        rs.precheck_fail_streak = [(e[0], mv(e[1]), mv(e[2])) for e in rs.precheck_fail_streak]
+        # The merged grid changes wholesale with the alignment; comparing
+        # it with an older one would read as doors opening.
+        self._opening_ref.pop('global', None)
+        jump = math.hypot(new[0] - old[0], new[1] - old[1])
+        if jump >= 0.3 or abs(dth) >= math.radians(5.0):
+            self.get_logger().info(
+                f'[{rs.name}] map moved in {self.world_frame} by {jump:.2f} m / '
+                f'{math.degrees(dth):.1f} deg (map_merge alignment); moved '
+                f'{len(rs.blacklist)} blacklist point(s) and stored goals with it')
+
+    def _local_map_world_view(self, name: str, lm: OccupancyGrid):
+        """This robot's own map, placed in world_frame where map_merge puts it.
+
+        Local mode plans on each robot's map, but robot poses, goals and
+        blacklists are all in world_frame. Planning on the raw map compared
+        a world pose with map-frame frontiers, metres apart before the maps
+        merge (Inky stood at (3.9, -0.6) in its map and (8.9, -2.3) in the
+        world), so travel distances, heading, blacklist and separation tests
+        were all off. Translation only moves the origin; a rotated
+        placement (after a merge) is resampled.
+        """
+        t = self._lookup_world_tf(name)
+        if t is None:
+            return None
+        key = (round(t[0], 3), round(t[1], 3), round(t[2], 4))
+        cached = self._local_view_cache.get(name)
+        if cached is not None and cached[0] is lm and cached[1] == key:
+            return cached[2]
+        res = float(lm.info.resolution)
+        w, h = int(lm.info.width), int(lm.info.height)
+        ox, oy = float(lm.info.origin.position.x), float(lm.info.origin.position.y)
+        info = copy.deepcopy(lm.info)
+        header = copy.deepcopy(lm.header)
+        header.frame_id = str(self.world_frame)
+        if abs(t[2]) < math.radians(0.2):
+            info.origin.position.x = ox + t[0]
+            info.origin.position.y = oy + t[1]
+            data = lm.data
+        else:
+            grid = np.asarray(lm.data, dtype=np.int8).reshape(h, w).view(np.uint8)
+            corners = [_se2_apply(t, (ox + cx * w * res, oy + cy * h * res))
+                       for cx in (0, 1) for cy in (0, 1)]
+            min_x = min(c[0] for c in corners)
+            min_y = min(c[1] for c in corners)
+            nw = int(math.ceil((max(c[0] for c in corners) - min_x) / res)) + 1
+            nh = int(math.ceil((max(c[1] for c in corners) - min_y) / res)) + 1
+            # Destination cell (u, v) -> world -> local cell; warpAffine takes
+            # that inverse map with WARP_INVERSE_MAP.
+            c, s_ = math.cos(t[2]), math.sin(t[2])
+            # world = min + (u + 0.5) * res; local = R^T (world - t)
+            # local cell = (local - o) / res - 0.5
+            a00, a01 = c, s_
+            a10, a11 = -s_, c
+            wx0, wy0 = min_x + 0.5 * res - t[0], min_y + 0.5 * res - t[1]
+            m = np.array([
+                [a00, a01, (a00 * wx0 + a01 * wy0 - ox) / res - 0.5],
+                [a10, a11, (a10 * wx0 + a11 * wy0 - oy) / res - 0.5],
+            ], dtype=np.float64)
+            warped = cv2.warpAffine(
+                grid, m, (nw, nh), flags=cv2.INTER_NEAREST | cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_CONSTANT, borderValue=255)
+            data = warped.view(np.int8).reshape(-1)
+            info.width, info.height = nw, nh
+            info.origin.position.x = min_x
+            info.origin.position.y = min_y
+            info.origin.orientation.x = 0.0
+            info.origin.orientation.y = 0.0
+            info.origin.orientation.z = 0.0
+            info.origin.orientation.w = 1.0
+        view = _GridView(header, info, data)
+        self._local_view_cache[name] = (lm, key, view)
+        return view
+
     # -----------------------------------------------------------------------
     # Nav2 dispatch frame (Path 2: goals in <robot>/map)
     # -----------------------------------------------------------------------
@@ -2706,17 +2917,17 @@ class MultiRobotExplorer(Node):
             return (float(x), float(y))
         ps = PoseStamped()
         ps.header.frame_id = from_frame
-        ps.header.stamp = self.get_clock().now().to_msg()
+        # Zero stamp = latest transform. With "now" the lookup asked for TF
+        # newer than map_merge had published and failed ("extrapolation into
+        # the future"), after blocking the planner for the full timeout: this
+        # node's callbacks share one group, so the wait could not receive TF.
+        ps.header.stamp = rclpy.time.Time().to_msg()
         ps.pose.position.x = float(x)
         ps.pose.position.y = float(y)
         ps.pose.position.z = 0.0
         ps.pose.orientation.w = 1.0
         try:
-            out = self.tf_buffer.transform(
-                ps,
-                to_frame,
-                timeout=Duration(seconds=self.nav_goal_tf_transform_timeout_sec),
-            )
+            out = self.tf_buffer.transform(ps, to_frame)
             return (float(out.pose.position.x), float(out.pose.position.y))
         except (tf2_ros.LookupException,
                 tf2_ros.ConnectivityException,

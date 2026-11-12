@@ -64,7 +64,8 @@ public:
       rclcpp::Logger logger = rclcpp::get_logger("estimateTransforms"),
       FeatureType feature = FeatureType::AKAZE,
       double confidence = 1.0,
-      double min_inlier_ratio = 0.5);
+      double min_inlier_ratio = 0.5,
+      int min_inliers = 8);
     nav_msgs::msg::OccupancyGrid::SharedPtr composeGrids(
       rclcpp::Logger logger = rclcpp::get_logger("composeGrids"));
 
@@ -113,6 +114,30 @@ private:
 
     /** Store the alignment just estimated so a later weak estimate can reuse it. */
     void rememberAlignment();
+
+    /** Metric alignment (see HeldAlignment) of the current transforms_. */
+    std::vector < HeldAlignment > currentAlignment() const;
+
+    /**
+     * @brief Largest disagreement between two alignments over every pair of
+     *        grids placed by both: (metres at the second grid's centre, rad).
+     */
+    std::pair < double, double > alignmentDisagreement(
+      const std::vector < HeldAlignment > & a,
+      const std::vector < HeldAlignment > & b) const;
+
+    /**
+     * @brief Turn each matched transform into rotation + translation.
+     * @details All grids share one resolution, so a correct alignment has
+     *          scale 1. Returns the largest |scale - 1| found; transforms are
+     *          made rigid about each grid's centre.
+     */
+    double makeTransformsRigid();
+
+    /** A new alignment that disagrees with held_, and how many estimates in
+     *  a row have agreed with it (see estimateTransforms). */
+    std::vector < HeldAlignment > pending_;
+    int pending_count_ = 0;
 
     /**
      * @brief Fill transforms_ when this pass produced no usable match: reuse

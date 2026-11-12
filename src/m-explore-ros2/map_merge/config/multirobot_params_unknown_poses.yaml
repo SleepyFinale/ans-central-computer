@@ -34,6 +34,11 @@ map_merge:
     # 0.5 rejected every estimate in a large area with hallways, where correct
     # estimates had 0.26-0.42 (2026-11-10); small rooms give about 0.7.
     estimation_min_inlier_ratio: 0.25
+    # Fewest inliers in the best pair for a new alignment. 6 was tried on
+    # replays of three runs (2026-11-12): no earlier merge, since the 6-7
+    # inlier estimates never agreed twice in a row. A new alignment must be
+    # confirmed by agreeing estimates anyway (merging_pipeline.cpp).
+    estimation_min_inliers: 8
     robot_map_topic: map
     robot_map_updates_topic: map_updates
     robot_namespace: ""

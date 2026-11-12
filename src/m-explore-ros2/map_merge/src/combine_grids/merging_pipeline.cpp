@@ -41,6 +41,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 #include <rclcpp/rclcpp.hpp>
 #include <rcpputils/asserts.hpp>
@@ -57,7 +59,8 @@ bool MergingPipeline::estimateTransforms(
   rclcpp::Logger logger,
   FeatureType feature_type,
   double confidence,
-  double min_inlier_ratio)
+  double min_inlier_ratio,
+  int min_inliers)
 {
   std::vector<cv::detail::ImageFeatures> image_features;
   std::vector<cv::detail::MatchesInfo> pairwise_matches;
@@ -149,7 +152,7 @@ bool MergingPipeline::estimateTransforms(
     static_cast<double>(best_matches)) :
     0.0;
 
-  const int kMinInliers = 8;
+  const int kMinInliers = std::max(3, min_inliers);
   if (best_inliers > 0 &&
     (best_inliers < kMinInliers || best_ratio < min_inlier_ratio))
   {
@@ -234,6 +237,83 @@ bool MergingPipeline::estimateTransforms(
     matched_[static_cast<size_t>(j)] = true;
     ++i;
   }
+
+  // A correct alignment of grids with one resolution is rigid. Estimates
+  // with a scale far from 1 are wrong matches; small scale errors are
+  // removed so the grid drawn and the TF published (rotation only) agree.
+  const double kMaxScaleError = 0.05;
+  const double scale_error = makeTransformsRigid();
+  if (scale_error > kMaxScaleError) {
+    RCLCPP_INFO(
+      logger,
+      "[estimateTransforms] Rejected alignment with scale off by %.1f%% "
+      "(inliers=%d, ratio=%.3f); keeping the last accepted alignment if there is one",
+      100.0 * scale_error, best_inliers, best_ratio);
+    placeWithoutMatch();
+    return true;
+  }
+
+  // One wrong match must not move the merged map: an estimate that disagrees
+  // with the alignment in use replaces it only after kConfirmEstimates
+  // estimates in a row agree with it (the map really did need correcting).
+  const double kMaxShiftM = 0.5;
+  const double kMaxTurnRad = 8.0 * M_PI / 180.0;
+  const int kConfirmEstimates = 3;
+  // The first alignment has nothing to be checked against, so it needs two
+  // estimates that agree with each other (weak passes in between do not
+  // count against it).
+  const int kConfirmFirst = 2;
+  const std::vector<HeldAlignment> candidate = currentAlignment();
+  const auto count_valid = [](const std::vector<HeldAlignment> & v) {
+      return std::count_if(v.begin(), v.end(), [](const HeldAlignment & h) {return h.valid;});
+    };
+  if (count_valid(held_) < 2 && count_valid(candidate) >= 2) {
+    bool same_as_pending = false;
+    if (pending_.size() == candidate.size()) {
+      const auto dp = alignmentDisagreement(pending_, candidate);
+      same_as_pending = dp.first <= kMaxShiftM && dp.second <= kMaxTurnRad;
+    }
+    pending_count_ = same_as_pending ? pending_count_ + 1 : 1;
+    pending_ = candidate;
+    if (pending_count_ < kConfirmFirst) {
+      RCLCPP_INFO(
+        logger,
+        "[estimateTransforms] First alignment found (inliers=%d, ratio=%.3f); "
+        "waiting for one more agreeing estimate before using it",
+        best_inliers, best_ratio);
+      placeWithoutMatch();
+      return true;
+    }
+  } else if (held_.size() == candidate.size()) {
+    const auto d = alignmentDisagreement(held_, candidate);
+    if (d.first > kMaxShiftM || d.second > kMaxTurnRad) {
+      bool same_as_pending = false;
+      if (pending_.size() == candidate.size()) {
+        const auto dp = alignmentDisagreement(pending_, candidate);
+        same_as_pending = dp.first <= kMaxShiftM && dp.second <= kMaxTurnRad;
+      }
+      pending_count_ = same_as_pending ? pending_count_ + 1 : 1;
+      pending_ = candidate;
+      if (pending_count_ < kConfirmEstimates) {
+        RCLCPP_INFO(
+          logger,
+          "[estimateTransforms] New alignment differs from the one in use by "
+          "%.2f m / %.1f deg (inliers=%d, ratio=%.3f); waiting for %d more "
+          "agreeing estimate(s) before switching",
+          d.first, d.second * 180.0 / M_PI, best_inliers, best_ratio,
+          kConfirmEstimates - pending_count_);
+        placeWithoutMatch();
+        return true;
+      }
+      RCLCPP_WARN(
+        logger,
+        "[estimateTransforms] Switching to a new alignment %.2f m / %.1f deg "
+        "from the previous one after %d agreeing estimates",
+        d.first, d.second * 180.0 / M_PI, pending_count_);
+    }
+  }
+  pending_.clear();
+  pending_count_ = 0;
 
   rememberAlignment();
 
@@ -382,12 +462,17 @@ void MergingPipeline::rememberAlignment()
   if (matchedCount() < 2) {
     return;
   }
+  held_ = currentAlignment();
+}
+
+std::vector<MergingPipeline::HeldAlignment> MergingPipeline::currentAlignment() const
+{
   // transforms_ are in pixels of each grid and go stale as soon as a grid
   // grows (its origin moves), so keep the alignment in metres instead:
   //   P_common = R * P_grid + c,  with  [R | t] = inv(T_i),  c = t * res - R * O_i
-  held_.assign(transforms_.size(), HeldAlignment());
+  std::vector<HeldAlignment> out(transforms_.size());
   for (size_t i = 0; i < transforms_.size(); ++i) {
-    if (!matched_[i] || transforms_[i].empty() || !grids_[i]) {
+    if (i >= matched_.size() || !matched_[i] || transforms_[i].empty() || !grids_[i]) {
       continue;
     }
     cv::Mat H;
@@ -395,13 +480,83 @@ void MergingPipeline::rememberAlignment()
     const double res = static_cast<double>(grids_[i]->info.resolution);
     const cv::Vec2d origin(
       grids_[i]->info.origin.position.x, grids_[i]->info.origin.position.y);
-    HeldAlignment & held = held_[i];
+    HeldAlignment & held = out[i];
     held.R = cv::Matx22d(
       H.at<double>(0, 0), H.at<double>(0, 1),
       H.at<double>(1, 0), H.at<double>(1, 1));
     held.c = cv::Vec2d(H.at<double>(0, 2), H.at<double>(1, 2)) * res - held.R * origin;
     held.valid = true;
   }
+  return out;
+}
+
+std::pair<double, double> MergingPipeline::alignmentDisagreement(
+  const std::vector<HeldAlignment> & a,
+  const std::vector<HeldAlignment> & b) const
+{
+  double worst_m = 0.0;
+  double worst_rad = 0.0;
+  const size_t n = std::min({a.size(), b.size(), grids_.size()});
+  for (size_t i = 0; i < n; ++i) {
+    if (!a[i].valid || !b[i].valid) {
+      continue;
+    }
+    for (size_t j = 0; j < n; ++j) {
+      if (j == i || !a[j].valid || !b[j].valid || !grids_[j]) {
+        continue;
+      }
+      // Where the centre of grid j lands in grid i's frame, under each.
+      const auto & info = grids_[j]->info;
+      const cv::Vec2d centre(
+        info.origin.position.x + 0.5 * info.width * info.resolution,
+        info.origin.position.y + 0.5 * info.height * info.resolution);
+      const cv::Vec2d pa = a[i].R.inv() * (a[j].R * centre + a[j].c - a[i].c);
+      const cv::Vec2d pb = b[i].R.inv() * (b[j].R * centre + b[j].c - b[i].c);
+      worst_m = std::max(worst_m, cv::norm(pa - pb));
+      const double ta = std::atan2(a[j].R(1, 0), a[j].R(0, 0)) -
+        std::atan2(a[i].R(1, 0), a[i].R(0, 0));
+      const double tb = std::atan2(b[j].R(1, 0), b[j].R(0, 0)) -
+        std::atan2(b[i].R(1, 0), b[i].R(0, 0));
+      worst_rad = std::max(
+        worst_rad, std::abs(std::atan2(std::sin(ta - tb), std::cos(ta - tb))));
+    }
+  }
+  return {worst_m, worst_rad};
+}
+
+double MergingPipeline::makeTransformsRigid()
+{
+  double worst = 0.0;
+  for (size_t i = 0; i < transforms_.size(); ++i) {
+    if (i >= matched_.size() || !matched_[i] || transforms_[i].empty() ||
+      images_[i].empty())
+    {
+      continue;
+    }
+    // H: grid pixels -> merged pixels (what the warper draws).
+    cv::Mat H;
+    cv::invertAffineTransform(transforms_[i].rowRange(0, 2), H);
+    const double a = H.at<double>(0, 0), b = H.at<double>(0, 1);
+    const double c = H.at<double>(1, 0), d = H.at<double>(1, 1);
+    const double scale = std::sqrt(std::abs(a * d - b * c));
+    if (!(scale > 1e-6)) {
+      worst = std::max(worst, 1.0);
+      continue;
+    }
+    worst = std::max(worst, std::abs(scale - 1.0));
+    const double theta = std::atan2(c - b, a + d);
+    const double cs = std::cos(theta), sn = std::sin(theta);
+    // Keep the grid centre where it was.
+    const double px = 0.5 * images_[i].cols, py = 0.5 * images_[i].rows;
+    const double qx = a * px + b * py + H.at<double>(0, 2);
+    const double qy = c * px + d * py + H.at<double>(1, 2);
+    cv::Mat R = (cv::Mat_<double>(2, 3) <<
+      cs, -sn, qx - (cs * px - sn * py),
+      sn, cs, qy - (sn * px + cs * py));
+    cv::Mat forward = transforms_[i].rowRange(0, 2);
+    cv::invertAffineTransform(R, forward);
+  }
+  return worst;
 }
 
 void MergingPipeline::placeWithoutMatch()
