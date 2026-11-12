@@ -926,6 +926,10 @@ class MultiRobotExplorer(Node):
         self.declare_parameter('degraded_precheck_fail_threshold', 3)
         self.declare_parameter('degraded_precheck_window_sec', 10.0)
         self.declare_parameter('degraded_recovery_stable_sec', 4.0)
+        # A robot whose TF stayed stale this long was probably off the network
+        # long enough for its own failsafe (fleet_link_watchdog.py on the
+        # robot, 15 s) to send it home, replacing our goal.
+        self.declare_parameter('link_outage_reset_sec', 15.0)
         # Merge-state hysteresis (auto mode only): require MERGED to remain
         # stable for a short hold before switching to global, and fall back to
         # local if merge degrades for long enough. This avoids thrashing when
@@ -1233,6 +1237,9 @@ class MultiRobotExplorer(Node):
         )
         self.degraded_recovery_stable_sec: float = float(
             self.get_parameter('degraded_recovery_stable_sec').value
+        )
+        self.link_outage_reset_sec: float = float(
+            self.get_parameter('link_outage_reset_sec').value
         )
         self.nav2_path_min_poses: int = max(
             1, int(self.get_parameter('nav2_path_min_poses').value)
@@ -2258,6 +2265,21 @@ class MultiRobotExplorer(Node):
                     and (now_recover - rs.degraded_since)
                     >= self.degraded_recovery_stable_sec
                 ):
+                    outage = now_recover - rs.degraded_since
+                    if (
+                        rs.degraded_reason == 'tf_stale'
+                        and outage >= self.link_outage_reset_sec
+                        and (rs.goal_active or rs.goal_pending)
+                    ):
+                        # The robot's failsafe replaced our goal with a trip
+                        # home, so the goal we track is gone. Drop it without
+                        # blacklisting (seq 0 ignores its late result) and
+                        # assign the robot afresh.
+                        self.get_logger().warn(
+                            f'[{rs.name}] Back after {outage:.0f} s out of contact; '
+                            'dropping its old goal and assigning it again')
+                        self._cancel_goal(rs, reason='link_outage')
+                        rs.active_goal_seq = 0
                     self.get_logger().info(
                         f'[{rs.name}] Clearing degraded hold '
                         f'(reason={rs.degraded_reason}, '

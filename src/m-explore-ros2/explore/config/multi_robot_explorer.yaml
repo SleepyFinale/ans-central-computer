@@ -295,6 +295,10 @@ multi_robot_explorer:
     degraded_precheck_window_sec: 10.0
     # Require this many seconds of healthy signals before clearing degraded hold.
     degraded_recovery_stable_sec: 5.0
+    # A robot out of contact (stale TF) this long has likely driven itself
+    # home (fleet_link_watchdog.py on the robot, after 15 s without the
+    # central PC). On its return its old goal is dropped, not blacklisted.
+    link_outage_reset_sec: 15.0
 
     # Distance (m) at which a frontier near another robot's goal (active,
     # in its path precheck, or handed out earlier in the same pass) gets a

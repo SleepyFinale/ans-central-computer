@@ -7,6 +7,7 @@ Clyde -> Inky transform. Also reads what the live map_merge node had published b
 Run with system Python after sourcing ROS 2:  python3 eval_twobot.py twobot1 twobot4
 """
 import json
+import os
 import sys
 from multiprocessing import Pool
 
@@ -160,8 +161,14 @@ def main():
 
 def evaluate_run(RUN, gates):
     central_bag = f'data/bags/{RUN}/central'
-    inky = read_maps('data/bags/' + RUN + '/inky', '/inky/map')
-    clyde = read_maps('data/bags/' + RUN + '/clyde', '/clyde/map')
+    # A robot's own bag has every map message; when it is missing (robot off
+    # the network after the run), the central bag's copy is used instead.
+    def robot_maps(robot):
+        own = f'data/bags/{RUN}/{robot}'
+        return read_maps(own if os.path.isdir(own) else central_bag, f'/{robot}/map')
+
+    inky = robot_maps('inky')
+    clyde = robot_maps('clyde')
     _, ga, oa, res = inky[-1]
     _, gb, ob, _ = clyde[-1]
     T_ref, score, rival = register_refined(ga, oa, gb, ob, res)

@@ -3,6 +3,7 @@
 
 Usage (after sourcing ROS 2): python3 akaze_gates.py hall1
 """
+import os
 import sys
 
 import cv2
@@ -17,8 +18,14 @@ d = np.load(f'data/{RUN}_final.npz')
 T_ref = Rigid(float(d['theta']), d['t'])
 res = float(d['res'])
 sample = d['ob'] + (np.argwhere(d['gb'] == 0)[::50, ::-1] + 0.5) * res
-inky = read_maps(f'data/bags/{RUN}/inky', '/inky/map')
-clyde = read_maps(f'data/bags/{RUN}/clyde', '/clyde/map')
+def robot_maps(robot):
+    # Fall back to the central bag's copy when a robot's own bag is missing.
+    own = f'data/bags/{RUN}/{robot}'
+    return read_maps(own if os.path.isdir(own) else f'data/bags/{RUN}/central', f'/{robot}/map')
+
+
+inky = robot_maps('inky')
+clyde = robot_maps('clyde')
 start, end = max(inky[0][0], clyde[0][0]), min(inky[-1][0], clyde[-1][0])
 rows = []
 for t in np.arange(start + STEP_S, end + 1e-3, STEP_S):

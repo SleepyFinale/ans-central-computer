@@ -15,6 +15,10 @@
 # By default only warnings and errors from the child processes are printed.
 # Pass --verbose to print every line. Full logs are always written to disk.
 # The script stays in the foreground. Ctrl+C stops every process it started.
+# Robot stages run detached on the robots (/tmp/fleet-stages/), so a robot that
+# drops off Wi-Fi keeps its stack and drives itself home
+# (scripts/comms/fleet_link_watchdog.py on the robot). The fleet keeps running,
+# re-attaches when the robot is back, and stops robot stages over SSH.
 # Robot SSH uses sshpass and ROBOT_SSH_PASSWORD (default: ubuntu).
 set -euo pipefail
 
@@ -44,6 +48,7 @@ TAIL_PIDS=()
 TMP_FILES=()
 declare -A SSH_TARGET=()
 declare -A PID_LABEL=()
+ROBOT_STAGE_ORDER=()
 STOPPING=0
 LAST_PID=""
 
@@ -298,6 +303,8 @@ cleanup_processes() {
   STOPPING=1
   echo ""
   echo "Stopping fleet..."
+  # Robot stages outlive their SSH sessions, so stop them on the robots.
+  stop_robot_stages
   for pid in "${PIDS[@]+"${PIDS[@]}"}"; do
     kill_pid "$pid" TERM
   done
@@ -408,9 +415,18 @@ start_central_stage() {
   run_logged_bash "$tag" "$logfile" "$(central_body "$command")"
 }
 
+# Where a robot stage keeps its log and process-group id on the robot.
+remote_stage_paths() {
+  local robot="$1" stage="$2"
+  cat <<EOF
+STAGE_DIR=/tmp/fleet-stages
+LOG_FILE=/tmp/fleet-stages/${robot}-${stage}.log
+PID_FILE=/tmp/fleet-stages/${robot}-${stage}.pid
+EOF
+}
+
 remote_body() {
-  local command="$1"
-  local remote_path="$2"
+  local command="$1" robot="$2" stage="$3"
   cat <<EOF
 set +u
 cd "\$HOME/turtlebot3"
@@ -418,35 +434,101 @@ source scripts/env/ros_robot_env.bash
 export TURTLEBOT3_MODEL=burger
 export LDS_MODEL=$(printf '%q' "${LDS_MODEL:-LDS-02}")
 export PATH="\$HOME/.local/bin:\$PATH"
-shopt -s huponexit
-cleanup_remote() {
-  trap - EXIT INT TERM HUP
-  if [[ -n "\${CHILD_PID:-}" ]] && kill -0 "\$CHILD_PID" 2>/dev/null; then
-    pkill -TERM -P "\$CHILD_PID" 2>/dev/null || true
-    kill -TERM "\$CHILD_PID" 2>/dev/null || true
-    sleep 2
-    pkill -KILL -P "\$CHILD_PID" 2>/dev/null || true
-    kill -KILL "\$CHILD_PID" 2>/dev/null || true
+# The stage writes to a file, not to this SSH pty: keep its output line-buffered.
+export PYTHONUNBUFFERED=1
+export RCUTILS_LOGGING_BUFFERED_STREAM=0
+$(remote_stage_paths "$robot" "$stage")
+mkdir -p "\$STAGE_DIR"
+# Left over from a run that could not stop it (the robot was off the network).
+if [[ -f "\$PID_FILE" ]]; then
+  old=\$(cat "\$PID_FILE")
+  if kill -0 -- "-\$old" 2>/dev/null; then
+    echo "Stopping ${stage} left over from an earlier run (process group \$old)"
+    kill -TERM -- "-\$old" 2>/dev/null
+    for _ in \$(seq 1 20); do kill -0 -- "-\$old" 2>/dev/null || break; sleep 0.5; done
+    kill -KILL -- "-\$old" 2>/dev/null
   fi
-  rm -f $(printf '%q' "$remote_path")
-}
-trap cleanup_remote EXIT INT TERM HUP
-${command} &
+fi
+# The stage runs in its own session and writes to a file, so it outlives this
+# SSH connection: a robot that loses Wi-Fi keeps its stack running, including
+# the failsafe that drives it home. The fleet stops it with stop_robot_stage,
+# not by hanging up.
+: > "\$LOG_FILE"
+setsid stdbuf -oL -eL bash -c $(printf '%q' "$command") > "\$LOG_FILE" 2>&1 < /dev/null &
 CHILD_PID=\$!
+echo "\$CHILD_PID" > "\$PID_FILE"
+tail -n +1 -F --pid="\$CHILD_PID" "\$LOG_FILE" 2>/dev/null
 wait "\$CHILD_PID"
 EOF
 }
 
-start_robot_stage() {
+# One-off command on a robot (no pty). Exit 255 = robot unreachable.
+robot_ssh() {
   local robot="$1"
-  local stage="$2"
-  local command="$3"
-  local logfile="${RUN_DIR}/${robot}-${stage}.log"
-  local payload remote_name remote_path target
-  remote_name="fleet-bringup-${robot}-${stage}.sh"
-  remote_path="/tmp/${remote_name}"
-  payload="$(printf '%s\n' "$(remote_body "$command" "$remote_path")" | base64 -w0)"
-  target="${SSH_TARGET[$robot]}"
+  shift
+  sshpass -e ssh \
+    -o StrictHostKeyChecking=accept-new \
+    -o PreferredAuthentications=password \
+    -o PubkeyAuthentication=no \
+    -o NumberOfPasswordPrompts=1 \
+    -o ConnectTimeout=8 \
+    "${SSH_TARGET[$robot]}" "$@" </dev/null
+}
+
+# alive | dead | unreachable
+robot_stage_status() {
+  local robot="$1" stage="$2" rc=0
+  robot_ssh "$robot" "$(remote_stage_paths "$robot" "$stage")
+[[ -f \"\$PID_FILE\" ]] && kill -0 -- \"-\$(cat \"\$PID_FILE\")\" 2>/dev/null" >/dev/null 2>&1 || rc=$?
+  if (( rc == 0 )); then
+    echo alive
+  elif (( rc == 255 )); then
+    echo unreachable
+  else
+    echo dead
+  fi
+}
+
+# Stop a robot stage and everything it started. Returns 255 if the robot
+# cannot be reached.
+stop_robot_stage() {
+  local robot="$1" stage="$2"
+  robot_ssh "$robot" "$(remote_stage_paths "$robot" "$stage")
+[[ -f \"\$PID_FILE\" ]] || exit 0
+p=\$(cat \"\$PID_FILE\")
+kill -TERM -- \"-\$p\" 2>/dev/null
+for _ in \$(seq 1 20); do kill -0 -- \"-\$p\" 2>/dev/null || break; sleep 0.5; done
+kill -KILL -- \"-\$p\" 2>/dev/null
+rm -f \"\$PID_FILE\"
+exit 0" >/dev/null 2>&1
+}
+
+# Stop every robot stage, newest first, robots in parallel.
+stop_robot_stages() {
+  local robot i key
+  local -a jobs=()
+  for robot in "${ROBOTS[@]+"${ROBOTS[@]}"}"; do
+    (
+      if ! robot_ssh "$robot" true >/dev/null 2>&1; then
+        echo "WARNING: cannot reach ${robot}; its stack is still running there." >&2
+        echo "  It is stopped at the next fleet start, or by hand: ssh ${SSH_TARGET[$robot]} 'for f in /tmp/fleet-stages/*.pid; do kill -TERM -- -\$(cat \$f); done'" >&2
+        exit 0
+      fi
+      for (( i=${#ROBOT_STAGE_ORDER[@]}-1; i>=0; i-- )); do
+        key="${ROBOT_STAGE_ORDER[$i]}"
+        [[ "$key" == "${robot}:"* ]] || continue
+        stop_robot_stage "$robot" "${key#*:}" || true
+      done
+    ) &
+    jobs+=("$!")
+  done
+  if (( ${#jobs[@]} )); then
+    wait "${jobs[@]}"
+  fi
+}
+
+robot_ssh_tt() {
+  local robot="$1" remote_command="$2" logfile="$3"
   setsid sshpass -e ssh -tt \
     -o StrictHostKeyChecking=accept-new \
     -o PreferredAuthentications=password \
@@ -455,13 +537,40 @@ start_robot_stage() {
     -o ConnectTimeout=20 \
     -o ServerAliveInterval=15 \
     -o ServerAliveCountMax=4 \
-    "$target" \
-    "echo ${payload} | base64 -d > /tmp/${remote_name} && bash /tmp/${remote_name}" \
-    >"$logfile" 2>&1 &
+    "${SSH_TARGET[$robot]}" "$remote_command" \
+    >>"$logfile" 2>&1 &
   LAST_PID=$!
+}
+
+start_robot_stage() {
+  local robot="$1"
+  local stage="$2"
+  local command="$3"
+  local logfile="${RUN_DIR}/${robot}-${stage}.log"
+  local payload remote_name
+  remote_name="fleet-bringup-${robot}-${stage}.sh"
+  payload="$(printf '%s\n' "$(remote_body "$command" "$robot" "$stage")" | base64 -w0)"
+  : > "$logfile"
+  robot_ssh_tt "$robot" \
+    "echo ${payload} | base64 -d > /tmp/${remote_name} && bash /tmp/${remote_name}" \
+    "$logfile"
   PIDS+=("$LAST_PID")
   PID_LABEL["$LAST_PID"]="${robot}:${stage}"
+  ROBOT_STAGE_ORDER+=("${robot}:${stage}")
   prefix_follow "${robot}:${stage}" "$logfile"
+}
+
+# Follow a stage that is still running on the robot after its SSH session
+# dropped. Lines written while out of contact stay in the robot's log file.
+attach_robot_stage() {
+  local robot="$1"
+  local stage="$2"
+  local logfile="${RUN_DIR}/${robot}-${stage}.log"
+  echo "--- re-attached $(date +%H:%M:%S); lines from while out of contact are in ${robot}:/tmp/fleet-stages/${robot}-${stage}.log ---" >>"$logfile"
+  robot_ssh_tt "$robot" \
+    "$(remote_stage_paths "$robot" "$stage"); [[ -f \"\$PID_FILE\" ]] && tail -n 0 -F --pid=\"\$(cat \"\$PID_FILE\")\" \"\$LOG_FILE\"" \
+    "$logfile"
+  PID_LABEL["$LAST_PID"]="${robot}:${stage}"
 }
 
 wait_ready() {
@@ -557,6 +666,7 @@ for robot in "${ROBOTS[@]}"; do
   if ! wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-zenoh.log" \
       "$TIMEOUT_ZENOH_ACTIONS" "${robot} Nav2 actions over Zenoh" "${action_patterns[@]}"; then
     echo "WARNING: ${robot}'s Zenoh bridge did not find both Nav2 action servers; restarting it and the central bridge once." >&2
+    stop_robot_stage "$robot" zenoh || true
     kill_pid "${STAGE_PID[$robot]}" TERM
     forget_pid "${STAGE_PID[$robot]}"
     # The central bridge has to restart too. It keeps a second DDS reader for
@@ -599,8 +709,36 @@ fi
 echo ""
 echo "Fleet is up. Press Ctrl+C to stop."
 
+# A robot's SSH session can drop while its stage keeps running there (Wi-Fi
+# out of reach). Then the fleet keeps going: the robot drives itself home
+# (fleet_link_watchdog.py) and is followed again once it can be reached.
+declare -A DETACHED=()   # robot:stage -> time of the next contact attempt
+declare -A ROBOT_LOST=()
+
+robot_stage_dropped() {
+  local key="$1" robot="${1%%:*}" stage="${1#*:}"
+  case "$(robot_stage_status "$robot" "$stage")" in
+    alive)
+      echo "WARNING: SSH session for ${key} dropped; the stage is still running, re-attached." >&2
+      attach_robot_stage "$robot" "$stage"
+      NEW_PIDS+=("$LAST_PID")
+      ;;
+    unreachable)
+      DETACHED["$key"]=$((SECONDS + 10))
+      if [[ -z "${ROBOT_LOST[$robot]:-}" ]]; then
+        ROBOT_LOST["$robot"]=1
+        echo "WARNING: lost contact with ${robot}. Its stack keeps running and drives it home if the link stays down; retrying every 10 s." >&2
+      fi
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 while true; do
   alive=()
+  NEW_PIDS=()
   for pid in "${PIDS[@]}"; do
     if kill -0 "$pid" 2>/dev/null; then
       alive+=("$pid")
@@ -611,9 +749,35 @@ while true; do
       echo "WARNING: RViz exited. The rest of the fleet is still running." >&2
       continue
     fi
+    if [[ "$label" == *:* && -n "${SSH_TARGET[${label%%:*}]:-}" ]] \
+        && robot_stage_dropped "$label"; then
+      continue
+    fi
     echo "ERROR: ${label} exited (pid ${pid})." >&2
     exit 1
   done
-  PIDS=("${alive[@]+"${alive[@]}"}")
+  for key in "${!DETACHED[@]}"; do
+    [[ $SECONDS -ge ${DETACHED[$key]} ]] || continue
+    robot="${key%%:*}"
+    case "$(robot_stage_status "$robot" "${key#*:}")" in
+      alive)
+        unset "DETACHED[$key]"
+        if [[ -n "${ROBOT_LOST[$robot]:-}" ]]; then
+          unset "ROBOT_LOST[$robot]"
+          echo "Contact with ${robot} restored." >&2
+        fi
+        attach_robot_stage "$robot" "${key#*:}"
+        NEW_PIDS+=("$LAST_PID")
+        ;;
+      unreachable)
+        DETACHED["$key"]=$((SECONDS + 10))
+        ;;
+      *)
+        echo "ERROR: ${key} stopped while ${robot} was out of contact." >&2
+        exit 1
+        ;;
+    esac
+  done
+  PIDS=("${alive[@]+"${alive[@]}"}" "${NEW_PIDS[@]+"${NEW_PIDS[@]}"}")
   sleep 1
 done

@@ -95,6 +95,30 @@ live. Fixed the same day: discovery now skips a map topic that has no publisher.
 run's maps with a probe subscribed to all four robots, only Inky and Clyde were added and the merger
 published a correct transform from about 114 s on (worst error 0.09 m). Not yet run live.
 
+Hallway run `hall2` (2026-11-12, after commits `7d1da15` and `c44811b`: relaxed ratio gate 0.25,
+rigid-only alignments, first alignment needs two agreeing estimates). Inky went out of Wi-Fi range at
+about 1050 s and the fleet stopped itself; Inky's own bag kept recording and was copied once it
+reconnected. 74 time points, timed from the start of the robot bags. All settings fixed before this
+run. (`results/hall2_central_only.json` is the earlier scoring from the central bag alone.)
+
+| Method | Accepted correct / wrong | First right |
+| --- | --- | --- |
+| Live `map_merge` (new code) | 36 / 0 after its first answer | 585 s |
+| AKAZE offline, no ratio gate | 33 / 1 | 615 s |
+| Clearance only, gated | 29 / 16 | 540 s |
+| FAQ geodesic + clearance, gated | 39 / 14 | 510 s |
+| Partial matching, geodesic, gated | 29 / 26 | 630 s |
+| Partial matching, Euclidean, gated | 33 / 35 | 630 s |
+
+- The live merger's first alignment had an inlier ratio of 0.27; the old 0.5 gate would have rejected
+  it. After merging it never switched alignment and stayed within 0.08 m of the reference.
+- Almost all wrong accepts by the graph methods were gross (2 m or more: 12-35 per method), mostly
+  while overlap was 5-13% and the maps were long, self-similar corridors. The conflict gate is not a
+  safe accept rule in hallways. The live merger's two-agreeing-estimates rule is what made AKAZE safe
+  here; the graph methods were scored without such a rule.
+- The reference is less distinctive than in other runs (best score 1.46x the best rival orientation,
+  against 1.8-2.5 elsewhere), but the live merger agrees with it to within 0.08 m.
+
 How far each row is a fair test:
 
 - Spacing, restarts and the conflict gate were frozen on the single-robot runs before either
@@ -163,7 +187,7 @@ python3 run_real.py && python3 summarize_real.py
 python3 graph_noise.py
 python3 simulate.py
 python3 spacing_sweep.py && python3 paired_edges.py
-python3 eval_twobot.py twobot1 twobot4 hall1 small1
+python3 eval_twobot.py twobot1 twobot4 hall1 small1 hall2
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py
