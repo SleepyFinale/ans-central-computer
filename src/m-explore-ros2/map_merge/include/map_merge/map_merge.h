@@ -80,6 +80,7 @@ private:
     double discovery_rate_;
     double estimation_rate_;
     double confidence_threshold_;
+    double min_inlier_ratio_;
     std::string robot_map_topic_;
     std::string robot_map_updates_topic_;
     std::string robot_namespace_;

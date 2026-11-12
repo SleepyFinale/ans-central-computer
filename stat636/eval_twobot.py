@@ -4,7 +4,7 @@
 At regular times, take the map each robot held at that moment and ask each method for the
 Clyde -> Inky transform. Also reads what the live map_merge node had published by then.
 
-Run with system Python after sourcing ROS 2.
+Run with system Python after sourcing ROS 2:  python3 eval_twobot.py twobot1 twobot4
 """
 import json
 import sys
@@ -19,7 +19,8 @@ from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 from map_graph import build_graph
-from matching import akaze_baseline, clearance_similarity, faq, geodesic_kernel, map_agreement, ransac_rigid
+from matching import akaze_baseline, clearance_similarity, consistency_match, faq, geodesic_kernel, \
+    map_agreement, ransac_rigid
 from registration import Rigid, register_refined
 from run_real import build_jobs, evaluate, free_overlap
 
@@ -28,6 +29,10 @@ RESTARTS = 8
 STEP_S = 15.0
 SUCCESS_M = 0.30
 WRONG_ACCEPT_LIMIT = 0.05
+# Added 2026-11-10 after both two-robot runs showed accepted answers at 0% overlap: an answer
+# needs this much area known in both maps before the gate will consider it.
+MIN_SHARED_M2 = 3.0
+METHODS = ('clearance_only', 'geodesic_clearance', 'partial_geodesic', 'partial_euclidean')
 
 
 def read_topics(path, wanted):
@@ -61,24 +66,30 @@ def graph_method(ga, oa, gb, ob, res, rng):
         'clearance_only': [np.column_stack(linear_sum_assignment(-(C + (0 if k == 0 else rng.normal(0, .05, C.shape)))))
                            for k in range(RESTARTS)],
     }
+    # Partial matching, settings fixed in advance and not tuned (top_k=8, sigma=0.15 m).
+    options['partial_geodesic'] = [consistency_match(A, B, 'geodesic')]
+    options['partial_euclidean'] = [consistency_match(A, B, 'euclidean')]
     found = {}
     for name, candidates in options.items():
-        best = (-np.inf, None, 1.0)
+        best = (-np.inf, None, 1.0, 0)
         for matches in candidates:
             T, _ = ransac_rigid(A.xy, B.xy, matches, rng=rng)
             if T is not None:
-                score, conflict, _ = map_agreement(ga, oa, gb, ob, res, T)
+                score, conflict, known = map_agreement(ga, oa, gb, ob, res, T)
                 if score > best[0]:
-                    best = (score, T, conflict)
+                    best = (score, T, conflict, known)
         if best[1] is not None:
-            found[name] = (best[1], best[2])
+            found[name] = (best[1], best[2], best[3] * res ** 2)
     return found, A, B
 
 
 def training_case(job):
     kind, a, b, label, ga, oa, gb, ob, res, T_ref, seed = job
     found, _, B = graph_method(ga, oa, gb, ob, res, np.random.default_rng(seed))
-    return {name: (conflict, evaluate(T, T_ref, B.xy) < SUCCESS_M) for name, (T, conflict) in found.items()}
+    out = {name: (conflict, bool(evaluate(T, T_ref, B.xy) < SUCCESS_M), shared)
+           for name, (T, conflict, shared) in found.items()}
+    out['overlap'] = float(free_overlap(ga, oa, gb, ob, res, T_ref)[0])
+    return out
 
 
 def freeze_gates():
@@ -86,11 +97,15 @@ def freeze_gates():
     with Pool(16) as pool:
         rows = pool.map(training_case, build_jobs(), chunksize=4)
     gates = {}
-    for name in ('geodesic_clearance', 'clearance_only'):
+    print(f"development pairs ({len(rows)}): share correct before any gate")
+    for name in METHODS:
+        low = [r.get(name, (1, False, 0))[1] for r in rows if r['overlap'] < 0.5]
+        high = [r.get(name, (1, False, 0))[1] for r in rows if r['overlap'] >= 0.5]
+        print(f"  {name:20s} overlap<0.5: {np.mean(low):4.0%} (n={len(low)})   overlap>=0.5: {np.mean(high):4.0%} (n={len(high)})")
         points = [r[name] for r in rows if name in r]
         best, kept_most = 0.0, -1
         for gate in np.arange(0.02, 0.30, 0.005):
-            kept = [ok for conflict, ok in points if conflict <= gate]
+            kept = [ok for conflict, ok, shared in points if conflict <= gate and shared >= MIN_SHARED_M2]
             if kept and 1 - np.mean(kept) <= WRONG_ACCEPT_LIMIT and len(kept) > kept_most:
                 best, kept_most = float(gate), len(kept)
         gates[name] = best
@@ -107,8 +122,9 @@ def test_case(job):
         return row
     T, info = akaze_baseline(ga, oa, gb, ob, res)
     row['akaze'] = dict(answered=T is not None, error=None if T is None else evaluate(T, T_ref, B.xy), **info)
-    for name, (T, conflict) in found.items():
-        row[name] = dict(error=evaluate(T, T_ref, B.xy), conflict=conflict, accepted=conflict <= gates[name])
+    for name, (T, conflict, shared) in found.items():
+        row[name] = dict(error=evaluate(T, T_ref, B.xy), conflict=conflict, shared=shared,
+                         accepted=bool(conflict <= gates[name] and shared >= MIN_SHARED_M2))
     return row
 
 
@@ -129,21 +145,30 @@ def live_map_merge(central_bag, T_ref, sample_xy):
     return np.array(series)
 
 
+def ok(e):
+    return e is not None and e < SUCCESS_M
+
+
 def main():
-    central_bag = sys.argv[1]
     print('freezing gates on older runs only ...')
     gates = freeze_gates()
-    print('gates', gates)
+    print('gates', {k: round(v, 3) for k, v in gates.items()})
+    for run in sys.argv[1:]:
+        print(f'\n===== {run} =====')
+        evaluate_run(run, gates)
 
-    inky = read_maps('data/bags/twobot1/inky', '/inky/map')
-    clyde = read_maps('data/bags/twobot1/clyde', '/clyde/map')
+
+def evaluate_run(RUN, gates):
+    central_bag = f'data/bags/{RUN}/central'
+    inky = read_maps('data/bags/' + RUN + '/inky', '/inky/map')
+    clyde = read_maps('data/bags/' + RUN + '/clyde', '/clyde/map')
     _, ga, oa, res = inky[-1]
     _, gb, ob, _ = clyde[-1]
     T_ref, score, rival = register_refined(ga, oa, gb, ob, res)
     print(f'reference: theta={np.rad2deg(T_ref.theta):.2f} deg t={np.round(T_ref.t, 2)} score/rival={score / rival:.2f}')
     conflict = map_agreement(ga, oa, gb, ob, res, T_ref)[1]
     print(f'reference conflict rate {conflict:.1%}')
-    np.savez_compressed('data/twobot1_final.npz', ga=ga, oa=oa, gb=gb, ob=ob, res=res,
+    np.savez_compressed(f'data/{RUN}_final.npz', ga=ga, oa=oa, gb=gb, ob=ob, res=res,
                         theta=T_ref.theta, t=T_ref.t)
 
     start = max(inky[0][0], clyde[0][0])
@@ -170,29 +195,32 @@ def main():
         row['merge_state'] = before[-1] if before else None
 
     json.dump(dict(gates=gates, rows=rows, theta=float(T_ref.theta), t=T_ref.t.tolist(), start=float(start)),
-              open('results/twobot1.json', 'w'), indent=0)
+              open(f'results/{RUN}.json', 'w'), indent=0)
 
-    def ok(e):
-        return e is not None and e < SUCCESS_M
-
-    print(f"{'t':>5}{'free I':>8}{'free C':>8}{'overlap':>9}{'nI':>5}{'nC':>5}{'AKAZE':>9}{'live':>9} {'state':>11}{'clear':>13}{'geo+clear':>13}")
+    print(f"{'t':>5}{'free I':>8}{'free C':>8}{'overlap':>9}{'nI':>5}{'nC':>5}{'AKAZE':>8}{'live':>8}"
+          + ''.join(f'{m[:12]:>14}' for m in METHODS))
     for r in rows:
         ak = r.get('akaze', {})
         def show(m):
             d = r.get(m)
             return '-' if d is None else f"{d['error']:.2f}{'*' if d['accepted'] else ' '}"
         print(f"{r['t']:5.0f}{r['free_a']:8.1f}{r['free_b']:8.1f}{r['overlap']:9.0%}{r['n_a']:5d}{r['n_b']:5d}"
-              f"{('%.2f' % ak['error']) if ak.get('answered') else 'none':>9}"
-              f"{('%.2f' % r['live_error']) if r['live_error'] is not None else '-':>9} {str(r['merge_state']):>11}"
-              f"{show('clearance_only'):>13}{show('geodesic_clearance'):>13}")
+              f"{('%.2f' % ak['error']) if ak.get('answered') else 'none':>8}"
+              f"{('%.2f' % r['live_error']) if r['live_error'] is not None else '-':>8}"
+              + ''.join(f'{show(m):>14}' for m in METHODS))
     n = len(rows)
     print('(* = passes the frozen gate; errors in metres)')
+
+    def first(times):
+        return min(times) if times else None
+
     print(f"time points {n}")
-    print(f"AKAZE offline: correct {sum(ok(r.get('akaze', {}).get('error')) for r in rows)}, wrong {sum(r.get('akaze', {}).get('answered', False) and not ok(r['akaze']['error']) for r in rows)}, no answer {sum(not r.get('akaze', {}).get('answered', False) for r in rows)}")
-    print(f"live map_merge published transform: correct {sum(ok(r['live_error']) for r in rows)}, wrong {sum(r['live_error'] is not None and not ok(r['live_error']) for r in rows)}")
-    for m in ('clearance_only', 'geodesic_clearance'):
+    print(f"AKAZE offline: correct {sum(ok(r.get('akaze', {}).get('error')) for r in rows)}, wrong {sum(r.get('akaze', {}).get('answered', False) and not ok(r['akaze']['error']) for r in rows)}, no answer {sum(not r.get('akaze', {}).get('answered', False) for r in rows)}; first correct at {first([r['t'] for r in rows if ok(r.get('akaze', {}).get('error'))])} s")
+    print(f"live map_merge TF: correct {sum(ok(r['live_error']) for r in rows)}, wrong {sum(r['live_error'] is not None and not ok(r['live_error']) for r in rows)}")
+    for m in METHODS:
         have = [r[m] for r in rows if m in r]
-        print(f"{m}: raw correct {sum(ok(d['error']) for d in have)} of {n}; accepted correct {sum(d['accepted'] and ok(d['error']) for d in have)}, accepted wrong {sum(d['accepted'] and not ok(d['error']) for d in have)}, rejected {sum(not d['accepted'] for d in have)}")
+        print(f"{m}: raw correct {sum(ok(d['error']) for d in have)}; accepted correct {sum(d['accepted'] and ok(d['error']) for d in have)}, accepted wrong {sum(d['accepted'] and not ok(d['error']) for d in have)}, rejected {sum(not d['accepted'] for d in have)}; "
+              f"first accepted correct at {first([r['t'] for r in rows if m in r and r[m]['accepted'] and ok(r[m]['error'])])} s")
 
 
 if __name__ == '__main__':

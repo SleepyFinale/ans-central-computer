@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from map_graph import MapGraph, build_graph
-from matching import akaze_baseline, centred_adjacency, faq, geodesic_kernel, map_agreement, \
+from matching import akaze_baseline, centred_adjacency, consistency_match, faq, geodesic_kernel, map_agreement, \
     ransac_rigid, spectral_match
 from registration import Rigid, register
 
@@ -70,3 +70,10 @@ matches = np.column_stack([np.arange(60), np.arange(60)])
 matches[:24, 1] = rng.permutation(60)[:24]
 T, inliers = ransac_rigid(target, pts, matches, rng=rng)
 print(f'ransac error {error(T, true_T, pts):.3f} m, inliers {inliers}')
+
+# 5. Partial matching: B is a shuffled copy of A with a third of its nodes removed.
+kept = np.sort(rng.permutation(ga.n)[:int(ga.n * 0.67)])
+partial = MapGraph(xy=true_T.apply(ga.xy[kept]), clearance=ga.clearance[kept], lengths=ga.lengths[np.ix_(kept, kept)])
+found = consistency_match(ga, partial, 'euclidean')
+right = np.mean([kept[b] == a for a, b in found])
+print(f'partial matching on a 67% sub-copy: {len(found)} matched of {len(kept)} possible, {right:.0%} of them correct')

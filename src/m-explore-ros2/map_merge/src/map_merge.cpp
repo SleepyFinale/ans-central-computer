@@ -102,6 +102,9 @@ MapMerge::MapMerge()
   if (!this->has_parameter("estimation_confidence")) {
     this->declare_parameter<double>("estimation_confidence", 1.0);
   }
+  if (!this->has_parameter("estimation_min_inlier_ratio")) {
+    this->declare_parameter<double>("estimation_min_inlier_ratio", 0.5);
+  }
   if (!this->has_parameter("robot_map_topic")) {
     this->declare_parameter<std::string>("robot_map_topic", "map");
   }
@@ -133,6 +136,7 @@ MapMerge::MapMerge()
   this->get_parameter("estimation_rate", estimation_rate_);
   this->get_parameter("known_init_poses", have_initial_poses_);
   this->get_parameter("estimation_confidence", confidence_threshold_);
+  this->get_parameter("estimation_min_inlier_ratio", min_inlier_ratio_);
   this->get_parameter("robot_map_topic", robot_map_topic_);
   this->get_parameter("robot_map_updates_topic", robot_map_updates_topic_);
   this->get_parameter("robot_namespace", robot_namespace_);
@@ -225,6 +229,13 @@ void MapMerge::topicSubscribing()
       robot_name = robotNameFromTopic(topic_name);
       if (robots_.count(robot_name)) {
         // we already know this robot
+        continue;
+      }
+
+      // A subscriber alone makes the topic appear (RViz, a recorder, a probe
+      // for robots that are switched off). A robot that never sends a map
+      // would then block every pose estimate, so wait for a publisher.
+      if (this->count_publishers(topic_name) == 0) {
         continue;
       }
 
@@ -706,7 +717,8 @@ void MapMerge::poseEstimation()
 
     // TODO allow user to change feature type
     bool success = pipeline_.estimateTransforms(
-      logger_, combine_grids::FeatureType::AKAZE, confidence_threshold_);
+      logger_, combine_grids::FeatureType::AKAZE, confidence_threshold_,
+      min_inlier_ratio_);
 
     if (!success) {
       RCLCPP_INFO(logger_, "No grid poses estimated");

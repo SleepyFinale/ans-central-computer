@@ -63,7 +63,8 @@ public:
     bool estimateTransforms(
       rclcpp::Logger logger = rclcpp::get_logger("estimateTransforms"),
       FeatureType feature = FeatureType::AKAZE,
-      double confidence = 1.0);
+      double confidence = 1.0,
+      double min_inlier_ratio = 0.5);
     nav_msgs::msg::OccupancyGrid::SharedPtr composeGrids(
       rclcpp::Logger logger = rclcpp::get_logger("composeGrids"));
 

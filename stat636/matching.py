@@ -225,3 +225,47 @@ def akaze_baseline(grid_a, origin_a, grid_b, origin_b, resolution, confidence=0.
     # x_a = R x_b + t in world coordinates, from p_a = R p_b + h in pixels.
     t = origin_a + resolution * H[:2, 2] - R @ origin_b
     return Rigid(theta, t), info
+
+
+def consistency_match(graph_a, graph_b, distance='euclidean', top_k=8, sigma=0.15, keep=0.2):
+    """Partial matching on the association graph (Leordeanu and Hebert's spectral matching).
+
+    Each candidate pair (a, b) is a vertex; two candidates are linked when the distance between
+    their nodes is the same in both maps. The principal eigenvector scores candidates, and a greedy
+    pass keeps a consistent subset, so nodes with no counterpart are simply left unmatched.
+    Candidates are the top_k most similar nodes by clearance, in either direction.
+    """
+    C = clearance_similarity(graph_a, graph_b)
+    chosen = np.zeros_like(C, dtype=bool)
+    k = min(top_k, graph_b.n, graph_a.n)
+    chosen[np.arange(graph_a.n)[:, None], np.argsort(-C, axis=1)[:, :k]] = True
+    chosen[np.argsort(-C, axis=0)[:k, :], np.arange(graph_b.n)[None, :]] = True
+    cand = np.argwhere(chosen)
+    if distance == 'euclidean':
+        Da = np.linalg.norm(graph_a.xy[:, None] - graph_a.xy[None, :], axis=-1)
+        Db = np.linalg.norm(graph_b.xy[:, None] - graph_b.xy[None, :], axis=-1)
+    else:
+        Da, Db = graph_a.geodesic, graph_b.geodesic
+    diff = Da[np.ix_(cand[:, 0], cand[:, 0])] - Db[np.ix_(cand[:, 1], cand[:, 1])]
+    M = np.exp(-diff ** 2 / (2 * sigma ** 2))
+    M[np.abs(diff) > 3 * sigma] = 0
+    # One node cannot be matched twice, and very close pairs carry no orientation information.
+    M[cand[:, 0][:, None] == cand[:, 0][None, :]] = 0
+    M[cand[:, 1][:, None] == cand[:, 1][None, :]] = 0
+    v = np.ones(len(cand)) / np.sqrt(len(cand))
+    for _ in range(60):
+        w = M @ v
+        norm = np.linalg.norm(w)
+        if norm == 0:
+            return np.empty((0, 2), int)
+        v = w / norm
+    matches, used_a, used_b = [], set(), set()
+    for index in np.argsort(-v):
+        if v[index] < keep * v.max():
+            break
+        a, b = cand[index]
+        if a not in used_a and b not in used_b:
+            matches.append((a, b))
+            used_a.add(a)
+            used_b.add(b)
+    return np.array(matches, int).reshape(-1, 2)

@@ -56,7 +56,8 @@ namespace combine_grids
 bool MergingPipeline::estimateTransforms(
   rclcpp::Logger logger,
   FeatureType feature_type,
-  double confidence)
+  double confidence,
+  double min_inlier_ratio)
 {
   std::vector<cv::detail::ImageFeatures> image_features;
   std::vector<cv::detail::MatchesInfo> pairwise_matches;
@@ -149,9 +150,8 @@ bool MergingPipeline::estimateTransforms(
     0.0;
 
   const int kMinInliers = 8;
-  const double kMinInlierRatio = 0.5;
   if (best_inliers > 0 &&
-    (best_inliers < kMinInliers || best_ratio < kMinInlierRatio))
+    (best_inliers < kMinInliers || best_ratio < min_inlier_ratio))
   {
     RCLCPP_INFO(
       logger,

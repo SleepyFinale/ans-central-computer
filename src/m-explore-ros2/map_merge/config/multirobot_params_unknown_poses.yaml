@@ -30,6 +30,10 @@ map_merge:
     discovery_rate: 0.08
     estimation_rate: 1.0
     estimation_confidence: 0.65
+    # Smallest share of feature matches that must be inliers for a new alignment.
+    # 0.5 rejected every estimate in a large area with hallways, where correct
+    # estimates had 0.26-0.42 (2026-11-10); small rooms give about 0.7.
+    estimation_min_inlier_ratio: 0.25
     robot_map_topic: map
     robot_map_updates_topic: map_updates
     robot_namespace: ""

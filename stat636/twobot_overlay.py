@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Overlay the final Inky and Clyde maps under the reference transform, for a visual check."""
+import sys
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -8,7 +10,8 @@ from scipy.spatial import cKDTree
 
 from registration import Rigid
 
-d = np.load('data/twobot1_final.npz')
+RUN = sys.argv[1] if len(sys.argv) > 1 else 'twobot1'
+d = np.load(f'data/{RUN}_final.npz')
 ga, oa, gb, ob, res = d['ga'], d['oa'], d['gb'], d['ob'], float(d['res'])
 T = Rigid(float(d['theta']), d['t'])
 
@@ -31,4 +34,4 @@ for ax, grid, origin, name in ((axes[0], ga, oa, 'Inky final map'), (axes[1], gb
 axes[2].scatter(*wa.T, s=2, c='k', label='Inky walls')
 axes[2].scatter(*wb.T, s=2, c='tab:red', label='Clyde walls, transformed')
 axes[2].set_aspect('equal'); axes[2].legend(fontsize=8, loc='best'); axes[2].set_title('Reference overlay', fontsize=10)
-plt.tight_layout(); plt.savefig('figures/twobot1_reference.png', dpi=90)
+plt.tight_layout(); plt.savefig(f'figures/{RUN}_reference.png', dpi=90)
