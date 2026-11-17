@@ -373,6 +373,22 @@ multi_robot_explorer:
     # Set repeat_goal_count_limit: 0 to disable this backstop, or
     # repeat_goal_dist_threshold: 0.0 to disable the distance test only.
     repeat_goal_dist_threshold: 0.3
+    # A frontier whose centre is within this distance of a place a robot
+    # already reached (its pose on arrival, the frontier's centre or the goal
+    # point) is not assigned again; to any robot once the maps are merged.
+    # The robot saw it from there and it stayed unknown (glass, a doorway, LiDAR
+    # rays through a gap). Without it the hall runs never finished: the robots
+    # drove 4-5 minute trips to the same five edges for 7 minutes (hall5,
+    # 2026-11-12). 0 disables.
+    exhausted_frontier_radius: 1.5
+    # Split the frontiers between robots once the maps merge: a goal another
+    # robot is nearer to (counting from its current goal if it has one) costs
+    # coordination_weight * potential_scale * (my distance - its distance),
+    # in travel distance on the merged map. Without it the robots stayed under
+    # 5 m apart 76% of the time in hall5 (2026-11-12) and were twice sent to
+    # the same far frontier. Soft: a robot still takes the other's frontiers
+    # when nothing on its side is worth it. 0 disables.
+    coordination_weight: 1.0
     repeat_goal_count_limit: 5
 
     # Publish frontier markers on /explore/frontiers for RViz

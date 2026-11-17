@@ -140,7 +140,8 @@ Time points at which the held alignment was right / wrong, and when it was first
 | `hall2` | 32 / 0, 645 s | 30 / 42, 630 s | 37 / 35, 570 s | 30 / 35, 660 s | 31 / 36, 660 s |
 | `hall3` | 82 / 0, 225 s | 77 / 0, 300 s | 77 / 3, 255 s | 72 / 13, 345 s | 79 / 7, 270 s |
 | `hall4` | 20 / 0, 675 s | 22 / 36, 645 s | 24 / 0, 615 s | 0 / 55, never | 0 / 53, never |
-| All eight | 242 / 0 | 236 / 78 | 257 / 38 | 183 / 103 | 226 / 97 |
+| `hall5` | 55 / 0, 225 s | 48 / 15, 285 s | 53 / 6, 165 s | 40 / 25, 375 s | 52 / 5, 270 s |
+| All nine | 297 / 0 | 284 / 93 | 310 / 44 | 223 / 128 | 278 / 102 |
 
 - The rule removes every wrong commitment in the three-room runs and `hall1` (one 0.3-0.5 m near miss
   remains for Euclidean partial matching in `hall1`). FAQ geodesic + clearance then answers first in
@@ -170,6 +171,9 @@ Time points at which the held alignment was right / wrong, and when it was first
   estimate with scale 5-10% off was wrong (7 of 7) and every one within 5% was right. Offline, under
   the same gates, AKAZE was first right at 675 s; why the live merger still had not merged by the end
   is not explained (the offline baseline skips bundle adjustment and map padding).
+- `hall5` (2026-11-12, hallways, stopped by hand after about 17 min; no Wi-Fi drop on either robot).
+  FAQ geodesic + clearance was right first (165 s, 60 s before AKAZE) and held no gross wrong
+  alignment (6 time points 0.3-2 m off). Partial matching again held gross wrong alignments.
 
 How far each row is a fair test:
 
@@ -239,8 +243,8 @@ python3 run_real.py && python3 summarize_real.py
 python3 graph_noise.py
 python3 simulate.py
 python3 spacing_sweep.py && python3 paired_edges.py
-python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4
-python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4
+python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
+python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py

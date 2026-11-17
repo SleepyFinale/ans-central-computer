@@ -732,6 +732,14 @@ class MultiRobotExplorer(Node):
         # the previous one trigger blacklist+skip. Set count_limit to 0 to disable
         # this backstop.
         self.declare_parameter('repeat_goal_dist_threshold', 0.3)
+        # A frontier whose centre lies this close to a place a robot already
+        # reached is one it could not see into (glass, a doorway it may not
+        # enter, LiDAR rays through a gap): it is not assigned again, to any
+        # robot once the maps are merged. 0 disables.
+        self.declare_parameter('exhausted_frontier_radius', 1.5)
+        # Split the frontiers by which robot is nearer (see
+        # _coordination_penalty). 0 disables.
+        self.declare_parameter('coordination_weight', 1.0)
         self.declare_parameter('repeat_goal_count_limit', 5)
         self.declare_parameter('visualize', True)
         self.declare_parameter('use_pose_goal_fallback', True)
@@ -1049,6 +1057,10 @@ class MultiRobotExplorer(Node):
             self.get_parameter('post_success_frontier_avoidance').value)
         self.repeat_goal_dist_threshold: float = max(
             0.0, float(self.get_parameter('repeat_goal_dist_threshold').value))
+        self.exhausted_frontier_radius: float = max(
+            0.0, float(self.get_parameter('exhausted_frontier_radius').value))
+        self.coordination_weight: float = max(
+            0.0, float(self.get_parameter('coordination_weight').value))
         self.repeat_goal_count_limit: int = int(
             self.get_parameter('repeat_goal_count_limit').value
         )
@@ -1375,6 +1387,11 @@ class MultiRobotExplorer(Node):
         # robot -> (local map msg, world TF key, world-frame view); see
         # _local_map_world_view.
         self._local_view_cache: Dict[str, tuple] = {}
+        # Places reached by exploration goals: (robot, x, y) in world_frame,
+        # each the robot's pose on arrival, the target frontier's centre or
+        # the goal point. See _frontier_exhausted.
+        self.reached_spots: List[Tuple[str, float, float]] = []
+        self._exhausted_logged: set = set()
         self._use_global_now = False
         # Map message currently associated with goal selection; set by the
         # frontier-step helpers before assigning goals so _select_goal_point
@@ -1699,6 +1716,8 @@ class MultiRobotExplorer(Node):
             rs.frontiers_exhausted = False
             rs.unassignable_since = None
             rs.visited_goals.clear()
+        self.reached_spots.clear()
+        self._exhausted_logged.clear()
         self.get_logger().warning(
             f'Map opened up near ({cx:.2f}, {cy:.2f}) on {key} map ({count} cells, e.g. '
             f'a door opened); cleared {cleared} blacklist point(s) so frontiers are retried')
@@ -2895,6 +2914,8 @@ class MultiRobotExplorer(Node):
             maxlen=rs.recent_goals.maxlen)
         rs.visited_goals = [mv(v) for v in rs.visited_goals]
         rs.precheck_fail_streak = [(e[0], mv(e[1]), mv(e[2])) for e in rs.precheck_fail_streak]
+        self.reached_spots = [
+            (n, *mv((x, y))) if n == rs.name else (n, x, y) for n, x, y in self.reached_spots]
         # The merged grid changes wholesale with the alignment; comparing
         # it with an older one would read as doors opening.
         self._opening_ref.pop('global', None)
@@ -3336,9 +3357,12 @@ class MultiRobotExplorer(Node):
             f'frontiers; clearing {len(rs.blacklist)} blacklist point(s) and retrying '
             f'(reset {rs.blacklist_resets}/{self.blacklist_reset_max} since last success)'
         )
-        rs.blacklist = []
-        rs.repeat_blacklist.clear()
-        rs.settled_blacklist.clear()
+        # Keep the settled points (reached and still unseen): a reset retries
+        # what failed, not what a robot already reached. Clearing them sent
+        # both robots back across the corridor loop for minutes per trip
+        # (hall5, 2026-11-12).
+        rs.blacklist = [bl for bl in rs.blacklist if bl in rs.settled_blacklist]
+        rs.repeat_blacklist &= rs.settled_blacklist
         rs.unassignable_since = None
 
     def _all_frontiers_exhausted(self) -> bool:
@@ -3363,12 +3387,14 @@ class MultiRobotExplorer(Node):
         revisit = any(
             _dist((gpx, gpy), v) < self.repeat_goal_dist_threshold for v in rs.visited_goals)
         if revisit:
+            self._remember_reached(rs, (gpx, gpy))
             if self.post_success_frontier_avoidance:
                 self._append_blacklist_if_distant(rs, (gpx, gpy))
                 self._mark_settled(rs, (gpx, gpy))
             rs.last_target_frontier_centroid = None
             return
         rs.visited_goals.append((gpx, gpy))
+        self._remember_reached(rs, (gpx, gpy))
         rs.blacklist_resets = 0
         rs.frontiers_exhausted = False
         if self.blacklist_clear_radius > 0.0:
@@ -3552,6 +3578,8 @@ class MultiRobotExplorer(Node):
                 f'min_frontier_cells_for_goal ({self.min_frontier_cells_for_goal})'
             )
             return True
+        if self._frontier_exhausted(rs, fr):
+            return True
         gx, gy = self._select_goal_point(rs, fr)
         if self._goal_point_blacklisted(rs, gx, gy):
             return True
@@ -3559,12 +3587,96 @@ class MultiRobotExplorer(Node):
             return True
         return False
 
+    def _remember_reached(self, rs: RobotState, goal_xy: Tuple[float, float]) -> None:
+        """Record where an exploration goal was reached (see _frontier_exhausted)."""
+        if self.exhausted_frontier_radius <= 0.0:
+            return
+        points = [goal_xy, rs.position, rs.last_target_frontier_centroid]
+        added = []
+        for p in points:
+            if p is None:
+                continue
+            x, y = float(p[0]), float(p[1])
+            if any(n == rs.name and math.hypot(x - sx, y - sy) < 0.3
+                   for n, sx, sy in self.reached_spots):
+                continue
+            self.reached_spots.append((rs.name, x, y))
+            added.append(f'({x:.2f}, {y:.2f})')
+        if added:
+            self.get_logger().info(
+                f'[{rs.name}] Reached; frontiers within {self.exhausted_frontier_radius:.1f} m of '
+                + ', '.join(added) + ' will not be assigned again'
+                + (' (to any robot)' if self._use_global_now else ''))
+
+    def _frontier_exhausted(self, rs: RobotState, fr: Frontier) -> bool:
+        """True if a robot already reached a place within exhausted_frontier_radius of this frontier.
+
+        A robot standing that close sees the frontier; if it is still there,
+        more visits will not resolve it. In hall5 (2026-11-12) the robots spent
+        the last 7 minutes driving 4-5 minute trips to five such frontiers
+        (a side alcove, open doorways, LiDAR rays through a gap): each was the
+        same edge split into pieces up to 2.5 m apart, so the 0.2 m blacklist
+        around one piece did not cover the next, and each robot tracked only
+        its own visits. Before the maps merge only the robot's own spots
+        count, since the robots' world positions are not aligned yet.
+        """
+        r = self.exhausted_frontier_radius
+        if r <= 0.0 or not self.reached_spots:
+            return False
+        cx, cy = fr.centroid_world
+        for n, sx, sy in self.reached_spots:
+            if (n == rs.name or self._use_global_now) and math.hypot(cx - sx, cy - sy) < r:
+                key = (rs.name, round(cx), round(cy))
+                if key not in self._exhausted_logged:
+                    self._exhausted_logged.add(key)
+                    self.get_logger().info(
+                        f'[{rs.name}] Skipping frontier at ({cx:.2f}, {cy:.2f}): {n} already '
+                        f'reached ({sx:.2f}, {sy:.2f}) and it is still unknown')
+                return True
+        return False
+
     def _frontier_penalty(self, rs: RobotState, fr: Frontier) -> float:
         gx, gy = self._select_goal_point(rs, fr)
         return (
             self._clearance_penalty(self._current_goal_map, gx, gy)
             + self._heading_penalty(rs, gx, gy)
+            + self._coordination_penalty(rs, gx, gy)
         )
+
+    def _coordination_penalty(self, rs: RobotState, gx: float, gy: float) -> float:
+        """Penalty for a goal another robot is closer to: the map split by who is nearest.
+
+        Utility only counted a robot's own distance, so whichever robot was
+        idle took the best frontier for itself. In hall5 (2026-11-12) the
+        robots were under 5 m apart 76% of the time after the maps merged, and
+        in 6 of 19 assignments the other robot was closer to the goal (twice
+        both were sent to the same far frontier). Another robot counts from its
+        current goal if it has one (that is where it will be), else from where
+        it is; distances are travel distances on the merged map. The penalty is
+        coordination_weight * potential_scale * (my distance - its distance),
+        so a frontier on the other robot's side is still taken when nothing on
+        this robot's side is worth it. Only after the maps merge: before that
+        the robots' positions are not in one frame.
+        """
+        w = self.coordination_weight
+        if w <= 0.0 or not self._use_global_now or len(self.robots) < 2 or rs.position is None:
+            return 0.0
+        mine = None
+        worst = 0.0
+        for other in self.robots.values():
+            if other is rs or other.homing_active or other.position is None:
+                continue
+            ref, key = other.position, other.name
+            if other.goal_pending and other.path_precheck_world_goal_xy is not None:
+                ref, key = other.path_precheck_world_goal_xy, f'{other.name}@goal'
+            elif other.goal_active and other.goal_position is not None:
+                ref, key = other.goal_position, f'{other.name}@goal'
+            theirs = self._travel_dist_from(key, ref, gx, gy)
+            if mine is None:
+                mine = self._travel_dist(rs, gx, gy)
+            if math.isfinite(mine) and math.isfinite(theirs) and theirs < mine:
+                worst = max(worst, w * self.potential_scale * (mine - theirs))
+        return worst
 
     def _heading_penalty(self, rs: RobotState, gx: float, gy: float) -> float:
         if self.heading_penalty_m <= 0.0 or rs.yaw is None or rs.position is None:
@@ -3578,13 +3690,19 @@ class MultiRobotExplorer(Node):
 
     def _geodesic_field(self, rs: RobotState) -> Optional[np.ndarray]:
         """Travel-distance field from the robot on the current goal map, once per map and cell."""
+        return self._geodesic_field_from(rs.name, rs.position)
+
+    def _geodesic_field_from(
+        self, key: str, origin: Optional[Tuple[float, float]]
+    ) -> Optional[np.ndarray]:
+        """Travel-distance field from origin on the current goal map, cached under key."""
         m = self._current_goal_map
-        if not self.use_geodesic_distance or m is None or rs.position is None:
+        if not self.use_geodesic_distance or m is None or origin is None:
             return None
-        cell = self._world_to_cell(m, rs.position[0], rs.position[1])
+        cell = self._world_to_cell(m, origin[0], origin[1])
         if cell is None:
             return None
-        cached = self._geodesic_cache.get(rs.name)
+        cached = self._geodesic_cache.get(key)
         if cached is not None and cached[0] is m and cached[1] == cell:
             return cached[2]
         grid, _clearance = self._map_arrays(m)
@@ -3592,15 +3710,21 @@ class MultiRobotExplorer(Node):
         field = geodesic_distance_field(
             grid, (cell[1], cell[0]), res,
             int(round(self.geodesic_inflate_m / res)), self.geodesic_unknown_cost)
-        self._geodesic_cache[rs.name] = (m, cell, field)
+        self._geodesic_cache[key] = (m, cell, field)
         return field
 
     def _travel_dist(self, rs: RobotState, gx: float, gy: float) -> float:
         """Travel distance from the robot to (gx, gy); straight line without a field."""
-        if rs.position is None:
+        return self._travel_dist_from(rs.name, rs.position, gx, gy)
+
+    def _travel_dist_from(
+        self, key: str, origin: Optional[Tuple[float, float]], gx: float, gy: float
+    ) -> float:
+        """Travel distance from origin to (gx, gy); straight line without a field."""
+        if origin is None:
             return float('inf')
-        straight = _dist(rs.position, (gx, gy))
-        field = self._geodesic_field(rs)
+        straight = _dist(origin, (gx, gy))
+        field = self._geodesic_field_from(key, origin)
         m = self._current_goal_map
         if field is None or m is None:
             return straight
