@@ -188,6 +188,36 @@ How far each row is a fair test:
 - In `twobot4` the first right answers came at 72-78% overlap for the graph methods and 94% for
   AKAZE; in `twobot1` all methods first succeeded at 86%.
 
+## Can AKAZE and FAQ confirm each other? (2026-11-19, offline only)
+
+`confirm_rule.py` showed that two FAQ answers agreeing proves little in a corridor: the hall2
+errors repeat. `cross_check.py` tries the other kind of confirmation: commit an alignment when an
+accepted FAQ estimate and an AKAZE estimate agree at the same time point (0.5 m and 8 deg at the
+centre of Clyde's grid), or when AKAZE agrees with itself twice in a row; otherwise hold the last
+alignment. Which AKAZE estimates may confirm is the variable. All nine runs, 478 time points:
+
+| Rule | Right | Wrong (gross) | Runs with any wrong | First right vs AKAZE alone |
+|---|---|---|---|---|
+| AKAZE alone (map_merge rule) | 297 | 0 (0) | 0 | - |
+| FAQ geodesic + clearance alone | 310 | 44 (35) | 3 | earlier in 7/9, median -60 s |
+| Cross-check, AKAZE with merger gates | 302 | 0 (0) | 0 | earlier in 5/9, median -15 s |
+| Cross-check, no inlier-ratio gate | 302 | 0 (0) | 0 | earlier in 5/9, median -15 s |
+| Cross-check, AKAZE inliers + scale only | 320 | 5 (3) | 2 | earlier in 7/9, median -30 s |
+
+- With AKAZE's own gates kept, cross-checking is safe on these runs and answers a little earlier.
+- Loosening AKAZE's gates brings the hall2 error back: at 165 s the ungated AKAZE estimate makes
+  the same ~180 deg corridor error as FAQ (17.5 m off), and only its confidence (0.56 < 0.65) and
+  scale (7% off) gates rejected it. The two methods are not independent in a symmetric corridor.
+- Can FAQ flag its own ambiguity? `rival_ratio.py` compares the best candidate's map-agreement score
+  with the best candidate that disagrees with it. Wrong hall2 answers have rivals at 0.84-0.97 of the
+  best, but right hallway answers also do (0.79-0.88 in hall3 and hall5, 0.88 in hall2 at 600 s).
+  Only the three-room maps separate clearly (0.25-0.59). A rival-ratio gate would not separate right
+  from wrong in corridors.
+- Caveats: the rule was written after all nine runs had been seen, so none of this is held out; the
+  15 s sampling understates how much earlier a live merger could answer.
+- **Decision: map_merge is not changed.** The gain (median 15 s) is too small, and too post hoc, to
+  justify running FAQ inside the live merger. A new hallway run would be needed to test it.
+
 ## What we learned
 
 1. **Adjacency alone fails.** FAQ on adjacency got 13% of nodes right on an exact shuffled copy of a
@@ -245,6 +275,8 @@ python3 simulate.py
 python3 spacing_sweep.py && python3 paired_edges.py
 python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
 python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
+python3 cross_check.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
+python3 rival_ratio.py
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py
