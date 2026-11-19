@@ -82,6 +82,10 @@ Environment:
                           servers before that stage is restarted once (default: 30)
   TIMEOUT_CENTRAL         Seconds to wait for start_central.sh (default: 180)
   TIMEOUT_RVIZ            Seconds to wait for RViz to start (default: 60)
+  FLEET_AFTER_SLAM_HOOK   Command run here once per robot after its Nav2 is up,
+                          before the robot joins Zenoh, as
+                          <hook> <robot> <ssh target>; a failure stops the fleet
+                          (entc641/set_robot_speed.sh uses this)
 
 Requires sshpass (sudo apt install sshpass). The script stays in the
 foreground until Ctrl+C, which stops every process it started.
@@ -652,6 +656,19 @@ for robot in "${ROBOTS[@]}"; do
   wait_ready "${STAGE_PID[$robot]}" "${RUN_DIR}/${robot}-slam.log" \
     "$TIMEOUT_SLAM" "${robot} slam" "$(ready_slam "$robot")"
 done
+
+if [[ -n "${FLEET_AFTER_SLAM_HOOK:-}" ]]; then
+  for robot in "${ROBOTS[@]}"; do
+    echo "=== ${robot}: after-slam hook ==="
+    if ! ${FLEET_AFTER_SLAM_HOOK} "$robot" "${SSH_TARGET[$robot]}" \
+        >>"${RUN_DIR}/${robot}-hook.log" 2>&1; then
+      echo "ERROR: FLEET_AFTER_SLAM_HOOK failed for ${robot}." >&2
+      tail -n 20 "${RUN_DIR}/${robot}-hook.log" >&2 || true
+      exit 1
+    fi
+    echo "Ready: ${robot} after-slam hook"
+  done
+fi
 
 for robot in "${ROBOTS[@]}"; do
   echo "=== ${robot}: zenoh ==="

@@ -20,6 +20,7 @@
 #   EXPLORER_FREQUENCY_HZ           override explore_frequency
 #   EXPLORER_TERMINAL_EVENT_LOG_MODE=summary|verbose
 #   EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC=<sec>
+#   EXPLORER_EXTRA_PARAMS="name:=value ..."   more explorer parameter overrides
 #   CENTRAL_MAP_MERGE_RAW_STDOUT=true   keep map_merge's OpenCV matrix dumps
 #   CENTRAL_AUTO_KILL=true              kill a stale central stack without asking
 set -e
@@ -163,6 +164,9 @@ EXPLORER_ARGS=(
 [[ -n "${EXPLORER_FREQUENCY_HZ:-}" ]] && EXPLORER_ARGS+=(-p "explore_frequency:=${EXPLORER_FREQUENCY_HZ}")
 [[ -n "${EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC:-}" ]] && EXPLORER_ARGS+=(-p "terminal_summary_period_sec:=${EXPLORER_TERMINAL_SUMMARY_PERIOD_SEC}")
 [[ -n "${EXPLORER_TERMINAL_EVENT_LOG_MODE:-}" ]] && EXPLORER_ARGS+=(-p "terminal_event_log_mode:=${EXPLORER_TERMINAL_EVENT_LOG_MODE}")
+for kv in ${EXPLORER_EXTRA_PARAMS:-}; do
+    EXPLORER_ARGS+=(-p "$kv")
+done
 
 if ((${#ACTIVE_ROBOTS[@]} == 1)); then
     ROBOT="${ACTIVE_ROBOTS[0]}"
