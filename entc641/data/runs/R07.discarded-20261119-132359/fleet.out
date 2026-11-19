@@ -1,0 +1,71 @@
+Robot: Inky  ROBOT_SSH=inky@inky  (network: tamu/tailscale)
+Robot: Clyde  ROBOT_SSH=clyde@clyde  (network: tamu/tailscale)
+Logs: /home/schen08/central-computer/entc641/data/runs/R07/fleet/20261119-131907-50155
+Fleet bringup
+  robots:       inky clyde
+  filter:       -ic
+  central host: reverie
+  rviz:         off
+  output:       warnings and errors
+  ssh:
+    inky -> inky@inky
+    clyde -> clyde@clyde
+Stages:
+  1. ./scripts/comms/start_zenoh_central.sh -ic
+     wait for each robot: Route Subscriber (Zenoh:<robot>/tf_zenoh -> ROS:/<robot>/tf_zenoh) created
+  2. on each robot, in parallel:
+       source scripts/env/ros_robot_env.bash
+       export TURTLEBOT3_MODEL=burger
+       export LDS_MODEL=LDS-02
+       ros2 launch turtlebot3_bringup robot.launch.py
+     wait for: [<robot>.diff_drive_controller]: Run!
+  3. on each robot, in parallel:
+       ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
+     wait for: [<robot>.startup_map_seeder]: Startup map seeding complete
+  4. on each robot, in parallel:
+       ./scripts/comms/start_zenoh_robot.sh reverie
+     wait for: TF zenoh publish: /<robot>/tf -> /<robot>/tf_zenoh
+     and both Nav2 action servers discovered (restarted once if not)
+  5. ./scripts/core/start_central.sh -ic
+     wait for: All services running.  Press Ctrl+C to stop.
+
+=== zenoh-central ===
+Ready: central Zenoh
+=== inky: bringup ===
+=== clyde: bringup ===
+Ready: inky bringup
+Ready: clyde bringup
+=== inky: slam ===
+=== clyde: slam ===
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795115982.512626783] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.18 m from the axle (Nav2 needs 0.26); moving clear
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795115982.560945514] [clyde.stuck_detector]: bumper reflex: driving forward 0.08 m
+Ready: inky slam
+Ready: clyde slam
+=== inky: after-slam hook ===
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795115991.504142869] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.23 m from the axle (Nav2 needs 0.26); moving clear
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795115991.514998040] [clyde.stuck_detector]: bumper reflex: driving back 0.07 m
+Ready: inky after-slam hook
+=== clyde: after-slam hook ===
+ERROR: FLEET_AFTER_SLAM_HOOK failed for clyde.
+/clyde/laser_scan_normalizer
+/clyde/ld08_driver
+/clyde/local_costmap/local_costmap
+/clyde/low_obstacle_memory
+/clyde/map_wire_compressed_republisher
+/clyde/planner_server
+/clyde/robot_state_publisher
+/clyde/slam_toolbox
+/clyde/stereo_cmd_vel_enforcer
+/clyde/stereo_container
+/clyde/stereo_depth_node
+/clyde/stereo_left/v4l2_camera
+/clyde/stereo_pair_throttle
+/clyde/stereo_right/v4l2_camera
+/clyde/transform_listener_impl_aaaacbeb2b20
+/clyde/transform_listener_impl_aaaae35ce870
+/clyde/transform_listener_impl_aaaaf0e866d0
+/clyde/transform_listener_impl_ffff8801ea80
+/clyde/turtlebot3_node
+/launch_ros_2369
+
+Stopping fleet...

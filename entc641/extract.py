@@ -12,7 +12,8 @@ the reference by exhaustive grid registration (stat636/registration.py), and at
 every 5 s the share of the reference's known cells that either robot has seen is
 the coverage. Check data/runs/<id>/registration.png for each run.
 
-Responses (window: t0 = first goal, to t0 + 480 s):
+Responses (window: t0 = first goal, to t0 + 480 s, or earlier when the explorer
+declared exploration complete; coverage after that stays at its last value):
   T90_s              time to 90% coverage (480 and censored=1 if never reached)
   coverage_cap_pct   coverage at 480 s
   tau_s, tau_r2      time constant of A(t) = 1 - exp(-(t - td)/tau), fitted on
@@ -40,6 +41,7 @@ import numpy as np  # noqa: E402
 
 import bagdata  # noqa: E402
 import design  # noqa: E402
+from run_trial import exploration_status  # noqa: E402
 from stat636.registration import Rigid, register_refined  # noqa: E402
 
 STEP = 5.0
@@ -50,7 +52,7 @@ FIELDS = ['run_id', 'session', 'type', 'condition', 'pair', 'arm', 'A', 'B', 'C'
           'T90_s', 'T90_censored', 'coverage_cap_pct', 'tau_s', 'tau_r2', 'idle_pct',
           'goal_success_pct', 'goals_succeeded', 'goals_aborted', 'distance_m',
           'battery_drop_v', 'start_voltage_v', 'separation_m', 'other_closer_pct',
-          'cpu_pct', 'merge_time_s', 'flags']
+          'cpu_pct', 'merge_time_s', 'run_length_s', 'end_reason', 'flags']
 
 
 def rigid_inverse_apply(T, xy):
@@ -248,6 +250,12 @@ def extract(run_dir, ref):
             raise ValueError(f'no /{r}/map in the bag')
     cap = meta.get('cap_sec') or design.CAP_SEC
     t0, t1 = run.t0, run.t0 + cap
+    # Scoring stops when the explorer declares exploration complete; driving
+    # home (or failing to) afterwards is not exploring.
+    end_reason = 'cap'
+    complete_t, _ = exploration_status(run_dir, run.robots)
+    if complete_t is not None and complete_t < t1:
+        t1, end_reason = complete_t, 'explored'
 
     T = align_robots(run, ref, flags)
     rel = np.arange(0.0, cap + 1e-6, STEP)
@@ -346,6 +354,7 @@ def extract(run_dir, ref):
         'other_closer_pct': fmt(100 * closer / total if total else None),
         'cpu_pct': fmt(np.mean(cpu) if cpu else None),
         'merge_time_s': fmt(mt, 1),
+        'run_length_s': fmt(t1 - t0, 1), 'end_reason': end_reason,
         'flags': ' '.join(flags),
     }
 

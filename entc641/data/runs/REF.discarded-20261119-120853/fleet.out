@@ -1,0 +1,46 @@
+Robot: Inky  ROBOT_SSH=inky@inky  (network: tamu/tailscale)
+Logs: /home/schen08/central-computer/entc641/data/runs/REF/fleet/20261119-120609-33788
+Fleet bringup
+  robots:       inky
+  filter:       -i
+  central host: reverie
+  rviz:         off
+  output:       warnings and errors
+  ssh:
+    inky -> inky@inky
+Stages:
+  1. ./scripts/comms/start_zenoh_central.sh -i
+     wait for each robot: Route Subscriber (Zenoh:<robot>/tf_zenoh -> ROS:/<robot>/tf_zenoh) created
+  2. on each robot, in parallel:
+       source scripts/env/ros_robot_env.bash
+       export TURTLEBOT3_MODEL=burger
+       export LDS_MODEL=LDS-02
+       ros2 launch turtlebot3_bringup robot.launch.py
+     wait for: [<robot>.diff_drive_controller]: Run!
+  3. on each robot, in parallel:
+       ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
+     wait for: [<robot>.startup_map_seeder]: Startup map seeding complete
+  4. on each robot, in parallel:
+       ./scripts/comms/start_zenoh_robot.sh reverie
+     wait for: TF zenoh publish: /<robot>/tf -> /<robot>/tf_zenoh
+     and both Nav2 action servers discovered (restarted once if not)
+  5. ./scripts/core/start_central.sh -i
+     wait for: All services running.  Press Ctrl+C to stop.
+
+=== zenoh-central ===
+Ready: central Zenoh
+=== inky: bringup ===
+Ready: inky bringup
+=== inky: slam ===
+[inky:slam] [stuck_detector.py-9] [WARN] [1795111598.528993862] [inky.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[inky:slam] [stuck_detector.py-9] [WARN] [1795111598.551632008] [inky.stuck_detector]: bumper reflex: driving forward 0.08 m
+Ready: inky slam
+=== inky: zenoh ===
+Ready: inky zenoh
+Ready: inky Nav2 actions over Zenoh
+=== central ===
+Ready: central stack
+
+Fleet is up. Press Ctrl+C to stop.
+
+Stopping fleet...

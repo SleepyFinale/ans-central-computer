@@ -1,0 +1,188 @@
+Script started on 2026-11-19 13:59:11-06:00 [<not executed on terminal>]
+Central ROS env: ROS_DOMAIN_ID=50 RMW=rmw_cyclonedds_cpp ROS_LOCALHOST_ONLY=1
+==========================================
+  Central Computer — Multi-Robot Exploration
+==========================================
+  ROS_DOMAIN_ID = 50 (localhost, rmw_cyclonedds_cpp)
+  Robots        = inky clyde
+
+Waiting up to 30s for robot maps (/<robot>/map)...
+1795118351.724512 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+Using robots: inky clyde
+  Mode = multi robot (map_merge)
+[1/3] map_merge (unknown initial poses)
+[2/3] Merge-state monitor (map_merge/merge_state)
+[3/3] Explorer
+
+==========================================
+  All services running.  Press Ctrl+C to stop.
+==========================================
+
+1795118352.078113 [50]  map_merge: selected interface "lo" is not multicast-capable: disabling multicast
+[INFO] [1795118352.081518858] [map_merge]: TF broadcasting enabled: map -> <robot>/map
+[INFO] [1795118352.081671209] [map_merge]: Map merging started.
+1795118352.218608 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+1795118352.422484 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+[0m[INFO] [1795118352.474866821] [multi_robot_explorer]: Multi-robot explorer started: robots=['inky', 'clyde'], map_topic=map, world_frame=map, freq=0.70 Hz, local_map_subs=True, use_pose_goal_fallback=False, mode=multi_robot, retarget_enable=True, retarget_opportunity=False, nav2_path_precheck=True, retrace_hold=True, goal_arrival_probe=True, collision_ahead_for_probe=True, navigate_to_pose_wait_sec=5.0, dispatch_nav_goals_in_robot_map_frame=True[0m
+[INFO] [1795118353.081884224] [map_merge]: Robot discovery started.
+[INFO] [1795118353.082083869] [map_merge]: adding robot [clyde] to system
+[INFO] [1795118353.082092884] [map_merge]: Subscribing to MAP topic: clyde/map.
+[INFO] [1795118353.082436008] [map_merge]: Subscribing to MAP updates topic: clyde/map_updates.
+[INFO] [1795118353.083241993] [map_merge]: adding robot [inky] to system
+[INFO] [1795118353.083251317] [map_merge]: Subscribing to MAP topic: inky/map.
+[INFO] [1795118353.083369530] [map_merge]: Subscribing to MAP updates topic: inky/map_updates.
+[INFO] [1795118353.083468888] [map_merge]: Grid pose estimation started.
+[INFO] [1795118353.331846835] [map_merge]: Publishing provisional map -> <robot>/map (identity) until a merged map is composed; Nav2 can register frame "map"
+[INFO] [1795118356.011848372] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=8, ratio=0.375, confidence=0.288); keeping the last accepted alignment if there is one
+[INFO] [1795118356.011962802] [map_merge]: 2 robot maps placed independently (no overlap detected yet)
+[INFO] [1795118356.012564333] [map_merge]: Publishing TF for 2 robot(s): map -> <robot>/map
+[INFO] [1795118356.087404941] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=6, ratio=0.333, confidence=0.204); keeping the last accepted alignment if there is one
+[INFO] [1795118357.087217961] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118357.212906280] [multi_robot_explorer]: [inky] map moved in map by 3.10 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118357.213158630] [multi_robot_explorer]: [clyde] map moved in map by 9.19 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118357.282989814] [map_merge_state_monitor]: Merge state changed: NO_OVERLAP -> PARTIAL[0m
+[0m[INFO] [1795118358.713080215] [multi_robot_explorer]: [clyde] map moved in map by 0.52 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118361.713082849] [multi_robot_explorer]: [clyde] map moved in map by 0.34 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118362.463079549] [multi_robot_explorer]: Summary: inky[goal_active] reached=0(+0) failed=0(+0) status=executing cancel=- pos=(3.42,0.09) | clyde[goal_active] reached=0(+0) failed=0(+0) status=executing cancel=- pos=(-6.95,-1.30)[0m
+[0m[INFO] [1795118363.212967119] [multi_robot_explorer]: [clyde] map moved in map by 1.22 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[33m[WARN] [1795118363.242203320] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[33m[WARN] [1795118363.242574622] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[0m[INFO] [1795118363.242821152] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.07 samples=8 max_cell=0)[0m
+[0m[INFO] [1795118363.276321136] [multi_robot_explorer]: [inky] Goal cancelled (reason=arrival_probe_fail, pose_dist_m=0.3336883504756873, blacklist=False)[0m
+[0m[INFO] [1795118364.273009200] [multi_robot_explorer]: [clyde] Goal reached (total: 1)[0m
+[0m[INFO] [1795118364.273219687] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-5.45, -0.95) will not be assigned again[0m
+[0m[INFO] [1795118364.463676158] [multi_robot_explorer]: [clyde] map moved in map by 0.48 m / 0.0 deg (map_merge alignment); moved 2 blacklist point(s) and stored goals with it[0m
+[INFO] [1795118365.087803147] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[INFO] [1795118366.088241113] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[INFO] [1795118369.088002655] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=4, matches=7, ratio=0.571, confidence=0.396); keeping the last accepted alignment if there is one
+[INFO] [1795118370.087881415] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[INFO] [1795118371.087991165] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=4, matches=6, ratio=0.667, confidence=0.408); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118371.977763843] [multi_robot_explorer]: [clyde] Skipping frontier at (-3.72, -0.54): clyde already reached (-5.01, -0.95) and it is still unknown[0m
+[0m[INFO] [1795118372.462902123] [multi_robot_explorer]: Summary: inky[goal_active] reached=0(+0) failed=0(+0) status=executing cancel=- pos=(3.94,0.39) | clyde[goal_active] reached=1(+1) failed=0(+0) status=executing cancel=- pos=(-4.35,-1.27)[0m
+[INFO] [1795118373.087930860] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[INFO] [1795118374.087986716] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=8, ratio=0.375, confidence=0.288); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118376.473200956] [multi_robot_explorer]: [clyde] Skipping frontier at (-3.85, -0.19): clyde already reached (-5.00, -0.95) and it is still unknown[0m
+[33m[WARN] [1795118376.494780677] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[33m[WARN] [1795118376.494952470] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[0m[INFO] [1795118376.521149054] [multi_robot_explorer]: [inky] Goal reached (total: 1)[0m
+[0m[INFO] [1795118376.521294949] [multi_robot_explorer]: [inky] Reached; frontiers within 1.5 m of (4.53, 0.70) will not be assigned again[0m
+[INFO] [1795118379.087688940] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=8, ratio=0.250, confidence=0.192); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118379.720500151] [multi_robot_explorer]: [inky] Skipping frontier at (4.98, 0.85): inky already reached (4.53, 0.70) and it is still unknown[0m
+[0m[INFO] [1795118379.760570093] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.00 samples=6 max_cell=0)[0m
+[0m[INFO] [1795118380.116429388] [multi_robot_explorer]: [clyde] Goal reached (total: 2)[0m
+[0m[INFO] [1795118380.116610342] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-3.30, -0.70) will not be assigned again[0m
+[0m[INFO] [1795118380.215501856] [multi_robot_explorer]: [clyde] Skipping frontier at (-3.10, -0.93): clyde already reached (-3.30, -0.70) and it is still unknown[0m
+[0m[INFO] [1795118380.221796523] [multi_robot_explorer]: [clyde] Skipping frontier at (-3.14, -0.30): clyde already reached (-3.30, -0.70) and it is still unknown[0m
+[INFO] [1795118382.087638554] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118382.463303530] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+1) failed=0(+0) status=executing cancel=- pos=(4.29,0.55) | clyde[goal_active] reached=2(+1) failed=0(+0) status=executing cancel=- pos=(-3.54,-0.70)[0m
+[INFO] [1795118385.087747840] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=6, ratio=0.333, confidence=0.204); keeping the last accepted alignment if there is one
+[INFO] [1795118386.087748149] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=6, ratio=0.333, confidence=0.204); keeping the last accepted alignment if there is one
+[INFO] [1795118387.087501842] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[INFO] [1795118389.087690167] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[INFO] [1795118390.087621871] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118392.463192878] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(4.49,-0.22) | clyde[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-4.53,-1.27)[0m
+[0m[INFO] [1795118402.462977520] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(5.71,-0.01) | clyde[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-5.72,-0.81)[0m
+[INFO] [1795118405.087847975] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=7, ratio=0.429, confidence=0.297); keeping the last accepted alignment if there is one
+[INFO] [1795118406.087860720] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=6, ratio=0.333, confidence=0.204); keeping the last accepted alignment if there is one
+[INFO] [1795118409.089675727] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118410.213204155] [multi_robot_explorer]: [clyde] map moved in map by 0.36 m / 0.0 deg (map_merge alignment); moved 3 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118412.462938135] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(7.01,0.73) | clyde[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-6.33,0.25)[0m
+[INFO] [1795118413.088612423] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=6, matches=7, ratio=0.857, confidence=0.594); keeping the last accepted alignment if there is one
+[INFO] [1795118414.088996816] [map_merge]: [estimateTransforms] First alignment found (inliers=9, ratio=0.643); waiting for one more agreeing estimate before using it
+[33m[WARN] [1795118414.740240196] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[33m[WARN] [1795118414.740593462] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[0m[INFO] [1795118414.792024215] [multi_robot_explorer]: [inky] Goal cancelled (reason=arrival_probe_fail, pose_dist_m=0.2853247635287984, blacklist=False)[0m
+[INFO] [1795118415.088781752] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=7, matches=11, ratio=0.636, confidence=0.619); keeping the last accepted alignment if there is one
+[INFO] [1795118417.088567190] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=4, matches=8, ratio=0.500, confidence=0.385); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118418.001166168] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.06 samples=7 max_cell=0)[0m
+[INFO] [1795118418.088457187] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=3, matches=6, ratio=0.500, confidence=0.306); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118418.671719274] [multi_robot_explorer]: [clyde] Goal reached (total: 3)[0m
+[0m[INFO] [1795118418.671895751] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-5.96, 1.09) will not be assigned again[0m
+[0m[INFO] [1795118418.730005718] [multi_robot_explorer]: [clyde] Skipping frontier at (-5.15, 0.50): clyde already reached (-5.96, 1.09) and it is still unknown[0m
+[0m[INFO] [1795118418.730152353] [multi_robot_explorer]: [clyde] Skipping frontier at (-4.49, 1.06): clyde already reached (-5.96, 1.09) and it is still unknown[0m
+[INFO] [1795118419.088506202] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=6, matches=10, ratio=0.600, confidence=0.545); keeping the last accepted alignment if there is one
+[INFO] [1795118420.088518140] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=4, matches=9, ratio=0.444, confidence=0.374); keeping the last accepted alignment if there is one
+[INFO] [1795118421.088625384] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=4, matches=6, ratio=0.667, confidence=0.408); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118421.722508493] [multi_robot_explorer]: [clyde] Skipping frontier at (-5.11, 0.44): clyde already reached (-5.96, 1.09) and it is still unknown[0m
+[0m[INFO] [1795118421.728493669] [multi_robot_explorer]: [clyde] Skipping frontier at (-5.43, 2.18): clyde already reached (-5.96, 1.09) and it is still unknown[0m
+[INFO] [1795118422.088726470] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=6, matches=9, ratio=0.667, confidence=0.561); keeping the last accepted alignment if there is one
+[0m[INFO] [1795118422.462949571] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(7.53,0.94) | clyde[goal_active] reached=3(+1) failed=0(+0) status=executing cancel=- pos=(-5.85,1.18)[0m
+[INFO] [1795118423.088605246] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=6, matches=11, ratio=0.545, confidence=0.531); keeping the last accepted alignment if there is one
+[INFO] [1795118424.089721025] [map_merge]: All 2 robot maps merged via feature matching
+[0m[INFO] [1795118424.712989786] [multi_robot_explorer]: [inky] map moved in map by 6.53 m / 0.0 deg (map_merge alignment); moved 3 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118424.713248300] [multi_robot_explorer]: [clyde] map moved in map by 6.41 m / 1.2 deg (map_merge alignment); moved 4 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118424.722441627] [multi_robot_explorer]: [clyde] Skipping frontier at (3.72, -1.77): clyde already reached (3.44, -1.51) and it is still unknown[0m
+[0m[INFO] [1795118425.235771761] [map_merge_state_monitor]: Merge state changed: PARTIAL -> MERGED[0m
+[0m[INFO] [1795118425.236795806] [multi_robot_explorer]: Merge state reported MERGED; waiting 6.0s before global switch (stability hold)[0m
+[0m[INFO] [1795118432.236675948] [multi_robot_explorer]: Merge state remained MERGED — switching to global exploration on merged map[0m
+[0m[INFO] [1795118432.463097141] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(2.27,0.65) | clyde[goal_active] reached=3(+0) failed=0(+0) status=executing cancel=- pos=(1.57,1.39)[0m
+[0m[INFO] [1795118433.604247890] [multi_robot_explorer]: [inky] map moved in map by 0.63 m / 0.0 deg (map_merge alignment); moved 3 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118433.604707161] [multi_robot_explorer]: [clyde] map moved in map by 0.64 m / 0.9 deg (map_merge alignment); moved 4 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118433.605075769] [multi_robot_explorer]: [inky] Goal reached (total: 2)[0m
+[0m[INFO] [1795118433.605370377] [multi_robot_explorer]: [inky] Reached; frontiers within 1.5 m of (2.57, -0.23) will not be assigned again[0m
+[0m[INFO] [1795118433.714630382] [multi_robot_explorer]: [clyde] Skipping frontier at (1.28, -1.53): clyde already reached (1.86, -2.32) and it is still unknown[0m
+[0m[INFO] [1795118433.714781593] [multi_robot_explorer]: [clyde] Skipping frontier at (3.08, -0.49): inky already reached (2.57, -0.23) and it is still unknown[0m
+[0m[INFO] [1795118433.724757248] [multi_robot_explorer]: [inky] Skipping frontier at (3.83, -2.20): clyde already reached (3.53, -1.96) and it is still unknown[0m
+[0m[INFO] [1795118433.724897778] [multi_robot_explorer]: [inky] Skipping frontier at (1.28, -1.53): clyde already reached (1.86, -2.32) and it is still unknown[0m
+[0m[INFO] [1795118433.725017997] [multi_robot_explorer]: [inky] Skipping frontier at (3.08, -0.49): inky already reached (2.57, -0.23) and it is still unknown[0m
+[0m[INFO] [1795118435.236428723] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=0.93 samples=9 max_cell=0)[0m
+[0m[INFO] [1795118435.769674611] [multi_robot_explorer]: [clyde] Goal reached (total: 4)[0m
+[0m[INFO] [1795118435.769839219] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (1.70, 1.49), (1.58, 1.14) will not be assigned again (to any robot)[0m
+[33m[WARN] [1795118436.028759298] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[0m[INFO] [1795118437.474404546] [multi_robot_explorer]: [inky] Skipping frontier at (2.21, -0.95): clyde already reached (1.85, -2.33) and it is still unknown[0m
+[0m[INFO] [1795118437.482950729] [multi_robot_explorer]: [clyde] Skipping frontier at (2.21, -0.95): clyde already reached (1.85, -2.33) and it is still unknown[0m
+[0m[INFO] [1795118442.462860941] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+1) failed=0(+0) status=executing cancel=- pos=(1.74,0.07) | clyde[goal_active] reached=4(+1) failed=0(+0) status=executing cancel=- pos=(1.53,0.99)[0m
+[0m[INFO] [1795118447.981576498] [multi_robot_explorer]: [inky] Skipping frontier at (1.15, -1.49): clyde already reached (1.84, -2.32) and it is still unknown[0m
+[0m[INFO] [1795118447.992470238] [multi_robot_explorer]: [clyde] Skipping frontier at (1.15, -1.49): clyde already reached (1.84, -2.32) and it is still unknown[0m
+[0m[INFO] [1795118452.472865054] [multi_robot_explorer]: [inky] Skipping frontier at (3.61, -2.54): clyde already reached (3.32, -2.29) and it is still unknown[0m
+[0m[INFO] [1795118452.480950836] [multi_robot_explorer]: [clyde] Skipping frontier at (3.61, -2.54): clyde already reached (3.32, -2.29) and it is still unknown[0m
+[0m[INFO] [1795118452.482223381] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(0.91,-0.46) | clyde[goal_active] reached=4(+0) failed=0(+0) status=executing cancel=- pos=(0.44,-0.42)[0m
+[0m[INFO] [1795118453.972698622] [multi_robot_explorer]: [inky] Skipping frontier at (3.39, -2.78): clyde already reached (3.30, -2.34) and it is still unknown[0m
+[0m[INFO] [1795118453.980303399] [multi_robot_explorer]: [clyde] Skipping frontier at (3.39, -2.78): clyde already reached (3.30, -2.34) and it is still unknown[0m
+[0m[INFO] [1795118462.462945598] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(0.43,-1.01) | clyde[goal_active] reached=4(+0) failed=0(+0) status=executing cancel=- pos=(-0.21,-1.40)[0m
+[0m[INFO] [1795118472.462702687] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-0.49,-1.66) | clyde[goal_active] reached=4(+0) failed=0(+0) status=executing cancel=- pos=(-1.24,-2.32)[0m
+[0m[INFO] [1795118474.974233557] [multi_robot_explorer]: [inky] Skipping frontier at (1.80, -2.12): clyde already reached (1.75, -2.50) and it is still unknown[0m
+[0m[INFO] [1795118479.485766257] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.07 samples=6 max_cell=0)[0m
+[0m[INFO] [1795118479.631349198] [multi_robot_explorer]: [clyde] Goal reached (total: 5)[0m
+[0m[INFO] [1795118479.631515755] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-0.80, -3.04) will not be assigned again (to any robot)[0m
+[0m[INFO] [1795118479.723344034] [multi_robot_explorer]: [inky] Skipping frontier at (-1.67, -3.42): clyde already reached (-0.80, -3.04) and it is still unknown[0m
+[0m[INFO] [1795118479.732304814] [multi_robot_explorer]: [clyde] Skipping frontier at (-1.67, -3.42): clyde already reached (-0.80, -3.04) and it is still unknown[0m
+[0m[INFO] [1795118481.214792927] [multi_robot_explorer]: [inky] Skipping frontier at (-1.32, -4.29): clyde already reached (-0.81, -3.01) and it is still unknown[0m
+[0m[INFO] [1795118481.215045623] [multi_robot_explorer]: [clyde] Skipping frontier at (-1.32, -4.29): clyde already reached (-0.81, -3.01) and it is still unknown[0m
+[0m[INFO] [1795118482.462737441] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-1.53,-1.81) | clyde[goal_active] reached=5(+1) failed=0(+0) status=executing cancel=- pos=(-1.04,-3.00)[0m
+[0m[INFO] [1795118482.724113960] [multi_robot_explorer]: [inky] Skipping frontier at (-0.10, -3.58): clyde already reached (-0.82, -3.02) and it is still unknown[0m
+[0m[INFO] [1795118482.732818368] [multi_robot_explorer]: [clyde] Skipping frontier at (-0.10, -3.58): clyde already reached (-0.82, -3.02) and it is still unknown[0m
+[0m[INFO] [1795118492.463098645] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-2.66,-2.79) | clyde[goal_active] reached=5(+0) failed=0(+0) status=executing cancel=- pos=(-1.21,-2.81)[0m
+[0m[INFO] [1795118502.462992469] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-3.23,-3.88) | clyde[goal_active] reached=5(+0) failed=0(+0) status=executing cancel=- pos=(-2.59,-2.66)[0m
+[0m[INFO] [1795118505.214911998] [multi_robot_explorer]: [clyde] Skipping frontier at (1.83, -2.11): clyde already reached (1.75, -2.51) and it is still unknown[0m
+[0m[INFO] [1795118512.463002667] [multi_robot_explorer]: Summary: inky[goal_active] reached=2(+0) failed=0(+0) status=executing cancel=- pos=(-2.11,-4.41) | clyde[goal_active] reached=5(+0) failed=0(+0) status=executing cancel=- pos=(-3.28,-3.45)[0m
+[0m[INFO] [1795118514.249233325] [multi_robot_explorer]: [inky] Arrival probe passed (ok len_ratio=1.15 samples=7 max_cell=0)[0m
+[0m[INFO] [1795118515.244293802] [multi_robot_explorer]: [inky] Goal reached (total: 3)[0m
+[0m[INFO] [1795118515.244475625] [multi_robot_explorer]: [inky] Reached; frontiers within 1.5 m of (-1.69, -4.75) will not be assigned again (to any robot)[0m
+[0m[INFO] [1795118515.463762673] [multi_robot_explorer]: [clyde] Skipping frontier at (-1.01, -4.96): inky already reached (-1.69, -4.75) and it is still unknown[0m
+[0m[INFO] [1795118515.463947626] [multi_robot_explorer]: [inky] Skipping frontier at (-1.01, -4.96): inky already reached (-1.69, -4.75) and it is still unknown[0m
+[33m[WARN] [1795118515.464693038] [multi_robot_explorer]: No frontier assigned: 1 idle, 5 frontier(s). Sample robot=inky vs frontier[0]: goal=(-0.93,-4.50) dist_to_goal=0.923m min_sep=0.4 issues=[none — check utility matrix][0m
+[33m[WARN] [1795118518.464493282] [multi_robot_explorer]: [inky] Idle 3s with only blacklisted frontiers; clearing 5 blacklist point(s) and retrying (reset 1/1 since last success)[0m
+[0m[INFO] [1795118522.463916339] [multi_robot_explorer]: Summary: inky[idle] reached=3(+1) failed=0(+0) status=succeeded cancel=- pos=(-1.84,-4.57) | clyde[goal_active] reached=5(+0) failed=0(+0) status=executing cancel=- pos=(-2.41,-4.23)[0m
+[33m[WARN] [1795118522.965430832] [multi_robot_explorer]: [inky] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[0m[INFO] [1795118522.984866828] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.08 samples=7 max_cell=0)[0m
+[0m[INFO] [1795118523.406898173] [multi_robot_explorer]: [clyde] Goal reached (total: 6)[0m
+[0m[INFO] [1795118523.407062744] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-2.16, -3.93) will not be assigned again (to any robot)[0m
+[33m[WARN] [1795118526.465355375] [multi_robot_explorer]: [clyde] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[0m[INFO] [1795118527.963949433] [multi_robot_explorer]: Only unreachable frontiers left (5) — exploration complete![0m
+[0m[INFO] [1795118527.964182902] [multi_robot_explorer]: [inky] Return home: sending goal to start (-3.53, -2.12)[0m
+[0m[INFO] [1795118527.970806569] [multi_robot_explorer]: [clyde] Return home: sending goal to start (0.34, -3.44)[0m
+[0m[INFO] [1795118532.465182744] [multi_robot_explorer]: Summary: inky[goal_active] reached=3(+0) failed=0(+0) status=executing cancel=- pos=(-1.83,-4.42) | clyde[goal_active] reached=6(+1) failed=0(+0) status=executing cancel=- pos=(-2.38,-4.17)[0m
+[0m[INFO] [1795118542.462911102] [multi_robot_explorer]: Summary: inky[goal_active] reached=3(+0) failed=0(+0) status=executing cancel=- pos=(-2.32,-3.99) | clyde[goal_active] reached=6(+0) failed=0(+0) status=executing cancel=- pos=(-3.23,-3.50)[0m
+[0m[INFO] [1795118552.462968615] [multi_robot_explorer]: Summary: inky[goal_active] reached=3(+0) failed=0(+0) status=executing cancel=- pos=(-2.91,-4.27) | clyde[goal_active] reached=6(+0) failed=0(+0) status=executing cancel=- pos=(-2.20,-2.39)[0m
+[0m[INFO] [1795118562.464975354] [multi_robot_explorer]: Summary: inky[goal_active] reached=3(+0) failed=0(+0) status=executing cancel=- pos=(-3.21,-3.23) | clyde[goal_active] reached=6(+0) failed=0(+0) status=executing cancel=- pos=(-0.81,-1.84)[0m
+[0m[INFO] [1795118570.719108128] [multi_robot_explorer]: [inky] Return home succeeded (NavigateToPose)[0m
+[0m[INFO] [1795118572.464050107] [multi_robot_explorer]: [inky] map moved in map by 1.91 m / 0.0 deg (map_merge alignment); moved 3 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118572.464532675] [multi_robot_explorer]: [clyde] map moved in map by 1.90 m / -0.2 deg (map_merge alignment); moved 9 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795118572.466052589] [multi_robot_explorer]: Summary: inky[idle] reached=4(+1) failed=0(+0) status=succeeded cancel=- pos=(-1.32,-2.29) | clyde[goal_active] reached=6(+0) failed=0(+0) status=executing cancel=- pos=(2.26,-2.15)[0m
+[0m[INFO] [1795118582.031006109] [multi_robot_explorer]: [clyde] Return home succeeded (NavigateToPose)[0m
+[0m[INFO] [1795118582.463313848] [multi_robot_explorer]: Summary: inky[idle] reached=4(+0) failed=0(+0) status=succeeded cancel=- pos=(-1.32,-2.29) | clyde[idle] reached=7(+1) failed=0(+0) status=succeeded cancel=- pos=(2.51,-3.24)[0m
+[0m[INFO] [1795118592.462930780] [multi_robot_explorer]: Summary: inky[idle] reached=4(+0) failed=0(+0) status=succeeded cancel=- pos=(-1.32,-2.31) | clyde[idle] reached=7(+0) failed=0(+0) status=succeeded cancel=- pos=(2.52,-3.25)[0m
+[0m[INFO] [1795118602.463214729] [multi_robot_explorer]: Summary: inky[idle] reached=4(+0) failed=0(+0) status=succeeded cancel=- pos=(-1.32,-2.31) | clyde[idle] reached=7(+0) failed=0(+0) status=succeeded cancel=- pos=(2.52,-3.25)[0m
+
+Script done on 2026-11-19 14:03:30-06:00 [COMMAND_EXIT_CODE="0"]

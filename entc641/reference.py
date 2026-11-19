@@ -28,6 +28,9 @@ def main():
     args = ap.parse_args()
 
     run = bagdata.load_run(design.RUNS / args.run_id)
+    if run.meta.get('status') != 'complete':
+        raise SystemExit(f'{args.run_id} is "{run.meta.get("status")}", not complete: redo it with\n'
+                         f'  python3 entc641/run_trial.py {args.run_id} --reference --redo')
     robot = args.robot or run.robots[0]
     if not run.maps.get(robot):
         raise SystemExit(f'no /{robot}/map in {args.run_id}')

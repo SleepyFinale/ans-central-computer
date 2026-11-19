@@ -1,0 +1,183 @@
+Robot: Inky  ROBOT_SSH=inky@inky  (network: tamu/tailscale)
+Robot: Clyde  ROBOT_SSH=clyde@clyde  (network: tamu/tailscale)
+Logs: /home/schen08/central-computer/entc641/data/runs/R05/fleet/20261119-125836-45787
+Fleet bringup
+  robots:       inky clyde
+  filter:       -ic
+  central host: reverie
+  rviz:         off
+  output:       warnings and errors
+  ssh:
+    inky -> inky@inky
+    clyde -> clyde@clyde
+Stages:
+  1. ./scripts/comms/start_zenoh_central.sh -ic
+     wait for each robot: Route Subscriber (Zenoh:<robot>/tf_zenoh -> ROS:/<robot>/tf_zenoh) created
+  2. on each robot, in parallel:
+       source scripts/env/ros_robot_env.bash
+       export TURTLEBOT3_MODEL=burger
+       export LDS_MODEL=LDS-02
+       ros2 launch turtlebot3_bringup robot.launch.py
+     wait for: [<robot>.diff_drive_controller]: Run!
+  3. on each robot, in parallel:
+       ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
+     wait for: [<robot>.startup_map_seeder]: Startup map seeding complete
+  4. on each robot, in parallel:
+       ./scripts/comms/start_zenoh_robot.sh reverie
+     wait for: TF zenoh publish: /<robot>/tf -> /<robot>/tf_zenoh
+     and both Nav2 action servers discovered (restarted once if not)
+  5. ./scripts/core/start_central.sh -ic
+     wait for: All services running.  Press Ctrl+C to stop.
+
+=== zenoh-central ===
+Ready: central Zenoh
+=== inky: bringup ===
+=== clyde: bringup ===
+Ready: inky bringup
+Ready: clyde bringup
+=== inky: slam ===
+=== clyde: slam ===
+[inky:slam] [stuck_detector.py-9] [WARN] [1795114745.157270177] [inky.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[inky:slam] [stuck_detector.py-9] [WARN] [1795114745.177502100] [inky.stuck_detector]: bumper reflex: driving forward 0.08 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114745.668662279] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114745.708958511] [clyde.stuck_detector]: bumper reflex: driving forward 0.07 m
+Ready: inky slam
+Ready: clyde slam
+=== inky: after-slam hook ===
+Ready: inky after-slam hook
+=== clyde: after-slam hook ===
+Ready: clyde after-slam hook
+=== inky: zenoh ===
+=== clyde: zenoh ===
+Ready: inky zenoh
+Ready: inky Nav2 actions over Zenoh
+Ready: clyde zenoh
+Ready: clyde Nav2 actions over Zenoh
+=== central ===
+[inky:slam] [stereo_depth_node.py-14] [ERROR] [1795114810.479327096] [inky.stereo_depth_node]: No stereo pairs for 2 s (no frames from: neither; pairs do not match in time). Stereo obstacles are OFF; the LiDAR still works. The cameras are restarted automatically; if this repeats, reseat their USB cables.
+Ready: central stack
+
+Fleet is up. Press Ctrl+C to stop.
+[central] [33m[WARN] [1795114820.940278667] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114820.940434735] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[clyde:slam] [controller_server-15] [WARN] [1795114834.660682484] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114834.760345005] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114835.360378733] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114835.460217270] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114835.560328822] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [stereo_depth_node.py-14] [WARN] [1795114836.591744010] [clyde.stereo_depth_node]: Stereo floor is +0.281 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114837.534167054] [clyde.stuck_detector]: bumper reflex: driving back 0.20 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114837.537872338] [clyde.stuck_detector]: stuck: slipping bump=front {'cmd_dist': 0.164, 'cmd_turn': 0.078, 'cmd_steady': True, 'turn_dir': 1, 'wheel_travel': 0.136, 'gyro_turn': 0.25, 'lidar_fraction': 0.0, 'lidar_gain': 0.0719, 'vo_travel': None}
+[clyde:slam] [controller_server-15] [WARN] [1795114838.060446859] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114838.160576540] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [planner_server-16] [WARN] [1795114838.165635824] [clyde.planner_server]: GridBased: failed to create plan, invalid use: Starting point in lethal space! Cannot create feasible plan..
+[clyde:slam] [planner_server-16] [WARN] [1795114838.165979597] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114838.166086003] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795114838.260719925] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114838.361096362] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114838.460321481] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114838.560400756] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [planner_server-16] [WARN] [1795114838.585039945] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114838.585511921] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114838.585636586] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795114838.660315459] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [planner_server-16] [WARN] [1795114839.038817885] [clyde.planner_server]: GridBased: failed to create plan, invalid use: Starting point in lethal space! Cannot create feasible plan..
+[clyde:slam] [planner_server-16] [WARN] [1795114839.039063308] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114839.039147455] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114839.575230833] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114839.575433978] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114839.575504625] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795114841.434284986] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114841.434647209] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[clyde:slam] [planner_server-16] [WARN] [1795114841.470030565] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114841.473867440] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.28, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114841.477388874] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114842.917534789] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114842.920554082] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114842.923642671] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114843.578063783] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114843.578280076] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114843.578356612] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114845.992624833] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114845.999891051] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114846.002049855] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114846.590875306] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114846.592446526] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114846.592694356] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114848.089473570] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114848.089703104] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114848.089773196] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114848.592035748] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114848.596388301] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.29, 1.14)
+[clyde:slam] [planner_server-16] [WARN] [1795114848.601039646] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114848.642633572] [clyde.stuck_detector]: bumper reflex: driving back 0.15 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114848.653256671] [clyde.stuck_detector]: plans keep failing with the robot standing still: nudging back 0.15 m into the more open side
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114848.660545685] [clyde.stuck_detector]: 4+ plans failed in 30 s with the robot standing still: clearing the global costmap (stale LiDAR marks)
+[clyde:slam] [bt_navigator-18] [WARN] [1795114848.850111709] [clyde.bt_navigator]: [navigate_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795114848.858464472] [multi_robot_explorer]: [clyde] Goal aborted — blacklisting (pose_dist_m=0.5812533315728755, distance_remaining=0.0; tacit: pose≤0.15m or remain≤0.15m)[0m
+[clyde:slam] [bt_navigator-18] [ERROR] [1795114848.854317023] [clyde.bt_navigator]: Goal failed
+[central] [33m[WARN] [1795114851.934508278] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114851.934678997] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[clyde:slam] [planner_server-16] [WARN] [1795114851.952798013] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114851.957446248] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.36, 0.94)
+[clyde:slam] [planner_server-16] [WARN] [1795114851.957547376] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795114851.965454089] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[clyde:slam] [stereo_depth_node.py-14] [WARN] [1795114868.488811186] [clyde.stereo_depth_node]: Stereo floor is -0.112 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[central] [33m[WARN] [1795114870.226151130] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114870.226325414] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[central] [33m[WARN] [1795114888.450104364] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114888.450269402] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[clyde:slam] [controller_server-15] [WARN] [1795114913.054839827] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.154843361] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.254913171] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.354880872] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.455362694] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.554812996] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.655184135] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.754805341] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114913.855034223] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795114913.855356922] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795114913.855848099] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795114914.367849669] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114914.368579009] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795114914.369158092] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795114914.471139020] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795114914.534890299] [clyde.stuck_detector]: bumper reflex: driving back 0.10 m
+[clyde:slam] [controller_server-15] [WARN] [1795114914.772982721] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [stereo_depth_node.py-14] [WARN] [1795114921.387852245] [clyde.stereo_depth_node]: Stereo floor is +0.165 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[clyde:slam] [planner_server-16] [WARN] [1795114921.556184577] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114921.558648963] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (-1.79, 2.53)
+[clyde:slam] [planner_server-16] [WARN] [1795114921.561045166] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795114933.687388993] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795114933.687568293] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[central] [33m[WARN] [1795114984.162456686] [multi_robot_explorer]: No frontier assigned: 1 idle, 4 frontier(s). Sample robot=inky vs frontier[0]: goal=(2.83,-4.48) dist_to_goal=2.965m min_sep=0.4 issues=[none — check utility matrix][0m
+[central] [33m[WARN] [1795114987.163415610] [multi_robot_explorer]: [inky] Idle 3s with only blacklisted frontiers; clearing 10 blacklist point(s) and retrying (reset 1/1 since last success)[0m
+[inky:slam] [planner_server-16] [WARN] [1795114988.702153837] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795114988.702429815] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.97, -2.99)
+[inky:slam] [planner_server-16] [WARN] [1795114988.702501665] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795114990.030803462] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795114990.040817314] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (-1.11, -0.66)
+[clyde:slam] [planner_server-16] [WARN] [1795114990.046447279] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795114993.161620790] [multi_robot_explorer]: [inky] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[inky:slam] [planner_server-16] [WARN] [1795114996.203223196] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795114996.203705466] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (7.02, -2.94)
+[inky:slam] [planner_server-16] [WARN] [1795114996.203806002] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795115000.662360378] [multi_robot_explorer]: [inky] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[central] [33m[WARN] [1795115000.662949908] [multi_robot_explorer]: No frontier assigned: 1 idle, 3 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.00,-4.40) dist_to_goal=2.864m min_sep=0.4 issues=[none — check utility matrix][0m
+[inky:slam] [planner_server-16] [WARN] [1795115017.235973934] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795115017.239775953] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (7.07, -2.89)
+[inky:slam] [planner_server-16] [WARN] [1795115017.243741395] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795115018.662477758] [multi_robot_explorer]: No frontier assigned: 1 idle, 3 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.03,-4.38) dist_to_goal=2.818m min_sep=0.4 issues=[none — check utility matrix][0m
+[inky:slam] [planner_server-16] [WARN] [1795115020.223153193] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795115020.225565250] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (7.07, -2.89)
+[inky:slam] [planner_server-16] [WARN] [1795115020.227088395] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795115020.235178532] [multi_robot_explorer]: [inky] Path precheck hard failure -> blacklist (precheck_hard_repeated_transient_abort (count=2, base=precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[central] [33m[WARN] [1795115024.661971529] [multi_robot_explorer]: [inky] Frontiers left are still unreachable after 1 blacklist reset(s); treating them as unreachable[0m
+[central] [33m[WARN] [1795115031.911716919] [multi_robot_explorer]: [clyde] Idle 3s with only blacklisted frontiers; clearing 8 blacklist point(s) and retrying (reset 1/1 since last success)[0m
+[central] [33m[WARN] [1795115034.912162758] [multi_robot_explorer]: No frontier assigned: 2 idle, 2 frontier(s). Sample robot=clyde vs frontier[0]: goal=(1.35,-2.00) dist_to_goal=3.350m min_sep=0.4 issues=[none — check utility matrix][0m
+[central] [33m[WARN] [1795115037.911953086] [multi_robot_explorer]: [clyde] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[clyde:slam] [stereo_depth_node.py-14] [WARN] [1795115043.023802817] [clyde.stereo_depth_node]: Stereo floor is -0.057 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[inky:slam] [stereo_depth_node.py-14] [WARN] [1795115043.124183714] [inky.stereo_depth_node]: Stereo floor is +0.064 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/inky
+[clyde:slam] [controller_server-15] [WARN] [1795115090.669491429] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+
+Stopping fleet...

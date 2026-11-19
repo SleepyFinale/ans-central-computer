@@ -1,0 +1,559 @@
+ROS domain profile loaded: robot=inky, ROS_DOMAIN_ID=19
+ROS 2 Humble and workspace environment loaded from:
+  Underlay: /opt/ros/humble
+  Overlay : /home/inky/turtlebot3
+  RMW:      rmw_cyclonedds_cpp
+  ROS_LOCALHOST_ONLY: (unset)
+  CYCLONEDDS_URI: file:///home/inky/turtlebot3/config/cyclonedds/robot_localhost.xml
+  ROS_DOMAIN_ID: 19
+[INFO] [launch]: All log files can be found below /home/inky/.ros/log/2026-11-19-14-34-25-840370-ubuntu-21879
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: stereo: left=/dev/video0 (Arducam-1080P-HDR: Arducam-1080) right=/dev/video2 (Arducam-219-8MP-HDR: Arducam-21) size=320x240 calibration=/home/inky/turtlebot3/config/stereo/inky.yaml visual_odometry=True focus=330/230
+[INFO] [launch.user]: stereo calibration /home/inky/turtlebot3/config/stereo/inky.yaml: usable=True local_costmap=True stop_gate=True
+[INFO] [launch.user]: sensors: ultrasonic=False (/home/inky/turtlebot3/config/sensors/inky.yaml)
+[INFO] [bash-1]: process started with pid [21884]
+[INFO] [normalize_laser_scan.py-2]: process started with pid [21886]
+[INFO] [cmd_vel_mux-3]: process started with pid [21888]
+[INFO] [startup_map_seeder.py-4]: process started with pid [21892]
+[INFO] [map_wire_compressed_republisher.py-5]: process started with pid [21895]
+[INFO] [async_slam_toolbox_node-6]: process started with pid [21900]
+[INFO] [python3-7]: process started with pid [21909]
+[INFO] [stereo_cmd_vel_enforcer.py-8]: process started with pid [21911]
+[INFO] [stuck_detector.py-9]: process started with pid [21913]
+[INFO] [collision_resolver.py-10]: process started with pid [21915]
+[INFO] [live_map_filter.py-11]: process started with pid [21917]
+[INFO] [low_obstacle_memory.py-12]: process started with pid [21928]
+[cmd_vel_mux-3] [INFO] [1795120466.980932121] [inky.cmd_vel_mux]: cmd_vel mux: 3 inputs, 2 stop gates
+[async_slam_toolbox_node-6] [INFO] [1795120467.320051661] [inky.slam_toolbox]: Node using stack size 40000000
+[async_slam_toolbox_node-6] [INFO] [1795120468.125451145] [inky.slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[async_slam_toolbox_node-6] [INFO] [1795120468.192402835] [inky.slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[INFO] [bash-1]: process has finished cleanly [pid 21884]
+[INFO] [component_container-13]: process started with pid [22004]
+[INFO] [stereo_depth_node.py-14]: process started with pid [22006]
+[component_container-13] [INFO] [1795120471.656668495] [inky.stereo_container]: Load Library: /opt/ros/humble/lib/libv4l2_camera.so
+[startup_map_seeder.py-4] [INFO] [1795120472.655754706] [inky.startup_map_seeder]: Startup map seeder active (ns='/inky', cmd_topic=cmd_vel_reflex, controller_state_service=/inky/controller_server/get_state)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120473.072041516] [inky.stereo_cmd_vel_enforcer]: Stereo stop gate started: close_m=0.45 streak=2
+[component_container-13] [INFO] [1795120473.398483383] [inky.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795120473.406357698] [inky.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[map_wire_compressed_republisher.py-5] [INFO] [1795120473.635457393] [inky.map_wire_compressed_republisher]: Map wire: map_live -> map_wire_z (zlib OccupancyGrid, <= 1.00 Hz, compression=3)
+[component_container-13] [INFO] [1795120473.692002470] [v4l2_camera]: Driver: uvcvideo
+[component_container-13] [INFO] [1795120473.692097691] [v4l2_camera]: Version: 331743
+[component_container-13] [INFO] [1795120473.692122209] [v4l2_camera]: Device: Arducam-1080P-HDR: Arducam-1080
+[component_container-13] [INFO] [1795120473.692140820] [v4l2_camera]: Location: usb-0000:01:00.0-1.1
+[component_container-13] [INFO] [1795120473.692157876] [v4l2_camera]: Capabilities:
+[component_container-13] [INFO] [1795120473.692174561] [v4l2_camera]:   Read/write: NO
+[component_container-13] [INFO] [1795120473.692192227] [v4l2_camera]:   Streaming: YES
+[component_container-13] [INFO] [1795120473.692228004] [v4l2_camera]: Current pixel format: YUYV @ 320x240
+[component_container-13] [INFO] [1795120473.700200411] [v4l2_camera]: Available pixel formats: 
+[component_container-13] [INFO] [1795120473.700325243] [v4l2_camera]:   YUYV - YUYV 4:2:2
+[component_container-13] [INFO] [1795120473.700347002] [v4l2_camera]:   MJPG - Motion-JPEG
+[component_container-13] [INFO] [1795120473.700364853] [v4l2_camera]: Available controls: 
+[component_container-13] [INFO] [1795120473.700418778] [v4l2_camera]:   Brightness (1) = 0
+[component_container-13] [INFO] [1795120473.700451926] [v4l2_camera]:   Contrast (1) = 32
+[component_container-13] [INFO] [1795120473.700482407] [v4l2_camera]:   Saturation (1) = 64
+[component_container-13] [INFO] [1795120473.700510073] [v4l2_camera]:   Hue (1) = 0
+[component_container-13] [INFO] [1795120473.700537684] [v4l2_camera]:   White Balance, Automatic (2) = 1
+[component_container-13] [INFO] [1795120473.700565313] [v4l2_camera]:   Gamma (1) = 100
+[component_container-13] [INFO] [1795120473.700592072] [v4l2_camera]:   Gain (1) = 0
+[component_container-13] [INFO] [1795120473.700618572] [v4l2_camera]:   Power Line Frequency (3) = 2
+[component_container-13] [INFO] [1795120473.700645257] [v4l2_camera]:   White Balance Temperature (1) = 4600 [inactive]
+[component_container-13] [INFO] [1795120473.700672219] [v4l2_camera]:   Sharpness (1) = 3
+[component_container-13] [INFO] [1795120473.700698478] [v4l2_camera]:   Backlight Compensation (1) = 1
+[component_container-13] [ERROR] [1795120473.700742144] [v4l2_camera]: Failed getting value for control 10092545: Permission denied (13); returning 0!
+[component_container-13] [INFO] [1795120473.700897901] [v4l2_camera]:   Camera Controls (6) = 0
+[component_container-13] [INFO] [1795120473.700961808] [v4l2_camera]:   Auto Exposure (3) = 3
+[component_container-13] [INFO] [1795120473.700993437] [v4l2_camera]:   Exposure Time, Absolute (1) = 157 [inactive]
+[component_container-13] [INFO] [1795120473.701022511] [v4l2_camera]:   Exposure, Dynamic Framerate (2) = 0
+[component_container-13] [INFO] [1795120473.701050325] [v4l2_camera]:   Focus, Absolute (1) = 330
+[component_container-13] [INFO] [1795120473.701077565] [v4l2_camera]:   Focus, Automatic Continuous (2) = 0
+[component_container-13] [WARN] [1795120473.787166377] [inky.stereo_left.v4l2_camera]: Control type not currently supported: 6, for control: Camera Controls
+[component_container-13] [INFO] [1795120473.828003489] [v4l2_camera]: Starting camera
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/inky/stereo_left/v4l2_camera' in container '/inky/stereo_container'
+[low_obstacle_memory.py-12] [INFO] [1795120473.847408087] [inky.low_obstacle_memory]: low obstacle memory: inky/map -> /inky/low_obstacle_points
+[component_container-13] [INFO] [1795120473.858620986] [inky.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795120473.858855427] [inky.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795120474.080097398] [v4l2_camera]: Driver: uvcvideo
+[component_container-13] [INFO] [1795120474.080205915] [v4l2_camera]: Version: 331743
+[component_container-13] [INFO] [1795120474.080228767] [v4l2_camera]: Device: Arducam-219-8MP-HDR: Arducam-21
+[component_container-13] [INFO] [1795120474.080248285] [v4l2_camera]: Location: usb-0000:01:00.0-1.2
+[component_container-13] [INFO] [1795120474.080265414] [v4l2_camera]: Capabilities:
+[component_container-13] [INFO] [1795120474.080282340] [v4l2_camera]:   Read/write: NO
+[component_container-13] [INFO] [1795120474.080299118] [v4l2_camera]:   Streaming: YES
+[component_container-13] [INFO] [1795120474.080334284] [v4l2_camera]: Current pixel format: YUYV @ 320x240
+[component_container-13] [INFO] [1795120474.080683612] [v4l2_camera]: Available pixel formats: 
+[component_container-13] [INFO] [1795120474.080732593] [v4l2_camera]:   YUYV - YUYV 4:2:2
+[component_container-13] [INFO] [1795120474.080752593] [v4l2_camera]:   MJPG - Motion-JPEG
+[component_container-13] [INFO] [1795120474.080770074] [v4l2_camera]: Available controls: 
+[component_container-13] [INFO] [1795120474.080806944] [v4l2_camera]:   Brightness (1) = 0
+[component_container-13] [INFO] [1795120474.080840332] [v4l2_camera]:   Contrast (1) = 32
+[component_container-13] [INFO] [1795120474.080869147] [v4l2_camera]:   Saturation (1) = 64
+[component_container-13] [INFO] [1795120474.080895239] [v4l2_camera]:   Hue (1) = 0
+[component_container-13] [INFO] [1795120474.080921535] [v4l2_camera]:   White Balance, Automatic (2) = 1
+[component_container-13] [INFO] [1795120474.081090551] [v4l2_camera]:   Gamma (1) = 100
+[component_container-13] [INFO] [1795120474.081121865] [v4l2_camera]:   Gain (1) = 0
+[component_container-13] [INFO] [1795120474.081150124] [v4l2_camera]:   Power Line Frequency (3) = 2
+[component_container-13] [INFO] [1795120474.081177587] [v4l2_camera]:   White Balance Temperature (1) = 4600 [inactive]
+[component_container-13] [INFO] [1795120474.081205123] [v4l2_camera]:   Sharpness (1) = 3
+[component_container-13] [INFO] [1795120474.081231808] [v4l2_camera]:   Backlight Compensation (1) = 1
+[component_container-13] [ERROR] [1795120474.081267530] [v4l2_camera]: Failed getting value for control 10092545: Permission denied (13); returning 0!
+[component_container-13] [INFO] [1795120474.081389491] [v4l2_camera]:   Camera Controls (6) = 0
+[component_container-13] [INFO] [1795120474.084887276] [v4l2_camera]:   Auto Exposure (3) = 3
+[component_container-13] [INFO] [1795120474.084941941] [v4l2_camera]:   Exposure Time, Absolute (1) = 157 [inactive]
+[component_container-13] [INFO] [1795120474.084972589] [v4l2_camera]:   Exposure, Dynamic Framerate (2) = 0
+[component_container-13] [INFO] [1795120474.085002533] [v4l2_camera]:   Focus, Absolute (1) = 230
+[component_container-13] [INFO] [1795120474.085032366] [v4l2_camera]:   Focus, Automatic Continuous (2) = 0
+[component_container-13] [WARN] [1795120474.132966342] [inky.stereo_right.v4l2_camera]: Control type not currently supported: 6, for control: Camera Controls
+[component_container-13] [INFO] [1795120474.153143467] [v4l2_camera]: Starting camera
+[collision_resolver.py-10] [INFO] [1795120474.275076034] [inky.collision_resolver]: collision resolver: diagnosing controller give-ups
+[component_container-13] [WARN] [1795120474.569529387] [inky.stereo_left.v4l2_camera]: Image encoding not the same as requested output, performing possibly slow conversion: yuv422_yuy2 => mono8
+[component_container-13] [INFO] [1795120474.571128790] [inky.stereo_left.v4l2_camera]: using default calibration URL
+[component_container-13] [INFO] [1795120474.571420323] [inky.stereo_left.v4l2_camera]: camera calibration URL: file:///home/inky/.ros/camera_info/arducam-1080p-hdr:_arducam-1080.yaml
+[component_container-13] [ERROR] [1795120474.571819725] [camera_calibration_parsers]: Unable to open camera calibration file [/home/inky/.ros/camera_info/arducam-1080p-hdr:_arducam-1080.yaml]
+[component_container-13] [WARN] [1795120474.572068425] [inky.stereo_left.v4l2_camera]: Camera calibration file /home/inky/.ros/camera_info/arducam-1080p-hdr:_arducam-1080.yaml not found
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/inky/stereo_right/v4l2_camera' in container '/inky/stereo_container'
+[component_container-13] [INFO] [1795120474.622263795] [inky.stereo_container]: Load Library: /home/inky/turtlebot3/install/turtlebot3_navigation2/lib/libstereo_pair_throttle_component.so
+[component_container-13] [INFO] [1795120474.630219684] [inky.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<StereoPairThrottle>
+[component_container-13] [INFO] [1795120474.630432070] [inky.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<StereoPairThrottle>
+[component_container-13] [INFO] [1795120474.849821697] [inky.stereo_right.v4l2_camera]: using default calibration URL
+[component_container-13] [INFO] [1795120474.850106711] [inky.stereo_right.v4l2_camera]: camera calibration URL: file:///home/inky/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml
+[component_container-13] [ERROR] [1795120474.850295116] [camera_calibration_parsers]: Unable to open camera calibration file [/home/inky/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml]
+[component_container-13] [WARN] [1795120474.850444725] [inky.stereo_right.v4l2_camera]: Camera calibration file /home/inky/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml not found
+[component_container-13] [INFO] [1795120475.206407529] [inky.stereo_pair_throttle]: stereo pairs stereo_left/image_raw + stereo_right/image_raw -> stereo_left/image_pair + stereo_right/image_pair at <= 3.0 Hz
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/inky/stereo_pair_throttle' in container '/inky/stereo_container'
+[normalize_laser_scan.py-2] [INFO] [1795120476.137272123] [inky.laser_scan_normalizer]: Auto target selection enabled: collecting 30 scan lengths (min valid samples=12, fallback fixed target=228)
+[python3-7] [INFO] [1795120476.153107383] [wait_for_tf]: Waiting for TF (odom only). Need inky/odom->(one of ['inky/base_footprint', 'inky/base_link']). Timeout: 30.0s
+[python3-7] [INFO] [1795120476.164746034] [wait_for_tf]: TF ready: inky/odom -> inky/base_footprint
+[normalize_laser_scan.py-2] [INFO] [1795120476.182960335] [inky.laser_scan_normalizer]: Ultrasonic fusion sensor mask: left=True, front=True, right=True
+[python3-7] [INFO] [1795120476.188673014] [wait_for_tf]: TF tree looks ready.
+[normalize_laser_scan.py-2] [INFO] [1795120476.220284589] [inky.laser_scan_normalizer]: Ultrasonic overlap arbitration: enabled=True, similarity_m=0.100, side_pair_front_scale=0.60
+[normalize_laser_scan.py-2] [INFO] [1795120476.258740846] [inky.laser_scan_normalizer]: Laser scan normalizer started: scan -> scan_normalized (normalizing to 228 readings, publishing every 1 scan(s))
+[normalize_laser_scan.py-2] [INFO] [1795120476.432394355] [inky.laser_scan_normalizer]: Auto target warmup: collected 1/30 scan lengths; delaying publish until lock.
+[normalize_laser_scan.py-2] [INFO] [1795120476.924232884] [inky.laser_scan_normalizer]: Auto target warmup: collected 10/30 scan lengths; delaying publish until lock.
+[INFO] [python3-7]: process has finished cleanly [pid 21909]
+[live_map_filter.py-11] [INFO] [1795120477.677273877] [inky.live_map_filter]: live map: /inky/map -> /inky/map_live (clears obstacles seen through 6 scans in a row, none hit for 8s)
+[normalize_laser_scan.py-2] [INFO] [1795120477.898046449] [inky.laser_scan_normalizer]: Auto target warmup: collected 20/30 scan lengths; delaying publish until lock.
+[stuck_detector.py-9] [INFO] [1795120478.314503956] [inky.stuck_detector]: stuck detector: cmd_vel vs wheels, wheels vs LiDAR/VO, turn vs gyro
+[normalize_laser_scan.py-2] [INFO] [1795120478.870480975] [inky.laser_scan_normalizer]: Auto target lock complete: selected target_readings=224 from 30/30 filtered samples (center=224, tolerance=12). Observed counts: 224:18, 225:6, 223:5, 222:1
+[normalize_laser_scan.py-2] [INFO] [1795120478.877321412] [inky.laser_scan_normalizer]: Scan 1: received 224 readings, normalizing to 224
+[normalize_laser_scan.py-2] [INFO] [1795120478.931577495] [inky.laser_scan_normalizer]: Scan 1: published 224 readings (target: 224)
+[normalize_laser_scan.py-2] [INFO] [1795120478.969026303] [inky.laser_scan_normalizer]: Scan 2: received 223 readings, normalizing to 224
+[normalize_laser_scan.py-2] [INFO] [1795120478.974409836] [inky.laser_scan_normalizer]: Scan 2: published 224 readings (target: 224)
+[normalize_laser_scan.py-2] [INFO] [1795120479.075128410] [inky.laser_scan_normalizer]: Scan 3: received 224 readings, normalizing to 224
+[normalize_laser_scan.py-2] [INFO] [1795120479.081618631] [inky.laser_scan_normalizer]: Scan 3: published 224 readings (target: 224)
+[normalize_laser_scan.py-2] [INFO] [1795120479.170005255] [inky.laser_scan_normalizer]: Scan 4: received 224 readings, normalizing to 224
+[normalize_laser_scan.py-2] [INFO] [1795120479.178217710] [inky.laser_scan_normalizer]: Scan 4: published 224 readings (target: 224)
+[normalize_laser_scan.py-2] [INFO] [1795120479.257561946] [inky.laser_scan_normalizer]: Scan 5: received 225 readings, normalizing to 224
+[normalize_laser_scan.py-2] [INFO] [1795120479.261155542] [inky.laser_scan_normalizer]: Scan 5: published 224 readings (target: 224)
+[INFO] [controller_server-15]: process started with pid [22099]
+[INFO] [planner_server-16]: process started with pid [22101]
+[INFO] [behavior_server-17]: process started with pid [22103]
+[INFO] [bt_navigator-18]: process started with pid [22105]
+[INFO] [velocity_smoother-19]: process started with pid [22107]
+[INFO] [lifecycle_manager-20]: process started with pid [22111]
+[async_slam_toolbox_node-6] Info: clipped range threshold to be within minimum and maximum range!
+[async_slam_toolbox_node-6] Registering sensor: [Custom Described Lidar]
+[planner_server-16] [INFO] [1795120479.379045682] [inky.planner_server]: 
+[planner_server-16] 	planner_server lifecycle node launched. 
+[planner_server-16] 	Waiting on external lifecycle transitions to activate
+[planner_server-16] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[controller_server-15] [INFO] [1795120479.455639088] [inky.controller_server]: 
+[controller_server-15] 	controller_server lifecycle node launched. 
+[controller_server-15] 	Waiting on external lifecycle transitions to activate
+[controller_server-15] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[planner_server-16] [INFO] [1795120479.458268865] [inky.planner_server]: Creating
+[planner_server-16] [INFO] [1795120479.548746940] [inky.global_costmap.global_costmap]: 
+[planner_server-16] 	global_costmap lifecycle node launched. 
+[planner_server-16] 	Waiting on external lifecycle transitions to activate
+[planner_server-16] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[planner_server-16] [INFO] [1795120479.657899596] [inky.global_costmap.global_costmap]: Creating Costmap
+[controller_server-15] [INFO] [1795120479.822271301] [inky.controller_server]: Creating controller server
+[velocity_smoother-19] [INFO] [1795120480.012122822] [inky.velocity_smoother]: 
+[velocity_smoother-19] 	velocity_smoother lifecycle node launched. 
+[startup_map_seeder.py-4] [INFO] [1795120480.044766866] [inky.startup_map_seeder]: controller_server lifecycle service is available; waiting for ACTIVE
+[velocity_smoother-19] 	Waiting on external lifecycle transitions to activate
+[velocity_smoother-19] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[bt_navigator-18] [INFO] [1795120480.159827825] [inky.bt_navigator]: 
+[bt_navigator-18] 	bt_navigator lifecycle node launched. 
+[bt_navigator-18] 	Waiting on external lifecycle transitions to activate
+[bt_navigator-18] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[bt_navigator-18] [INFO] [1795120480.168512940] [inky.bt_navigator]: Creating
+[controller_server-15] [INFO] [1795120480.299957327] [inky.local_costmap.local_costmap]: 
+[controller_server-15] 	local_costmap lifecycle node launched. 
+[controller_server-15] 	Waiting on external lifecycle transitions to activate
+[controller_server-15] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[lifecycle_manager-20] [INFO] [1795120480.370732522] [inky.lifecycle_manager_navigation]: Creating
+[controller_server-15] [INFO] [1795120480.379998332] [inky.local_costmap.local_costmap]: Creating Costmap
+[lifecycle_manager-20] [INFO] [1795120480.620841778] [inky.lifecycle_manager_navigation]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[stereo_depth_node.py-14] [INFO] [1795120480.824690170] [inky.stereo_depth_node]: Loaded stereo calibration /home/inky/turtlebot3/config/stereo/inky.yaml
+[behavior_server-17] [INFO] [1795120481.222293470] [inky.behavior_server]: 
+[behavior_server-17] 	behavior_server lifecycle node launched. 
+[behavior_server-17] 	Waiting on external lifecycle transitions to activate
+[behavior_server-17] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[stuck_detector.py-9] [WARN] [1795120481.421877887] [inky.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[stuck_detector.py-9] [WARN] [1795120481.433955582] [inky.stuck_detector]: bumper reflex: driving forward 0.09 m
+[normalize_laser_scan.py-2] [INFO] [1795120481.721935603] [inky.laser_scan_normalizer]: robot tilted more than 1.5 deg: 0 floor beam(s) blanked in this scan, 1 scan(s) so far
+[stereo_depth_node.py-14] [INFO] [1795120482.770846908] [inky.stereo_depth_node]: stereo depth: left=stereo_left/image_pair right=stereo_right/image_pair calibration=/home/inky/turtlebot3/config/stereo/inky.yaml calibrated=True
+[lifecycle_manager-20] [INFO] [1795120482.791124762] [inky.lifecycle_manager_navigation]: Waiting for service controller_server/get_state...
+[stuck_detector.py-9] [INFO] [1795120483.501243598] [inky.stuck_detector]: bumper reflex: done (0.09 m)
+[lifecycle_manager-20] [INFO] [1795120484.137215399] [inky.lifecycle_manager_navigation]: [34m[1mStarting managed nodes bringup...[0m[0m
+[lifecycle_manager-20] [INFO] [1795120484.142519248] [inky.lifecycle_manager_navigation]: [34m[1mConfiguring controller_server[0m[0m
+[controller_server-15] [INFO] [1795120484.146407062] [inky.controller_server]: Configuring controller interface
+[controller_server-15] [INFO] [1795120484.147510324] [inky.controller_server]: getting goal checker plugins..
+[controller_server-15] [INFO] [1795120484.148466699] [inky.controller_server]: Controller frequency set to 10.0000Hz
+[controller_server-15] [INFO] [1795120484.148707288] [inky.local_costmap.local_costmap]: Configuring
+[controller_server-15] [INFO] [1795120484.286921151] [inky.local_costmap.local_costmap]: Using plugin "obstacle_layer"
+[controller_server-15] [INFO] [1795120484.333181369] [inky.local_costmap.local_costmap]: Subscribed to Topics: scan
+[controller_server-15] [INFO] [1795120484.502967681] [inky.local_costmap.local_costmap]: Initialized plugin "obstacle_layer"
+[controller_server-15] [INFO] [1795120484.510804048] [inky.local_costmap.local_costmap]: Using plugin "stereo_layer"
+[controller_server-15] [INFO] [1795120484.570262537] [inky.local_costmap.local_costmap]: Subscribed to Topics: stereo_mark stereo_clear
+[controller_server-15] [INFO] [1795120484.702986850] [inky.local_costmap.local_costmap]: Initialized plugin "stereo_layer"
+[controller_server-15] [INFO] [1795120484.703283679] [inky.local_costmap.local_costmap]: Using plugin "memory_layer"
+[controller_server-15] [INFO] [1795120484.715198691] [inky.local_costmap.local_costmap]: Subscribed to Topics: memory_mark memory_clear
+[controller_server-15] [INFO] [1795120484.802145410] [inky.local_costmap.local_costmap]: Initialized plugin "memory_layer"
+[controller_server-15] [INFO] [1795120484.802370888] [inky.local_costmap.local_costmap]: Using plugin "inflation_layer"
+[controller_server-15] [INFO] [1795120484.816764494] [inky.local_costmap.local_costmap]: Initialized plugin "inflation_layer"
+[controller_server-15] [INFO] [1795120484.897584691] [inky.controller_server]: Created progress_checker : progress_checker of type nav2_controller::SimpleProgressChecker
+[controller_server-15] [INFO] [1795120484.911180049] [inky.controller_server]: Created goal checker : general_goal_checker of type nav2_controller::SimpleGoalChecker
+[controller_server-15] [INFO] [1795120484.923245763] [inky.controller_server]: Controller Server has general_goal_checker  goal checkers available.
+[controller_server-15] [INFO] [1795120484.929108566] [inky.controller_server]: Created controller : FollowPath of type nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
+[controller_server-15] [INFO] [1795120485.021954292] [inky.controller_server]: Controller Server has FollowPath  controllers available.
+[lifecycle_manager-20] [INFO] [1795120485.122742977] [inky.lifecycle_manager_navigation]: [34m[1mConfiguring planner_server[0m[0m
+[planner_server-16] [INFO] [1795120485.126817121] [inky.planner_server]: Configuring
+[planner_server-16] [INFO] [1795120485.127012804] [inky.global_costmap.global_costmap]: Configuring
+[planner_server-16] [INFO] [1795120485.209931451] [inky.global_costmap.global_costmap]: Using plugin "static_layer"
+[planner_server-16] [INFO] [1795120485.248285394] [inky.global_costmap.global_costmap]: Subscribing to the map topic (/inky/map_live) with transient local durability
+[planner_server-16] [INFO] [1795120485.261226780] [inky.global_costmap.global_costmap]: Subscribing to updates
+[planner_server-16] [INFO] [1795120485.276185971] [inky.global_costmap.global_costmap]: Initialized plugin "static_layer"
+[planner_server-16] [INFO] [1795120485.279095317] [inky.global_costmap.global_costmap]: Using plugin "obstacle_layer"
+[planner_server-16] [INFO] [1795120485.309575393] [inky.global_costmap.global_costmap]: Subscribed to Topics: scan
+[planner_server-16] [INFO] [1795120485.362368682] [inky.global_costmap.global_costmap]: Initialized plugin "obstacle_layer"
+[planner_server-16] [INFO] [1795120485.362564827] [inky.global_costmap.global_costmap]: Using plugin "memory_layer"
+[planner_server-16] [INFO] [1795120485.378448523] [inky.global_costmap.global_costmap]: Subscribed to Topics: memory_mark memory_clear
+[planner_server-16] [INFO] [1795120485.474369611] [inky.global_costmap.global_costmap]: Initialized plugin "memory_layer"
+[planner_server-16] [INFO] [1795120485.474642570] [inky.global_costmap.global_costmap]: Using plugin "inflation_layer"
+[planner_server-16] [INFO] [1795120485.489800998] [inky.global_costmap.global_costmap]: Initialized plugin "inflation_layer"
+[planner_server-16] [INFO] [1795120485.587185565] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 145 X 107 at 0.050000 m/pix
+[planner_server-16] [INFO] [1795120485.612078000] [inky.planner_server]: Created global planner plugin GridBased of type nav2_smac_planner/SmacPlanner2D
+[planner_server-16] [INFO] [1795120485.612699417] [inky.planner_server]: Configuring GridBased of type SmacPlanner2D
+[planner_server-16] [INFO] [1795120485.661370470] [inky.planner_server]: Configured plugin GridBased of type SmacPlanner2D with tolerance 0.25, maximum iterations 1000000, max on approach iterations 5000, and allowing unknown traversal.
+[planner_server-16] [INFO] [1795120485.664075190] [inky.planner_server]: Planner Server has GridBased  planners available.
+[lifecycle_manager-20] [INFO] [1795120485.785198134] [inky.lifecycle_manager_navigation]: [34m[1mConfiguring behavior_server[0m[0m
+[behavior_server-17] [INFO] [1795120485.788065630] [inky.behavior_server]: Configuring
+[behavior_server-17] [INFO] [1795120485.863320444] [inky.behavior_server]: Creating behavior plugin spin of type nav2_behaviors/Spin
+[behavior_server-17] [INFO] [1795120485.868454796] [inky.behavior_server]: Configuring spin
+[behavior_server-17] [INFO] [1795120485.956651867] [inky.behavior_server]: Creating behavior plugin backup of type nav2_behaviors/BackUp
+[behavior_server-17] [INFO] [1795120485.960984822] [inky.behavior_server]: Configuring backup
+[behavior_server-17] [INFO] [1795120486.040930310] [inky.behavior_server]: Creating behavior plugin wait of type nav2_behaviors/Wait
+[behavior_server-17] [INFO] [1795120486.052375940] [inky.behavior_server]: Configuring wait
+[lifecycle_manager-20] [INFO] [1795120486.117913303] [inky.lifecycle_manager_navigation]: [34m[1mConfiguring bt_navigator[0m[0m
+[bt_navigator-18] [INFO] [1795120486.121368197] [inky.bt_navigator]: Configuring
+[lifecycle_manager-20] [INFO] [1795120487.061279937] [inky.lifecycle_manager_navigation]: [34m[1mConfiguring velocity_smoother[0m[0m
+[velocity_smoother-19] [INFO] [1795120487.063315278] [inky.velocity_smoother]: Configuring velocity smoother
+[lifecycle_manager-20] [INFO] [1795120487.135446341] [inky.lifecycle_manager_navigation]: [34m[1mActivating controller_server[0m[0m
+[controller_server-15] [INFO] [1795120487.140898169] [inky.controller_server]: Activating
+[controller_server-15] [INFO] [1795120487.141134166] [inky.local_costmap.local_costmap]: Activating
+[controller_server-15] [INFO] [1795120487.141201591] [inky.local_costmap.local_costmap]: Checking transform
+[controller_server-15] [INFO] [1795120487.142810142] [inky.local_costmap.local_costmap]: start
+[controller_server-15] [INFO] [1795120487.218921814] [inky.controller_server]: Activating controller: FollowPath of type regulated_pure_pursuit_controller::RegulatedPurePursuitController
+[controller_server-15] [INFO] [1795120487.219332623] [inky.controller_server]: Creating bond (controller_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795120487.241415339] [inky.lifecycle_manager_navigation]: [34m[1mActivating planner_server[0m[0m
+[planner_server-16] [INFO] [1795120487.242731505] [inky.planner_server]: Activating
+[planner_server-16] [INFO] [1795120487.242968706] [inky.global_costmap.global_costmap]: Activating
+[planner_server-16] [INFO] [1795120487.243047649] [inky.global_costmap.global_costmap]: Checking transform
+[planner_server-16] [INFO] [1795120487.243715880] [inky.global_costmap.global_costmap]: start
+[startup_map_seeder.py-4] [INFO] [1795120487.254186950] [inky.startup_map_seeder]: controller_server is ACTIVE; beginning startup map seeding motion
+[startup_map_seeder.py-4] [INFO] [1795120487.263874680] [inky.startup_map_seeder]: Running seeding segment: forward
+[planner_server-16] [INFO] [1795120487.785525123] [inky.planner_server]: Activating plugin GridBased of type SmacPlanner2D
+[planner_server-16] [INFO] [1795120487.796584629] [inky.planner_server]: Creating bond (planner_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795120487.815572039] [inky.lifecycle_manager_navigation]: [34m[1mActivating behavior_server[0m[0m
+[behavior_server-17] [INFO] [1795120487.816547932] [inky.behavior_server]: Activating
+[behavior_server-17] [INFO] [1795120487.817128331] [inky.behavior_server]: Activating spin
+[behavior_server-17] [INFO] [1795120487.817252422] [inky.behavior_server]: Activating backup
+[behavior_server-17] [INFO] [1795120487.817303513] [inky.behavior_server]: Activating wait
+[behavior_server-17] [INFO] [1795120487.817361716] [inky.behavior_server]: Creating bond (behavior_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795120487.831925505] [inky.lifecycle_manager_navigation]: [34m[1mActivating bt_navigator[0m[0m
+[bt_navigator-18] [INFO] [1795120487.833196060] [inky.bt_navigator]: Activating
+[bt_navigator-18] [INFO] [1795120488.599114197] [inky.bt_navigator]: Creating bond (bt_navigator) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795120488.615337554] [inky.lifecycle_manager_navigation]: [34m[1mActivating velocity_smoother[0m[0m
+[velocity_smoother-19] [INFO] [1795120488.616389798] [inky.velocity_smoother]: Activating
+[velocity_smoother-19] [INFO] [1795120488.616628332] [inky.velocity_smoother]: Creating bond (velocity_smoother) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795120488.666717864] [inky.lifecycle_manager_navigation]: [34m[1mManaged nodes are active[0m[0m
+[stereo_depth_node.py-14] [INFO] [1795120488.885462409] [inky.stereo_depth_node]: Stereo rows drifted +2.7 px while driving, over 397 matches: right cy -2.1 px from the file, in memory. A large value means a loose camera mount.
+[stereo_depth_node.py-14] [INFO] [1795120489.169897501] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795120489.756971790] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 156 X 111 at 0.050000 m/pix
+[startup_map_seeder.py-4] [INFO] [1795120490.340992994] [inky.startup_map_seeder]: Running seeding segment: stop
+[startup_map_seeder.py-4] [INFO] [1795120491.440747302] [inky.startup_map_seeder]: Startup map seeding complete
+[stereo_depth_node.py-14] [INFO] [1795120491.781355689] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120493.705816427] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120497.301550674] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120500.499492641] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120503.768059657] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120506.819521900] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120510.084682835] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120513.854347167] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120516.436262636] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120519.112160684] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120522.031844137] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120524.684406691] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=0.46 m drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120527.239849804] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120530.305838891] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120532.834562428] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=0.45 m drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120536.042112812] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=0.45 m drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120538.891466564] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [ERROR] [1795120542.201798501] [inky.stereo_depth_node]: No stereo pairs for 2 s (no frames from: neither; pairs do not match in time). Stereo obstacles are OFF; the LiDAR still works. The cameras are restarted automatically; if this repeats, reseat their USB cables.
+[stereo_depth_node.py-14] [INFO] [1795120542.381843766] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120542.658712157] [inky.stereo_depth_node]: Stereo images are back
+[stereo_depth_node.py-14] [INFO] [1795120544.537852735] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[bt_navigator-18] [INFO] [1795120545.552950534] [inky.bt_navigator]: Begin navigating from current location (0.44, 0.01) to (1.16, 1.18)
+[controller_server-15] [INFO] [1795120545.758334430] [inky.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795120545.759107012] [inky.controller_server]: No goal checker was specified in parameter 'current_goal_checker'. Server will use only plugin loaded general_goal_checker . This warning will appear once.
+[stereo_depth_node.py-14] [INFO] [1795120546.598248616] [inky.stereo_depth_node]: stereo floor_z=0.006 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[normalize_laser_scan.py-2] [INFO] [1795120547.450470493] [inky.laser_scan_normalizer]: robot tilted more than 1.5 deg: 0 floor beam(s) blanked in this scan, 10 scan(s) so far
+[planner_server-16] [INFO] [1795120548.757065748] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 118 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120548.824036050] [inky.stereo_depth_node]: stereo floor_z=0.008 m obstacle=0.99 m path=0.99 m@-7deg drop=no row_error=0.4 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120551.415833724] [inky.live_map_filter]: 11 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120551.464975749] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.66 m path=1.02 m@+3deg drop=no row_error=2.0 px lidar_height_beams=8
+[planner_server-16] [INFO] [1795120551.756972882] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 119 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120553.737256375] [inky.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.89 m drop=no row_error=2.3 px lidar_height_beams=8
+[planner_server-16] [INFO] [1795120553.756988773] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 119 at 0.050000 m/pix
+[controller_server-15] [INFO] [1795120553.960685489] [inky.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795120554.354296420] [inky.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795120554.573168730] [inky.bt_navigator]: Begin navigating from current location (1.10, 0.95) to (2.86, -1.57)
+[controller_server-15] [INFO] [1795120554.779362003] [inky.controller_server]: Received a goal, begin computing control effort.
+[planner_server-16] [INFO] [1795120555.757000164] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 119 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120556.163468999] [inky.stereo_depth_node]: stereo floor_z=0.028 m obstacle=0.60 m drop=no row_error=2.3 px lidar_height_beams=6
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120557.812530486] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [WARN] [1795120558.086591640] [inky.stereo_depth_node]: Stereo floor is +0.111 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/inky
+[controller_server-15] [INFO] [1795120558.280983493] [inky.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795120558.513261515] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120558.620219086] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795120560.872923313] [inky.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120561.396075226] [inky.live_map_filter]: 21 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120562.757040503] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 119 at 0.050000 m/pix
+[controller_server-15] [INFO] [1795120562.880589444] [inky.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795120563.339034115] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=5
+[stereo_depth_node.py-14] [INFO] [1795120565.357524032] [inky.stereo_depth_node]: stereo floor_z=0.006 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=3
+[planner_server-16] [INFO] [1795120565.756976711] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 134 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120567.464201646] [inky.stereo_depth_node]: stereo floor_z=0.004 m obstacle=none drop=no row_error=1.4 px lidar_height_beams=16
+[planner_server-16] [INFO] [1795120567.757051564] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 137 at 0.050000 m/pix
+[planner_server-16] [INFO] [1795120569.757293544] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 144 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120569.807603033] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.88 m drop=no row_error=0.7 px lidar_height_beams=21
+[planner_server-16] [INFO] [1795120571.757254343] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120571.970496031] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=0.63 m path=0.82 m@-9deg drop=no row_error=0.7 px lidar_height_beams=10
+[live_map_filter.py-11] [INFO] [1795120573.432309395] [inky.live_map_filter]: 31 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120573.758908487] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 170 at 0.050000 m/pix
+[controller_server-15] [INFO] [1795120573.980459444] [inky.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795120574.330052127] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=0.59 m path=0.59 m@-1deg drop=no row_error=0.6 px lidar_height_beams=6
+[live_map_filter.py-11] [INFO] [1795120574.423831464] [inky.live_map_filter]: 46 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120574.757614581] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 171 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120576.782914548] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=16
+[controller_server-15] [INFO] [1795120577.586637872] [inky.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795120577.978513606] [inky.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795120578.127909318] [inky.bt_navigator]: Begin navigating from current location (2.76, -1.32) to (1.58, -2.53)
+[controller_server-15] [INFO] [1795120578.355860773] [inky.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795120579.368250001] [inky.stereo_depth_node]: stereo floor_z=0.015 m obstacle=1.06 m path=1.06 m@-7deg drop=no row_error=0.6 px lidar_height_beams=16
+[stereo_depth_node.py-14] [INFO] [1795120581.728230998] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=0.60 m drop=no row_error=0.6 px lidar_height_beams=10
+[controller_server-15] [INFO] [1795120582.856321632] [inky.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795120583.807924413] [inky.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.43 m path=0.46 m@+15deg drop=no row_error=0.5 px lidar_height_beams=21
+[controller_server-15] [INFO] [1795120584.156254874] [inky.controller_server]: Passing new path to controller.
+[controller_server-15] [WARN] [1795120584.257655803] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120584.357084465] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_depth_node.py-14] [INFO] [1795120586.041920023] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=38
+[controller_server-15] [INFO] [1795120586.556285453] [inky.controller_server]: Passing new path to controller.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120587.702875911] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120588.207502223] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795120588.226191192] [inky.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.30 m path=0.29 m@-14deg drop=no row_error=0.6 px lidar_height_beams=13
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120588.230377260] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[live_map_filter.py-11] [INFO] [1795120588.395367578] [inky.live_map_filter]: 56 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120588.756828088] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120588.968443708] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120589.480360304] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [WARN] [1795120589.857470678] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120589.957691310] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120590.057326358] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120590.081730225] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [WARN] [1795120590.158185333] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120590.257937546] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120590.357438189] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_depth_node.py-14] [WARN] [1795120590.380384021] [inky.stereo_depth_node]: Stereo floor is +0.111 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/inky
+[stereo_depth_node.py-14] [INFO] [1795120590.407005522] [inky.stereo_depth_node]: stereo floor_z=0.111 m obstacle=0.29 m path=0.28 m@+11deg drop=no row_error=1.0 px lidar_height_beams=27
+[controller_server-15] [WARN] [1795120590.457767634] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120590.557408719] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120590.658127029] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795120590.658403988] [inky.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795120590.659272642] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[collision_resolver.py-10] [WARN] [1795120590.929040599] [inky.collision_resolver]: collision ahead: unverified (close=2 stale=3; nearest (+0.12,+0.18) stale): backing off 0.17 m to look at it with the cameras
+[controller_server-15] [INFO] [1795120590.937165407] [inky.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[stuck_detector.py-9] [WARN] [1795120590.941972170] [inky.stuck_detector]: bumper reflex: driving back 0.17 m
+[controller_server-15] [INFO] [1795120590.947827418] [inky.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795120591.195235757] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120591.199231977] [inky.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[controller_server-15] [WARN] [1795120591.204127702] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120591.307898393] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120591.391838225] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [WARN] [1795120591.410529009] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120592.027341057] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120592.131620111] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[live_map_filter.py-11] [INFO] [1795120592.403457761] [inky.live_map_filter]: 66 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120592.791882211] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=42
+[stuck_detector.py-9] [INFO] [1795120594.020997947] [inky.stuck_detector]: bumper reflex: done (0.17 m)
+[controller_server-15] [INFO] [1795120594.430362241] [inky.local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+[collision_resolver.py-10] [INFO] [1795120594.449932085] [inky.collision_resolver]: collision ahead: real (floor=1 unseen=3 memory=1; nearest (+0.30,+0.18) memory): forgot 4 fake cell(s); remembered 1 real cell(s) for the planner; cleared the costmap; still unverified after looking: treated as real
+[low_obstacle_memory.py-12] [INFO] [1795120594.513228922] [inky.low_obstacle_memory]: forgot 7 cell(s) on collision_resolver's verdict
+[low_obstacle_memory.py-12] [INFO] [1795120594.637860328] [inky.low_obstacle_memory]: remembered 1 cell(s) on collision_resolver's verdict
+[controller_server-15] [WARN] [1795120594.794445232] [inky.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[stereo_depth_node.py-14] [INFO] [1795120594.884484068] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=40
+[controller_server-15] [WARN] [1795120595.721558276] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120595.823395274] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120596.027093583] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120596.536168794] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120596.640182648] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120596.744502332] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_depth_node.py-14] [INFO] [1795120597.232215817] [inky.stereo_depth_node]: stereo floor_z=0.019 m obstacle=0.67 m path=0.69 m@+3deg drop=no row_error=1.7 px lidar_height_beams=37
+[stereo_depth_node.py-14] [INFO] [1795120599.433007263] [inky.stereo_depth_node]: stereo floor_z=0.001 m obstacle=none drop=no row_error=1.3 px lidar_height_beams=19
+[stereo_depth_node.py-14] [INFO] [1795120602.237586540] [inky.stereo_depth_node]: stereo floor_z=0.010 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120603.406980146] [inky.live_map_filter]: 55 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120604.488984378] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120606.611100693] [inky.stereo_depth_node]: stereo floor_z=0.022 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120608.786748099] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795120609.894581399] [inky.controller_server]: Passing new path to controller.
+[live_map_filter.py-11] [INFO] [1795120610.410228458] [inky.live_map_filter]: 44 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120610.867523683] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=1.08 m drop=no row_error=0.8 px lidar_height_beams=8
+[planner_server-16] [INFO] [1795120611.757194718] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 166 X 171 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120612.886491575] [inky.stereo_depth_node]: stereo floor_z=0.008 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=9
+[stereo_depth_node.py-14] [INFO] [1795120615.029860506] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=1.07 m drop=no row_error=0.5 px lidar_height_beams=15
+[stereo_depth_node.py-14] [INFO] [1795120617.360471783] [inky.stereo_depth_node]: stereo floor_z=0.005 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=30
+[planner_server-16] [INFO] [1795120618.757156373] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 166 X 171 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120619.412852596] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.64 m drop=no row_error=1.3 px lidar_height_beams=11
+[stereo_depth_node.py-14] [INFO] [1795120621.754165087] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=0.98 m drop=no row_error=1.0 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795120624.617313491] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=0.73 m path=0.75 m@+8deg drop=no row_error=0.4 px lidar_height_beams=4
+[live_map_filter.py-11] [INFO] [1795120625.398742659] [inky.live_map_filter]: 66 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120625.757038771] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 168 X 171 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120626.887857106] [inky.stereo_depth_node]: stereo floor_z=0.007 m obstacle=0.52 m path=0.52 m@-5deg drop=no row_error=0.4 px lidar_height_beams=2
+[controller_server-15] [WARN] [1795120627.696487433] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120627.796682436] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120627.897148731] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120627.995916181] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120628.097778752] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120628.195326053] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120628.297401121] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795120628.395777594] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795120628.399475337] [inky.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795120628.400067161] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795120628.641546568] [inky.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[planner_server-16] [INFO] [1795120628.652237116] [inky.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[collision_resolver.py-10] [WARN] [1795120628.688231425] [inky.collision_resolver]: collision ahead: unverified (floor=1 unseen=2 close=4; nearest (+0.17,-0.10) close): backing off 0.20 m to look at it with the cameras
+[stuck_detector.py-9] [WARN] [1795120628.715464028] [inky.stuck_detector]: bumper reflex: driving back 0.20 m
+[stereo_depth_node.py-14] [INFO] [1795120628.883286916] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=none drop=no row_error=2.1 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795120628.948037009] [inky.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795120631.067562214] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stuck_detector.py-9] [INFO] [1795120632.378010302] [inky.stuck_detector]: bumper reflex: done (0.20 m)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120632.569542122] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [INFO] [1795120632.707175097] [inky.local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+[collision_resolver.py-10] [INFO] [1795120632.737256974] [inky.collision_resolver]: collision ahead: real (stereo=4 unseen=3; nearest (+0.38,-0.10) stereo): forgot 3 fake cell(s); remembered 4 real cell(s) for the planner; cleared the costmap
+[low_obstacle_memory.py-12] [INFO] [1795120632.843847458] [inky.low_obstacle_memory]: forgot 2 cell(s) on collision_resolver's verdict
+[low_obstacle_memory.py-12] [INFO] [1795120632.927100541] [inky.low_obstacle_memory]: remembered 4 cell(s) on collision_resolver's verdict
+[stereo_depth_node.py-14] [INFO] [1795120633.420255724] [inky.stereo_depth_node]: stereo floor_z=0.015 m obstacle=0.42 m path=0.40 m@-15deg drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120633.978481219] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795120635.671094219] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=0.37 m path=0.36 m@-5deg drop=no row_error=0.6 px lidar_height_beams=5
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120636.178057423] [inky.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795120636.684560561] [inky.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795120637.820625838] [inky.stereo_depth_node]: stereo floor_z=0.008 m obstacle=0.75 m drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120639.828170415] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=0.48 m path=0.48 m@+16deg drop=no row_error=0.6 px lidar_height_beams=14
+[live_map_filter.py-11] [INFO] [1795120641.404731718] [inky.live_map_filter]: 41 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120641.757037824] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 168 X 171 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120641.862005572] [inky.stereo_depth_node]: stereo floor_z=0.012 m obstacle=0.92 m drop=no row_error=0.5 px lidar_height_beams=21
+[stereo_depth_node.py-14] [INFO] [1795120644.084473203] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=0.82 m path=0.81 m@+9deg drop=no row_error=1.8 px lidar_height_beams=12
+[controller_server-15] [INFO] [1795120644.349578432] [inky.controller_server]: Goal was canceled. Stopping the robot.
+[controller_server-15] [INFO] [1795120644.349788614] [inky.controller_server]: [follow_path] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795120644.353270323] [inky.bt_navigator]: [navigate_to_pose] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795120644.357031990] [inky.bt_navigator]: Goal canceled
+[stereo_depth_node.py-14] [INFO] [1795120646.116589496] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=0.74 m drop=no row_error=1.8 px lidar_height_beams=10
+[bt_navigator-18] [INFO] [1795120647.577129656] [inky.bt_navigator]: Begin navigating from current location (1.50, -2.27) to (4.40, -0.29)
+[controller_server-15] [INFO] [1795120647.783045192] [inky.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795120648.802025102] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=0.74 m drop=no row_error=0.6 px lidar_height_beams=7
+[stereo_depth_node.py-14] [INFO] [1795120650.859869113] [inky.stereo_depth_node]: stereo floor_z=-0.017 m obstacle=0.57 m drop=no row_error=0.6 px lidar_height_beams=5
+[controller_server-15] [INFO] [1795120652.387417185] [inky.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795120653.225815726] [inky.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120655.506344973] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=1.6 px lidar_height_beams=29
+[stereo_depth_node.py-14] [INFO] [1795120657.713686935] [inky.stereo_depth_node]: stereo floor_z=0.033 m obstacle=0.54 m drop=no row_error=1.6 px lidar_height_beams=25
+[controller_server-15] [WARN] [1795120658.988597486] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_depth_node.py-14] [INFO] [1795120659.736104000] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.52 m drop=no row_error=1.7 px lidar_height_beams=17
+[stereo_depth_node.py-14] [INFO] [1795120662.066966606] [inky.stereo_depth_node]: stereo floor_z=0.013 m obstacle=0.94 m drop=no row_error=0.8 px lidar_height_beams=18
+[stereo_depth_node.py-14] [INFO] [1795120664.090815520] [inky.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=5
+[stereo_depth_node.py-14] [INFO] [1795120666.202223157] [inky.stereo_depth_node]: stereo floor_z=0.007 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120668.409736709] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120670.541682807] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120672.578211092] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=1.0 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120674.607016933] [inky.stereo_depth_node]: stereo floor_z=0.007 m obstacle=1.07 m drop=no row_error=1.7 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120676.916196102] [inky.stereo_depth_node]: stereo floor_z=0.020 m obstacle=0.64 m drop=no row_error=1.7 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120678.933456963] [inky.stereo_depth_node]: stereo floor_z=0.007 m obstacle=0.73 m drop=no row_error=1.1 px lidar_height_beams=4
+[live_map_filter.py-11] [INFO] [1795120680.407775649] [inky.live_map_filter]: 30 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120681.182451652] [inky.stereo_depth_node]: stereo floor_z=0.005 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120683.429549961] [inky.stereo_depth_node]: stereo floor_z=0.010 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=18
+[live_map_filter.py-11] [INFO] [1795120685.407053601] [inky.live_map_filter]: 40 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120685.718751624] [inky.stereo_depth_node]: stereo floor_z=0.022 m obstacle=0.57 m drop=no row_error=0.6 px lidar_height_beams=9
+[planner_server-16] [INFO] [1795120685.757004311] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 168 X 172 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120687.745340923] [inky.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=1.7 px lidar_height_beams=2
+[planner_server-16] [INFO] [1795120687.757356360] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 168 X 172 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120690.110900832] [inky.stereo_depth_node]: stereo floor_z=0.015 m obstacle=none drop=no row_error=1.7 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795120691.387444216] [inky.controller_server]: Goal was canceled. Stopping the robot.
+[controller_server-15] [INFO] [1795120691.387616398] [inky.controller_server]: [follow_path] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795120691.392864618] [inky.bt_navigator]: [navigate_to_pose] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795120691.393705477] [inky.bt_navigator]: Goal canceled
+[stereo_depth_node.py-14] [INFO] [1795120692.476203411] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=none drop=no row_error=1.1 px lidar_height_beams=3
+[stereo_depth_node.py-14] [INFO] [1795120694.498077353] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=1.17 m drop=no row_error=1.1 px lidar_height_beams=3
+[bt_navigator-18] [INFO] [1795120694.560115954] [inky.bt_navigator]: Begin navigating from current location (4.17, -0.21) to (6.19, -0.63)
+[controller_server-15] [INFO] [1795120694.765082134] [inky.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795120696.823302605] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=0.66 m drop=no row_error=0.8 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795120698.872286728] [inky.stereo_depth_node]: stereo floor_z=0.017 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120701.260123555] [inky.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120701.400035343] [inky.live_map_filter]: 51 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120704.135796798] [inky.stereo_depth_node]: stereo floor_z=0.020 m obstacle=1.04 m drop=no row_error=0.6 px lidar_height_beams=18
+[stereo_depth_node.py-14] [INFO] [1795120706.193193503] [inky.stereo_depth_node]: stereo floor_z=0.005 m obstacle=0.94 m path=0.94 m@-3deg drop=no row_error=0.8 px lidar_height_beams=17
+[controller_server-15] [INFO] [1795120706.569888825] [inky.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795120706.963443367] [inky.bt_navigator]: Goal succeeded
+[stereo_depth_node.py-14] [INFO] [1795120708.350911866] [inky.stereo_depth_node]: stereo floor_z=0.019 m obstacle=0.72 m path=0.71 m@-10deg drop=no row_error=0.8 px lidar_height_beams=19
+[stereo_depth_node.py-14] [INFO] [1795120711.355266005] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=0.73 m path=0.97 m@+7deg drop=no row_error=0.8 px lidar_height_beams=20
+[stereo_depth_node.py-14] [INFO] [1795120714.701574526] [inky.stereo_depth_node]: stereo floor_z=0.019 m obstacle=0.73 m path=0.72 m@-9deg drop=no row_error=0.7 px lidar_height_beams=20
+[stereo_depth_node.py-14] [INFO] [1795120717.698725788] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=0.74 m path=0.72 m@-10deg drop=no row_error=0.7 px lidar_height_beams=20
+[live_map_filter.py-11] [INFO] [1795120720.401005376] [inky.live_map_filter]: 61 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120721.162234833] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=0.73 m path=0.72 m@-10deg drop=no row_error=0.7 px lidar_height_beams=20
+[stereo_depth_node.py-14] [INFO] [1795120724.111422864] [inky.stereo_depth_node]: stereo floor_z=0.018 m obstacle=0.73 m path=0.73 m@-9deg drop=no row_error=0.7 px lidar_height_beams=22
+[stereo_depth_node.py-14] [INFO] [1795120727.556116385] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.73 m path=0.72 m@-9deg drop=no row_error=0.7 px lidar_height_beams=22
+[bt_navigator-18] [INFO] [1795120729.349742762] [inky.bt_navigator]: Begin navigating from current location (6.03, -0.74) to (0.16, -0.02)
+[controller_server-15] [INFO] [1795120729.562093390] [inky.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795120730.106659133] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=0.72 m path=0.70 m@-11deg drop=no row_error=0.7 px lidar_height_beams=18
+[stereo_depth_node.py-14] [INFO] [1795120732.551444784] [inky.stereo_depth_node]: stereo floor_z=0.190 m obstacle=1.04 m drop=no row_error=0.8 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120734.850164290] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=none drop=no row_error=1.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120737.126966892] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795120739.237559289] [inky.stereo_depth_node]: stereo floor_z=0.023 m obstacle=1.07 m drop=no row_error=1.2 px lidar_height_beams=3
+[stereo_depth_node.py-14] [INFO] [1795120741.703932441] [inky.stereo_depth_node]: stereo floor_z=0.021 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=4
+[normalize_laser_scan.py-2] [INFO] [1795120743.550356979] [inky.laser_scan_normalizer]: robot tilted more than 1.5 deg: 0 floor beam(s) blanked in this scan, 100 scan(s) so far
+[stereo_depth_node.py-14] [INFO] [1795120743.810317326] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120745.411400787] [inky.live_map_filter]: 50 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120746.106777309] [inky.stereo_depth_node]: stereo floor_z=0.021 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120746.423639480] [inky.live_map_filter]: 37 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795120746.757489515] [inky.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 168 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795120748.548431486] [inky.stereo_depth_node]: stereo floor_z=0.008 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795120749.406066825] [inky.live_map_filter]: 47 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120750.619285978] [inky.stereo_depth_node]: stereo floor_z=0.011 m obstacle=0.93 m path=0.93 m@+0deg drop=no row_error=0.5 px lidar_height_beams=6
+[live_map_filter.py-11] [INFO] [1795120752.406571520] [inky.live_map_filter]: 57 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120753.201721116] [inky.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.64 m drop=no row_error=0.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120755.353647989] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120757.486134588] [inky.stereo_depth_node]: stereo floor_z=0.015 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795120759.723210672] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=none drop=no row_error=1.7 px lidar_height_beams=0
+[async_slam_toolbox_node-6] [INFO] [1795120760.606935522] [inky.slam_toolbox]: Message Filter dropping message: frame 'inky/base_scan' at time 1795120760.351 for reason 'the timestamp on the message is earlier than all the data in the transform cache'
+[stereo_depth_node.py-14] [INFO] [1795120761.748097052] [inky.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=1.7 px lidar_height_beams=3
+[controller_server-15] [WARN] [1795120762.269276708] [inky.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[stereo_depth_node.py-14] [INFO] [1795120763.863878374] [inky.stereo_depth_node]: stereo floor_z=0.007 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=23
+[live_map_filter.py-11] [INFO] [1795120764.394302933] [inky.live_map_filter]: 68 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795120766.125626397] [inky.stereo_depth_node]: stereo floor_z=0.022 m obstacle=none drop=no row_error=1.5 px lidar_height_beams=23
+[controller_server-15] [INFO] [1795120766.664925161] [inky.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795120767.163937823] [inky.bt_navigator]: Goal succeeded
+[stereo_depth_node.py-14] [INFO] [1795120768.618981900] [inky.stereo_depth_node]: stereo floor_z=0.023 m obstacle=none drop=no row_error=1.5 px lidar_height_beams=20
+[stereo_depth_node.py-14] [INFO] [1795120772.046415838] [inky.stereo_depth_node]: stereo floor_z=0.020 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=21
+[stereo_depth_node.py-14] [INFO] [1795120774.884122742] [inky.stereo_depth_node]: stereo floor_z=0.023 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=21
+[stereo_depth_node.py-14] [INFO] [1795120778.520885797] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=20
+[stereo_depth_node.py-14] [INFO] [1795120781.337255955] [inky.stereo_depth_node]: stereo floor_z=0.016 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=20
+Connection to inky closed.

@@ -1,0 +1,62 @@
+Script started on 2026-11-19 14:16:15-06:00 [<not executed on terminal>]
+Central ROS env: ROS_DOMAIN_ID=50 RMW=rmw_cyclonedds_cpp ROS_LOCALHOST_ONLY=1
+==========================================
+  Central Computer — Multi-Robot Exploration
+==========================================
+  ROS_DOMAIN_ID = 50 (localhost, rmw_cyclonedds_cpp)
+  Robots        = inky clyde
+
+Waiting up to 30s for robot maps (/<robot>/map)...
+1795119376.442931 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+Using robots: inky clyde
+  Mode = multi robot (map_merge)
+[1/3] map_merge (unknown initial poses)
+[2/3] Merge-state monitor (map_merge/merge_state)
+[3/3] Explorer
+
+==========================================
+  All services running.  Press Ctrl+C to stop.
+==========================================
+
+1795119376.796259 [50]  map_merge: selected interface "lo" is not multicast-capable: disabling multicast
+[INFO] [1795119376.799444105] [map_merge]: TF broadcasting enabled: map -> <robot>/map
+[INFO] [1795119376.799600577] [map_merge]: Map merging started.
+1795119376.941745 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+1795119377.143251 [50]    python3: selected interface "lo" is not multicast-capable: disabling multicast
+[0m[INFO] [1795119377.195310513] [multi_robot_explorer]: Multi-robot explorer started: robots=['inky', 'clyde'], map_topic=map, world_frame=map, freq=0.70 Hz, local_map_subs=True, use_pose_goal_fallback=False, mode=multi_robot, retarget_enable=True, retarget_opportunity=False, nav2_path_precheck=True, retrace_hold=True, goal_arrival_probe=True, collision_ahead_for_probe=True, navigate_to_pose_wait_sec=5.0, dispatch_nav_goals_in_robot_map_frame=True[0m
+[INFO] [1795119377.799772079] [map_merge]: Robot discovery started.
+[INFO] [1795119377.799957350] [map_merge]: adding robot [clyde] to system
+[INFO] [1795119377.799967127] [map_merge]: Subscribing to MAP topic: clyde/map.
+[INFO] [1795119377.800117746] [map_merge]: Subscribing to MAP updates topic: clyde/map_updates.
+[INFO] [1795119377.800884094] [map_merge]: adding robot [inky] to system
+[INFO] [1795119377.800893765] [map_merge]: Subscribing to MAP topic: inky/map.
+[INFO] [1795119377.800989785] [map_merge]: Subscribing to MAP updates topic: inky/map_updates.
+[INFO] [1795119377.801088373] [map_merge]: Grid pose estimation started.
+[INFO] [1795119378.049814160] [map_merge]: Publishing provisional map -> <robot>/map (identity) until a merged map is composed; Nav2 can register frame "map"
+[INFO] [1795119380.724551990] [map_merge]: 2 robot maps placed independently (no overlap detected yet)
+[INFO] [1795119380.725421674] [map_merge]: Publishing TF for 2 robot(s): map -> <robot>/map
+[0m[INFO] [1795119381.933215318] [multi_robot_explorer]: [inky] map moved in map by 3.01 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795119381.933662039] [multi_robot_explorer]: [clyde] map moved in map by 9.22 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795119382.007147095] [map_merge_state_monitor]: Merge state changed: NO_OVERLAP -> PARTIAL[0m
+[33m[WARN] [1795119384.964358932] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[33m[WARN] [1795119384.964741836] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[0m[INFO] [1795119384.999500667] [multi_robot_explorer]: [inky] Goal cancelled (reason=arrival_probe_fail, pose_dist_m=0.3450641598984706, blacklist=False)[0m
+[0m[INFO] [1795119387.183256891] [multi_robot_explorer]: Summary: inky[idle] reached=0(+0) failed=0(+0) status=canceled cancel=arrival_probe_fail pos=(3.93,-1.08) | clyde[goal_active] reached=0(+0) failed=0(+0) status=executing cancel=- pos=(-7.91,-2.41)[0m
+[0m[INFO] [1795119388.183695602] [multi_robot_explorer]: [inky] map moved in map by 0.57 m / 0.0 deg (map_merge alignment); moved 1 blacklist point(s) and stored goals with it[0m
+[0m[INFO] [1795119388.184240931] [multi_robot_explorer]: [clyde] map moved in map by 0.59 m / 0.0 deg (map_merge alignment); moved 0 blacklist point(s) and stored goals with it[0m
+[INFO] [1795119393.809093433] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=6, ratio=0.333, confidence=0.204); keeping the last accepted alignment if there is one
+[INFO] [1795119394.806547733] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[0m[INFO] [1795119395.704444734] [multi_robot_explorer]: [clyde] Arrival probe passed (ok len_ratio=1.10 samples=10 max_cell=0)[0m
+[INFO] [1795119395.805922144] [map_merge]: [estimateTransforms] Best feature match too weak (inliers=2, matches=7, ratio=0.286, confidence=0.198); keeping the last accepted alignment if there is one
+[0m[INFO] [1795119396.517348546] [multi_robot_explorer]: [clyde] Goal reached (total: 1)[0m
+[0m[INFO] [1795119396.517559850] [multi_robot_explorer]: [clyde] Reached; frontiers within 1.5 m of (-8.03, -2.30), (-8.02, -1.97) will not be assigned again[0m
+[0m[INFO] [1795119397.183359030] [multi_robot_explorer]: Summary: inky[goal_active] reached=0(+0) failed=0(+0) status=executing cancel=- pos=(3.21,-2.38) | clyde[goal_active] reached=1(+1) failed=0(+0) status=executing cancel=- pos=(-8.02,-1.98)[0m
+[0m[INFO] [1795119398.145216605] [multi_robot_explorer]: [inky] Goal reached (total: 1)[0m
+[0m[INFO] [1795119398.145542335] [multi_robot_explorer]: [inky] Reached; frontiers within 1.5 m of (2.83, -2.58) will not be assigned again[0m
+[0m[INFO] [1795119398.192052433] [multi_robot_explorer]: [clyde] Skipping frontier at (-7.43, -2.76): clyde already reached (-8.03, -2.30) and it is still unknown[0m
+[0m[INFO] [1795119407.187680347] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+1) failed=0(+0) status=executing cancel=- pos=(3.19,-2.86) | clyde[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(-7.89,-1.56)[0m
+[0m[INFO] [1795119417.183070763] [multi_robot_explorer]: Summary: inky[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(3.19,-2.86) | clyde[goal_active] reached=1(+0) failed=0(+0) status=executing cancel=- pos=(-7.89,-1.56)[0m
+[33m[WARN] [1795119419.183772731] [multi_robot_explorer]: [clyde] TF stale -> robot temporarily unassignable (tf_age=7.50s, threshold=6.50s)[0m
+[33m[WARN] [1795119419.183993128] [multi_robot_explorer]: [clyde] Entering degraded hold due to stale TF (age=7.50s)[0m
+
+Script done on 2026-11-19 14:17:01-06:00 [COMMAND_EXIT_CODE="0"]

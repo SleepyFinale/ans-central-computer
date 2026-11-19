@@ -28,6 +28,8 @@ import csv
 import glob
 import json
 import os
+import re
+import select
 import shlex
 import signal
 import subprocess
@@ -53,7 +55,7 @@ def ssh_target(robot):
 
 
 def ssh(robot, command, timeout=30):
-    return subprocess.run(['sshpass', '-e', 'ssh', *SSH_OPTS, ssh_target(robot), command],
+    return subprocess.run(stdin=subprocess.DEVNULL, args=['sshpass', '-e', 'ssh', *SSH_OPTS, ssh_target(robot), command],
                           capture_output=True, text=True, timeout=timeout)
 
 
@@ -95,7 +97,7 @@ class Fleet:
         if not rviz:
             cmd.append('--no-rviz')
         self.out = open(out_path, 'w')
-        self.proc = subprocess.Popen(cmd, cwd=WS, env=env, stdout=subprocess.PIPE,
+        self.proc = subprocess.Popen(stdin=subprocess.DEVNULL, args=cmd, cwd=WS, env=env, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True,
                                      start_new_session=True, bufsize=1)
         self.lines = []
@@ -151,7 +153,7 @@ def start_bag(bag_dir, robots, out_path):
                    f'/{r}/navigate_to_pose/_action/status']
     cmd = f'exec ros2 bag record --include-hidden-topics -o {shlex.quote(str(bag_dir))} ' + \
         ' '.join(topics)
-    return subprocess.Popen(central_shell(cmd), cwd=WS, stdout=open(out_path, 'w'),
+    return subprocess.Popen(stdin=subprocess.DEVNULL, args=central_shell(cmd), cwd=WS, stdout=open(out_path, 'w'),
                             stderr=subprocess.STDOUT, start_new_session=True)
 
 
@@ -168,7 +170,7 @@ def stop_bag(proc):
 
 def live_voltage(robot):
     try:
-        r = subprocess.run(central_shell(
+        r = subprocess.run(stdin=subprocess.DEVNULL, args=central_shell(
             f'timeout 15 ros2 topic echo --once --field voltage /{robot}/battery_state'),
             cwd=WS, capture_output=True, text=True, timeout=25)
         return float(r.stdout.split()[0])
@@ -199,7 +201,7 @@ def stop_pi_monitor(run_id, robot, run_dir):
     try:
         # The [e] keeps pkill from matching this SSH command's own shell.
         ssh(robot, f'pkill -INT -f "[e]{tag[1:]}.csv"; sleep 1; pkill -f "[e]{tag[1:]}.csv"; true')
-        r = subprocess.run(['sshpass', '-e', 'scp', *SSH_OPTS,
+        r = subprocess.run(stdin=subprocess.DEVNULL, args=['sshpass', '-e', 'scp', *SSH_OPTS,
                             f'{ssh_target(robot)}:/tmp/{tag}.csv', str(run_dir / f'pi_{robot}.csv')],
                            capture_output=True, text=True, timeout=60)
         if r.returncode != 0:
@@ -212,7 +214,7 @@ def git_state(robot=None):
     cmd = 'git rev-parse --short HEAD && git branch --show-current && git status --porcelain | wc -l'
     try:
         if robot is None:
-            r = subprocess.run(['bash', '-c', cmd], cwd=WS, capture_output=True, text=True, timeout=20)
+            r = subprocess.run(stdin=subprocess.DEVNULL, args=['bash', '-c', cmd], cwd=WS, capture_output=True, text=True, timeout=20)
         else:
             r = ssh(robot, f'cd ~/turtlebot3 && {cmd}')
         commit, branch, dirty = r.stdout.split()[:3]
@@ -231,6 +233,40 @@ def read_events(run_dir):
                 except json.JSONDecodeError:
                     pass
     return events
+
+
+# Only these mean a robot is home. "Return home abandoned" is not: the explorer
+# gave up for now and retries later, so the robot may be anywhere.
+HOME_MARKS = ('Return home succeeded', 'skipping NavigateToPose for return home')
+STAMP = re.compile(r'\[(?:INFO|WARN|ERROR)\] \[(\d+\.\d+)\] \[multi_robot_explorer\]: (.*)')
+
+
+def exploration_status(run_dir, robots):
+    """(complete_t, home_t) in ROS seconds from the explorer's lines in central.log.
+
+    complete_t: when it logged 'exploration complete!' (None if not yet).
+    home_t: when the last robot reported home after that (None until all are).
+    """
+    complete_t = None
+    home = {}
+    for path in glob.glob(str(run_dir / 'fleet' / '*' / 'central.log')):
+        with open(path, errors='replace') as f:
+            for line in f:
+                m = STAMP.search(line)
+                if not m:
+                    continue
+                t, text = float(m.group(1)), m.group(2)
+                if 'exploration complete!' in text:
+                    if complete_t is None:
+                        complete_t = t
+                    continue
+                if complete_t is None:
+                    continue
+                for r in robots:
+                    if text.startswith(f'[{r}]') and any(k in text for k in HOME_MARKS):
+                        home.setdefault(r, t)
+    home_t = max(home.values()) if complete_t is not None and len(home) == len(robots) else None
+    return complete_t, home_t
 
 
 def goal_counts(events, t0_ns):
@@ -398,19 +434,51 @@ def main():
         if cap > 0:
             end = t0_ns * 1e-9 + cap
             next_report = time.time() + 30
+            meta['end_reason'] = 'cap'
             while time.time() < end:
                 if not fleet.alive():
                     raise RuntimeError('the fleet stopped during the run (see fleet.out)')
+                complete_t, home_t = exploration_status(run_dir, robots)
+                if complete_t is not None and 't_complete_ros_ns' not in meta:
+                    meta['t_complete_ros_ns'] = int(complete_t * 1e9)
+                    save_meta()
+                    log(f'exploration complete at {complete_t - t0_ns * 1e-9:.0f} s '
+                        '(scoring ends here); waiting for the robots to get home')
+                if home_t is not None:
+                    meta['end_reason'] = 'explored_and_home'
+                    meta['t_end_ros_ns'] = int(home_t * 1e9)
+                    log(f'every robot home at {home_t - t0_ns * 1e-9:.0f} s; ending the run')
+                    break
                 if time.time() >= next_report:
                     el = time.time() - t0_ns * 1e-9
                     log(f'{el:4.0f}/{cap:.0f} s  {goal_counts(read_events(run_dir), t0_ns)}')
                     next_report += 30
                 time.sleep(1.0)
-            log('cap reached')
+            else:
+                meta['t_end_ros_ns'] = int(end * 1e9)
+                log('cap reached')
         else:
-            input('Reference run: press Enter when the area is fully mapped ')
+            # No cap: stop when exploration is complete and the robot is home,
+            # or when you press Enter.
+            print('Reference run: stops by itself once the area is mapped and the robot '
+                  'is home; press Enter to stop sooner.', flush=True)
+            meta['end_reason'] = 'enter'
+            while True:
+                if not fleet.alive():
+                    raise RuntimeError('the fleet stopped during the run (see fleet.out)')
+                complete_t, home_t = exploration_status(run_dir, robots)
+                if home_t is not None:
+                    meta['end_reason'] = 'explored_and_home'
+                    meta['t_end_ros_ns'] = int(home_t * 1e9)
+                    log('exploration complete and the robot is home')
+                    break
+                ready, _, _ = select.select([sys.stdin], [], [], 1.0)
+                if ready:
+                    sys.stdin.readline()
+                    meta['t_end_ros_ns'] = int(time.time() * 1e9)
+                    break
         meta['status'] = 'complete'
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         log('interrupted: stopping and marking the run aborted')
         meta['status'] = 'aborted'
     except RuntimeError as e:

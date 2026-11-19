@@ -1,0 +1,907 @@
+ROS domain profile loaded: robot=clyde, ROS_DOMAIN_ID=80
+ROS 2 Humble and workspace environment loaded from:
+  Underlay: /opt/ros/humble
+  Overlay : /home/clyde/turtlebot3
+  RMW:      rmw_cyclonedds_cpp
+  ROS_LOCALHOST_ONLY: (unset)
+  CYCLONEDDS_URI: file:///home/clyde/turtlebot3/config/cyclonedds/robot_localhost.xml
+  ROS_DOMAIN_ID: 80
+[INFO] [launch]: All log files can be found below /home/clyde/.ros/log/2026-11-19-14-58-45-264519-ubuntu-14773
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [launch.user]: stereo: left=/dev/video0 (Arducam-219-8MP-HDR: Arducam-21) right=/dev/video2 (Arducam-219-8MP-HDR: Arducam-21) size=320x240 calibration=/home/clyde/turtlebot3/config/stereo/clyde.yaml visual_odometry=True focus=270/290
+[INFO] [launch.user]: stereo calibration /home/clyde/turtlebot3/config/stereo/clyde.yaml: usable=True local_costmap=True stop_gate=True
+[INFO] [launch.user]: sensors: ultrasonic=False (/home/clyde/turtlebot3/config/sensors/clyde.yaml)
+[INFO] [bash-1]: process started with pid [14779]
+[INFO] [normalize_laser_scan.py-2]: process started with pid [14781]
+[INFO] [cmd_vel_mux-3]: process started with pid [14783]
+[INFO] [startup_map_seeder.py-4]: process started with pid [14788]
+[INFO] [map_wire_compressed_republisher.py-5]: process started with pid [14791]
+[INFO] [async_slam_toolbox_node-6]: process started with pid [14793]
+[INFO] [python3-7]: process started with pid [14797]
+[INFO] [stereo_cmd_vel_enforcer.py-8]: process started with pid [14806]
+[INFO] [stuck_detector.py-9]: process started with pid [14810]
+[INFO] [collision_resolver.py-10]: process started with pid [14819]
+[INFO] [live_map_filter.py-11]: process started with pid [14821]
+[INFO] [low_obstacle_memory.py-12]: process started with pid [14824]
+[cmd_vel_mux-3] [INFO] [1795121926.353064571] [clyde.cmd_vel_mux]: cmd_vel mux: 3 inputs, 2 stop gates
+[async_slam_toolbox_node-6] [INFO] [1795121926.466759154] [clyde.slam_toolbox]: Node using stack size 40000000
+[async_slam_toolbox_node-6] [INFO] [1795121927.146756450] [clyde.slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[async_slam_toolbox_node-6] [INFO] [1795121927.195879795] [clyde.slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[INFO] [bash-1]: process has finished cleanly [pid 14779]
+[INFO] [component_container-13]: process started with pid [14899]
+[INFO] [stereo_depth_node.py-14]: process started with pid [14901]
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795121931.144316348] [clyde.stereo_cmd_vel_enforcer]: Stereo stop gate started: close_m=0.45 streak=2
+[component_container-13] [INFO] [1795121931.324333664] [clyde.stereo_container]: Load Library: /opt/ros/humble/lib/libv4l2_camera.so
+[map_wire_compressed_republisher.py-5] [INFO] [1795121932.270659424] [clyde.map_wire_compressed_republisher]: Map wire: map_live -> map_wire_z (zlib OccupancyGrid, <= 1.00 Hz, compression=3)
+[component_container-13] [INFO] [1795121932.680297989] [clyde.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795121932.684103407] [clyde.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795121933.059890484] [v4l2_camera]: Driver: uvcvideo
+[component_container-13] [INFO] [1795121933.059997501] [v4l2_camera]: Version: 331743
+[component_container-13] [INFO] [1795121933.060022927] [v4l2_camera]: Device: Arducam-219-8MP-HDR: Arducam-21
+[component_container-13] [INFO] [1795121933.060042001] [v4l2_camera]: Location: usb-0000:01:00.0-1.1
+[component_container-13] [INFO] [1795121933.060059038] [v4l2_camera]: Capabilities:
+[component_container-13] [INFO] [1795121933.060076186] [v4l2_camera]:   Read/write: NO
+[component_container-13] [INFO] [1795121933.060092982] [v4l2_camera]:   Streaming: YES
+[component_container-13] [INFO] [1795121933.060139907] [v4l2_camera]: Current pixel format: YUYV @ 320x240
+[component_container-13] [INFO] [1795121933.060569457] [v4l2_camera]: Available pixel formats: 
+[component_container-13] [INFO] [1795121933.060642457] [v4l2_camera]:   YUYV - YUYV 4:2:2
+[component_container-13] [INFO] [1795121933.060664993] [v4l2_camera]:   MJPG - Motion-JPEG
+[component_container-13] [INFO] [1795121933.060682586] [v4l2_camera]: Available controls: 
+[component_container-13] [INFO] [1795121933.060744715] [v4l2_camera]:   Brightness (1) = 0
+[component_container-13] [INFO] [1795121933.060792251] [v4l2_camera]:   Contrast (1) = 32
+[component_container-13] [INFO] [1795121933.060824399] [v4l2_camera]:   Saturation (1) = 64
+[component_container-13] [INFO] [1795121933.060852436] [v4l2_camera]:   Hue (1) = 0
+[component_container-13] [INFO] [1795121933.060881620] [v4l2_camera]:   White Balance, Automatic (2) = 1
+[component_container-13] [INFO] [1795121933.060912268] [v4l2_camera]:   Gamma (1) = 100
+[component_container-13] [INFO] [1795121933.060938749] [v4l2_camera]:   Gain (1) = 0
+[component_container-13] [INFO] [1795121933.060964879] [v4l2_camera]:   Power Line Frequency (3) = 2
+[component_container-13] [INFO] [1795121933.060991415] [v4l2_camera]:   White Balance Temperature (1) = 4600 [inactive]
+[component_container-13] [INFO] [1795121933.061018989] [v4l2_camera]:   Sharpness (1) = 3
+[component_container-13] [INFO] [1795121933.061046341] [v4l2_camera]:   Backlight Compensation (1) = 1
+[component_container-13] [ERROR] [1795121933.061089711] [v4l2_camera]: Failed getting value for control 10092545: Permission denied (13); returning 0!
+[component_container-13] [INFO] [1795121933.061289393] [v4l2_camera]:   Camera Controls (6) = 0
+[component_container-13] [INFO] [1795121933.061362689] [v4l2_camera]:   Auto Exposure (3) = 3
+[component_container-13] [INFO] [1795121933.061397818] [v4l2_camera]:   Exposure Time, Absolute (1) = 157 [inactive]
+[component_container-13] [INFO] [1795121933.061426281] [v4l2_camera]:   Exposure, Dynamic Framerate (2) = 0
+[component_container-13] [INFO] [1795121933.061454447] [v4l2_camera]:   Focus, Absolute (1) = 270
+[component_container-13] [INFO] [1795121933.061481984] [v4l2_camera]:   Focus, Automatic Continuous (2) = 0
+[collision_resolver.py-10] [INFO] [1795121933.163331761] [clyde.collision_resolver]: collision resolver: diagnosing controller give-ups
+[component_container-13] [WARN] [1795121933.260546112] [clyde.stereo_left.v4l2_camera]: Control type not currently supported: 6, for control: Camera Controls
+[component_container-13] [INFO] [1795121933.341580358] [v4l2_camera]: Starting camera
+[startup_map_seeder.py-4] [INFO] [1795121933.476940388] [clyde.startup_map_seeder]: Startup map seeder active (ns='/clyde', cmd_topic=cmd_vel_reflex, controller_state_service=/clyde/controller_server/get_state)
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/clyde/stereo_left/v4l2_camera' in container '/clyde/stereo_container'
+[component_container-13] [INFO] [1795121933.829809384] [clyde.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [INFO] [1795121933.829972660] [clyde.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<v4l2_camera::V4L2Camera>
+[component_container-13] [WARN] [1795121934.043534339] [clyde.stereo_left.v4l2_camera]: Image encoding not the same as requested output, performing possibly slow conversion: yuv422_yuy2 => mono8
+[component_container-13] [INFO] [1795121934.044788010] [clyde.stereo_left.v4l2_camera]: using default calibration URL
+[component_container-13] [INFO] [1795121934.045027414] [clyde.stereo_left.v4l2_camera]: camera calibration URL: file:///home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml
+[component_container-13] [ERROR] [1795121934.045960810] [camera_calibration_parsers]: Unable to open camera calibration file [/home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml]
+[component_container-13] [WARN] [1795121934.046166215] [clyde.stereo_left.v4l2_camera]: Camera calibration file /home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml not found
+[component_container-13] [INFO] [1795121934.131067249] [v4l2_camera]: Driver: uvcvideo
+[component_container-13] [INFO] [1795121934.131160026] [v4l2_camera]: Version: 331743
+[component_container-13] [INFO] [1795121934.131181637] [v4l2_camera]: Device: Arducam-219-8MP-HDR: Arducam-21
+[component_container-13] [INFO] [1795121934.131199896] [v4l2_camera]: Location: usb-0000:01:00.0-1.2
+[component_container-13] [INFO] [1795121934.131216655] [v4l2_camera]: Capabilities:
+[component_container-13] [INFO] [1795121934.131233062] [v4l2_camera]:   Read/write: NO
+[component_container-13] [INFO] [1795121934.131249413] [v4l2_camera]:   Streaming: YES
+[component_container-13] [INFO] [1795121934.131282376] [v4l2_camera]: Current pixel format: YUYV @ 320x240
+[component_container-13] [INFO] [1795121934.131623631] [v4l2_camera]: Available pixel formats: 
+[component_container-13] [INFO] [1795121934.131679316] [v4l2_camera]:   YUYV - YUYV 4:2:2
+[component_container-13] [INFO] [1795121934.131698964] [v4l2_camera]:   MJPG - Motion-JPEG
+[component_container-13] [INFO] [1795121934.131715889] [v4l2_camera]: Available controls: 
+[component_container-13] [INFO] [1795121934.131751741] [v4l2_camera]:   Brightness (1) = 0
+[component_container-13] [INFO] [1795121934.131784944] [v4l2_camera]:   Contrast (1) = 32
+[component_container-13] [INFO] [1795121934.131815370] [v4l2_camera]:   Saturation (1) = 64
+[component_container-13] [INFO] [1795121934.131843999] [v4l2_camera]:   Hue (1) = 0
+[component_container-13] [INFO] [1795121934.131872462] [v4l2_camera]:   White Balance, Automatic (2) = 1
+[component_container-13] [INFO] [1795121934.131900443] [v4l2_camera]:   Gamma (1) = 100
+[component_container-13] [INFO] [1795121934.131927183] [v4l2_camera]:   Gain (1) = 0
+[component_container-13] [INFO] [1795121934.131953201] [v4l2_camera]:   Power Line Frequency (3) = 2
+[component_container-13] [INFO] [1795121934.131979812] [v4l2_camera]:   White Balance Temperature (1) = 4600 [inactive]
+[component_container-13] [INFO] [1795121934.132006627] [v4l2_camera]:   Sharpness (1) = 3
+[component_container-13] [INFO] [1795121934.132033015] [v4l2_camera]:   Backlight Compensation (1) = 1
+[component_container-13] [ERROR] [1795121934.132067533] [v4l2_camera]: Failed getting value for control 10092545: Permission denied (13); returning 0!
+[component_container-13] [INFO] [1795121934.132225217] [v4l2_camera]:   Camera Controls (6) = 0
+[component_container-13] [INFO] [1795121934.132283457] [v4l2_camera]:   Auto Exposure (3) = 3
+[component_container-13] [INFO] [1795121934.132311531] [v4l2_camera]:   Exposure Time, Absolute (1) = 157 [inactive]
+[component_container-13] [INFO] [1795121934.132338530] [v4l2_camera]:   Exposure, Dynamic Framerate (2) = 0
+[component_container-13] [INFO] [1795121934.132365937] [v4l2_camera]:   Focus, Absolute (1) = 290
+[component_container-13] [INFO] [1795121934.132394344] [v4l2_camera]:   Focus, Automatic Continuous (2) = 0
+[component_container-13] [WARN] [1795121934.202329147] [clyde.stereo_right.v4l2_camera]: Control type not currently supported: 6, for control: Camera Controls
+[component_container-13] [INFO] [1795121934.258529094] [v4l2_camera]: Starting camera
+[normalize_laser_scan.py-2] [INFO] [1795121934.541835931] [clyde.laser_scan_normalizer]: Auto target selection enabled: collecting 30 scan lengths (min valid samples=12, fallback fixed target=228)
+[normalize_laser_scan.py-2] [INFO] [1795121934.559997457] [clyde.laser_scan_normalizer]: Ultrasonic fusion sensor mask: left=True, front=True, right=True
+[normalize_laser_scan.py-2] [INFO] [1795121934.567659089] [clyde.laser_scan_normalizer]: Ultrasonic overlap arbitration: enabled=True, similarity_m=0.100, side_pair_front_scale=0.60
+[normalize_laser_scan.py-2] [INFO] [1795121934.581860699] [clyde.laser_scan_normalizer]: Laser scan normalizer started: scan -> scan_normalized (normalizing to 228 readings, publishing every 1 scan(s))
+[normalize_laser_scan.py-2] [INFO] [1795121934.597638382] [clyde.laser_scan_normalizer]: Auto target warmup: collected 1/30 scan lengths; delaying publish until lock.
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/clyde/stereo_right/v4l2_camera' in container '/clyde/stereo_container'
+[component_container-13] [INFO] [1795121934.728902757] [clyde.stereo_container]: Load Library: /home/clyde/turtlebot3/install/turtlebot3_navigation2/lib/libstereo_pair_throttle_component.so
+[component_container-13] [INFO] [1795121934.734287601] [clyde.stereo_container]: Found class: rclcpp_components::NodeFactoryTemplate<StereoPairThrottle>
+[component_container-13] [INFO] [1795121934.734485061] [clyde.stereo_container]: Instantiate class: rclcpp_components::NodeFactoryTemplate<StereoPairThrottle>
+[low_obstacle_memory.py-12] [INFO] [1795121934.888918791] [clyde.low_obstacle_memory]: low obstacle memory: clyde/map -> /clyde/low_obstacle_points
+[python3-7] [INFO] [1795121934.910167688] [wait_for_tf]: Waiting for TF (odom only). Need clyde/odom->(one of ['clyde/base_footprint', 'clyde/base_link']). Timeout: 30.0s
+[python3-7] [INFO] [1795121934.930967480] [wait_for_tf]: TF ready: clyde/odom -> clyde/base_footprint
+[component_container-13] [INFO] [1795121934.951224240] [clyde.stereo_pair_throttle]: stereo pairs stereo_left/image_raw + stereo_right/image_raw -> stereo_left/image_pair + stereo_right/image_pair at <= 3.0 Hz
+[INFO] [launch_ros.actions.load_composable_nodes]: Loaded node '/clyde/stereo_pair_throttle' in container '/clyde/stereo_container'
+[component_container-13] [INFO] [1795121934.963239820] [clyde.stereo_right.v4l2_camera]: using default calibration URL
+[component_container-13] [INFO] [1795121934.963613168] [clyde.stereo_right.v4l2_camera]: camera calibration URL: file:///home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml
+[component_container-13] [ERROR] [1795121934.963870276] [camera_calibration_parsers]: Unable to open camera calibration file [/home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml]
+[component_container-13] [WARN] [1795121934.964094403] [clyde.stereo_right.v4l2_camera]: Camera calibration file /home/clyde/.ros/camera_info/arducam-219-8mp-hdr:_arducam-21.yaml not found
+[python3-7] [INFO] [1795121934.975887023] [wait_for_tf]: TF tree looks ready.
+[normalize_laser_scan.py-2] [INFO] [1795121935.016198380] [clyde.laser_scan_normalizer]: Auto target warmup: collected 10/30 scan lengths; delaying publish until lock.
+[INFO] [python3-7]: process has finished cleanly [pid 14797]
+[normalize_laser_scan.py-2] [INFO] [1795121936.040586623] [clyde.laser_scan_normalizer]: Auto target warmup: collected 20/30 scan lengths; delaying publish until lock.
+[normalize_laser_scan.py-2] [INFO] [1795121937.074914565] [clyde.laser_scan_normalizer]: Auto target lock complete: selected target_readings=236 from 30/30 filtered samples (center=236, tolerance=12). Observed counts: 236:11, 237:9, 233:4, 235:3, 231:1, 232:1
+[normalize_laser_scan.py-2] [INFO] [1795121937.078098805] [clyde.laser_scan_normalizer]: Scan 1: received 237 readings, normalizing to 236
+[normalize_laser_scan.py-2] [INFO] [1795121937.082211997] [clyde.laser_scan_normalizer]: Scan 1: published 236 readings (target: 236)
+[normalize_laser_scan.py-2] [INFO] [1795121937.172009047] [clyde.laser_scan_normalizer]: Scan 2: received 238 readings, normalizing to 236
+[normalize_laser_scan.py-2] [INFO] [1795121937.176022944] [clyde.laser_scan_normalizer]: Scan 2: published 236 readings (target: 236)
+[normalize_laser_scan.py-2] [INFO] [1795121937.282450186] [clyde.laser_scan_normalizer]: Scan 3: received 237 readings, normalizing to 236
+[normalize_laser_scan.py-2] [INFO] [1795121937.287421905] [clyde.laser_scan_normalizer]: Scan 3: published 236 readings (target: 236)
+[normalize_laser_scan.py-2] [INFO] [1795121937.383520602] [clyde.laser_scan_normalizer]: Scan 4: received 237 readings, normalizing to 236
+[normalize_laser_scan.py-2] [INFO] [1795121937.388324545] [clyde.laser_scan_normalizer]: Scan 4: published 236 readings (target: 236)
+[normalize_laser_scan.py-2] [INFO] [1795121937.483097370] [clyde.laser_scan_normalizer]: Scan 5: received 237 readings, normalizing to 236
+[normalize_laser_scan.py-2] [INFO] [1795121937.489018355] [clyde.laser_scan_normalizer]: Scan 5: published 236 readings (target: 236)
+[async_slam_toolbox_node-6] Info: clipped range threshold to be within minimum and maximum range!
+[async_slam_toolbox_node-6] Registering sensor: [Custom Described Lidar]
+[INFO] [controller_server-15]: process started with pid [14981]
+[INFO] [planner_server-16]: process started with pid [14983]
+[INFO] [behavior_server-17]: process started with pid [14985]
+[INFO] [bt_navigator-18]: process started with pid [14987]
+[INFO] [velocity_smoother-19]: process started with pid [14989]
+[INFO] [lifecycle_manager-20]: process started with pid [14993]
+[live_map_filter.py-11] [INFO] [1795121937.118506531] [clyde.live_map_filter]: live map: /clyde/map -> /clyde/map_live (clears obstacles seen through 6 scans in a row, none hit for 8s)
+[stuck_detector.py-9] [INFO] [1795121937.182154797] [clyde.stuck_detector]: stuck detector: cmd_vel vs wheels, wheels vs LiDAR/VO, turn vs gyro
+[controller_server-15] [INFO] [1795121937.840638033] [clyde.controller_server]: 
+[controller_server-15] 	controller_server lifecycle node launched. 
+[controller_server-15] 	Waiting on external lifecycle transitions to activate
+[controller_server-15] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[controller_server-15] [INFO] [1795121937.937934012] [clyde.controller_server]: Creating controller server
+[bt_navigator-18] [INFO] [1795121937.870135073] [clyde.bt_navigator]: 
+[bt_navigator-18] 	bt_navigator lifecycle node launched. 
+[bt_navigator-18] 	Waiting on external lifecycle transitions to activate
+[bt_navigator-18] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[bt_navigator-18] [INFO] [1795121937.870620660] [clyde.bt_navigator]: Creating
+[behavior_server-17] [INFO] [1795121937.943893460] [clyde.behavior_server]: 
+[behavior_server-17] 	behavior_server lifecycle node launched. 
+[behavior_server-17] 	Waiting on external lifecycle transitions to activate
+[behavior_server-17] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[controller_server-15] [INFO] [1795121937.949776317] [clyde.local_costmap.local_costmap]: 
+[controller_server-15] 	local_costmap lifecycle node launched. 
+[controller_server-15] 	Waiting on external lifecycle transitions to activate
+[controller_server-15] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[controller_server-15] [INFO] [1795121937.953187684] [clyde.local_costmap.local_costmap]: Creating Costmap
+[startup_map_seeder.py-4] [INFO] [1795121938.053799106] [clyde.startup_map_seeder]: controller_server lifecycle service is available; waiting for ACTIVE
+[planner_server-16] [INFO] [1795121938.069894101] [clyde.planner_server]: 
+[planner_server-16] 	planner_server lifecycle node launched. 
+[planner_server-16] 	Waiting on external lifecycle transitions to activate
+[planner_server-16] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[planner_server-16] [INFO] [1795121938.100500665] [clyde.planner_server]: Creating
+[planner_server-16] [INFO] [1795121938.117261226] [clyde.global_costmap.global_costmap]: 
+[planner_server-16] 	global_costmap lifecycle node launched. 
+[planner_server-16] 	Waiting on external lifecycle transitions to activate
+[planner_server-16] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[planner_server-16] [INFO] [1795121938.127117517] [clyde.global_costmap.global_costmap]: Creating Costmap
+[velocity_smoother-19] [INFO] [1795121938.155894825] [clyde.velocity_smoother]: 
+[velocity_smoother-19] 	velocity_smoother lifecycle node launched. 
+[velocity_smoother-19] 	Waiting on external lifecycle transitions to activate
+[velocity_smoother-19] 	See https://design.ros2.org/articles/node_lifecycle.html for more information.
+[lifecycle_manager-20] [INFO] [1795121938.731397523] [clyde.lifecycle_manager_navigation]: Creating
+[lifecycle_manager-20] [INFO] [1795121938.821151036] [clyde.lifecycle_manager_navigation]: [34m[1mCreating and initializing lifecycle service clients[0m[0m
+[stuck_detector.py-9] [WARN] [1795121940.043173018] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.18 m from the axle (Nav2 needs 0.26); moving clear
+[stuck_detector.py-9] [WARN] [1795121940.139989355] [clyde.stuck_detector]: bumper reflex: driving forward 0.08 m
+[lifecycle_manager-20] [INFO] [1795121941.093734341] [clyde.lifecycle_manager_navigation]: Waiting for service controller_server/get_state...
+[stereo_depth_node.py-14] [INFO] [1795121941.501101915] [clyde.stereo_depth_node]: Loaded stereo calibration /home/clyde/turtlebot3/config/stereo/clyde.yaml
+[stereo_depth_node.py-14] [INFO] [1795121941.582776320] [clyde.stereo_depth_node]: stereo depth: left=stereo_left/image_pair right=stereo_right/image_pair calibration=/home/clyde/turtlebot3/config/stereo/clyde.yaml calibrated=True
+[lifecycle_manager-20] [INFO] [1795121941.672821608] [clyde.lifecycle_manager_navigation]: [34m[1mStarting managed nodes bringup...[0m[0m
+[lifecycle_manager-20] [INFO] [1795121941.673045679] [clyde.lifecycle_manager_navigation]: [34m[1mConfiguring controller_server[0m[0m
+[controller_server-15] [INFO] [1795121941.673983390] [clyde.controller_server]: Configuring controller interface
+[controller_server-15] [INFO] [1795121941.677407424] [clyde.controller_server]: getting goal checker plugins..
+[controller_server-15] [INFO] [1795121941.678317061] [clyde.controller_server]: Controller frequency set to 10.0000Hz
+[controller_server-15] [INFO] [1795121941.678592558] [clyde.local_costmap.local_costmap]: Configuring
+[stuck_detector.py-9] [INFO] [1795121941.748713174] [clyde.stuck_detector]: bumper reflex: done (0.08 m)
+[controller_server-15] [INFO] [1795121941.774514665] [clyde.local_costmap.local_costmap]: Using plugin "obstacle_layer"
+[controller_server-15] [INFO] [1795121941.803984298] [clyde.local_costmap.local_costmap]: Subscribed to Topics: scan
+[controller_server-15] [INFO] [1795121941.897643043] [clyde.local_costmap.local_costmap]: Initialized plugin "obstacle_layer"
+[controller_server-15] [INFO] [1795121941.897802041] [clyde.local_costmap.local_costmap]: Using plugin "stereo_layer"
+[controller_server-15] [INFO] [1795121941.944377602] [clyde.local_costmap.local_costmap]: Subscribed to Topics: stereo_mark stereo_clear
+[controller_server-15] [INFO] [1795121942.168115198] [clyde.local_costmap.local_costmap]: Initialized plugin "stereo_layer"
+[controller_server-15] [INFO] [1795121942.168861189] [clyde.local_costmap.local_costmap]: Using plugin "memory_layer"
+[controller_server-15] [INFO] [1795121942.179687135] [clyde.local_costmap.local_costmap]: Subscribed to Topics: memory_mark memory_clear
+[controller_server-15] [INFO] [1795121942.313500128] [clyde.local_costmap.local_costmap]: Initialized plugin "memory_layer"
+[controller_server-15] [INFO] [1795121942.313642996] [clyde.local_costmap.local_costmap]: Using plugin "inflation_layer"
+[controller_server-15] [INFO] [1795121942.374666460] [clyde.local_costmap.local_costmap]: Initialized plugin "inflation_layer"
+[stereo_depth_node.py-14] [INFO] [1795121942.403590785] [clyde.stereo_depth_node]: Stereo alignment verified (1.9 px); obstacles on
+[controller_server-15] [INFO] [1795121942.565218930] [clyde.controller_server]: Created progress_checker : progress_checker of type nav2_controller::SimpleProgressChecker
+[controller_server-15] [INFO] [1795121942.577417471] [clyde.controller_server]: Created goal checker : general_goal_checker of type nav2_controller::SimpleGoalChecker
+[controller_server-15] [INFO] [1795121942.583887302] [clyde.controller_server]: Controller Server has general_goal_checker  goal checkers available.
+[controller_server-15] [INFO] [1795121942.587364169] [clyde.controller_server]: Created controller : FollowPath of type nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
+[stereo_depth_node.py-14] [INFO] [1795121942.673642001] [clyde.stereo_depth_node]: stereo floor_z=-0.011 m obstacle=none drop=no row_error=1.9 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795121942.684630741] [clyde.controller_server]: Controller Server has FollowPath  controllers available.
+[lifecycle_manager-20] [INFO] [1795121942.795808353] [clyde.lifecycle_manager_navigation]: [34m[1mConfiguring planner_server[0m[0m
+[planner_server-16] [INFO] [1795121942.797298854] [clyde.planner_server]: Configuring
+[planner_server-16] [INFO] [1795121942.797459222] [clyde.global_costmap.global_costmap]: Configuring
+[planner_server-16] [INFO] [1795121942.902365279] [clyde.global_costmap.global_costmap]: Using plugin "static_layer"
+[planner_server-16] [INFO] [1795121942.944481151] [clyde.global_costmap.global_costmap]: Subscribing to the map topic (/clyde/map_live) with transient local durability
+[planner_server-16] [INFO] [1795121942.949761348] [clyde.global_costmap.global_costmap]: Subscribing to updates
+[planner_server-16] [INFO] [1795121942.973910563] [clyde.global_costmap.global_costmap]: Initialized plugin "static_layer"
+[planner_server-16] [INFO] [1795121942.974310373] [clyde.global_costmap.global_costmap]: Using plugin "obstacle_layer"
+[planner_server-16] [INFO] [1795121942.988665055] [clyde.global_costmap.global_costmap]: Subscribed to Topics: scan
+[planner_server-16] [INFO] [1795121943.044408026] [clyde.global_costmap.global_costmap]: Initialized plugin "obstacle_layer"
+[planner_server-16] [INFO] [1795121943.044566950] [clyde.global_costmap.global_costmap]: Using plugin "memory_layer"
+[planner_server-16] [INFO] [1795121943.062638644] [clyde.global_costmap.global_costmap]: Subscribed to Topics: memory_mark memory_clear
+[planner_server-16] [INFO] [1795121943.147399234] [clyde.global_costmap.global_costmap]: Initialized plugin "memory_layer"
+[planner_server-16] [INFO] [1795121943.150610085] [clyde.global_costmap.global_costmap]: Using plugin "inflation_layer"
+[planner_server-16] [INFO] [1795121943.163985020] [clyde.global_costmap.global_costmap]: Initialized plugin "inflation_layer"
+[planner_server-16] [INFO] [1795121943.240373228] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 158 X 170 at 0.050000 m/pix
+[planner_server-16] [INFO] [1795121943.253738255] [clyde.planner_server]: Created global planner plugin GridBased of type nav2_smac_planner/SmacPlanner2D
+[planner_server-16] [INFO] [1795121943.253895309] [clyde.planner_server]: Configuring GridBased of type SmacPlanner2D
+[planner_server-16] [INFO] [1795121943.296228123] [clyde.planner_server]: Configured plugin GridBased of type SmacPlanner2D with tolerance 0.25, maximum iterations 1000000, max on approach iterations 5000, and allowing unknown traversal.
+[planner_server-16] [INFO] [1795121943.296615563] [clyde.planner_server]: Planner Server has GridBased  planners available.
+[lifecycle_manager-20] [INFO] [1795121943.397975310] [clyde.lifecycle_manager_navigation]: [34m[1mConfiguring behavior_server[0m[0m
+[behavior_server-17] [INFO] [1795121943.399390015] [clyde.behavior_server]: Configuring
+[behavior_server-17] [INFO] [1795121943.480370595] [clyde.behavior_server]: Creating behavior plugin spin of type nav2_behaviors/Spin
+[behavior_server-17] [INFO] [1795121943.484337511] [clyde.behavior_server]: Configuring spin
+[behavior_server-17] [INFO] [1795121943.553276326] [clyde.behavior_server]: Creating behavior plugin backup of type nav2_behaviors/BackUp
+[behavior_server-17] [INFO] [1795121943.557557960] [clyde.behavior_server]: Configuring backup
+[behavior_server-17] [INFO] [1795121943.613920128] [clyde.behavior_server]: Creating behavior plugin wait of type nav2_behaviors/Wait
+[behavior_server-17] [INFO] [1795121943.625721433] [clyde.behavior_server]: Configuring wait
+[lifecycle_manager-20] [INFO] [1795121943.680951502] [clyde.lifecycle_manager_navigation]: [34m[1mConfiguring bt_navigator[0m[0m
+[bt_navigator-18] [INFO] [1795121943.681990971] [clyde.bt_navigator]: Configuring
+[lifecycle_manager-20] [INFO] [1795121944.332212138] [clyde.lifecycle_manager_navigation]: [34m[1mConfiguring velocity_smoother[0m[0m
+[velocity_smoother-19] [INFO] [1795121944.335920094] [clyde.velocity_smoother]: Configuring velocity smoother
+[lifecycle_manager-20] [INFO] [1795121944.397884602] [clyde.lifecycle_manager_navigation]: [34m[1mActivating controller_server[0m[0m
+[controller_server-15] [INFO] [1795121944.399099180] [clyde.controller_server]: Activating
+[controller_server-15] [INFO] [1795121944.399280808] [clyde.local_costmap.local_costmap]: Activating
+[controller_server-15] [INFO] [1795121944.399360418] [clyde.local_costmap.local_costmap]: Checking transform
+[controller_server-15] [INFO] [1795121944.399775709] [clyde.local_costmap.local_costmap]: start
+[controller_server-15] [INFO] [1795121944.810189081] [clyde.controller_server]: Activating controller: FollowPath of type regulated_pure_pursuit_controller::RegulatedPurePursuitController
+[controller_server-15] [INFO] [1795121944.810382967] [clyde.controller_server]: Creating bond (controller_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795121944.838756817] [clyde.lifecycle_manager_navigation]: [34m[1mActivating planner_server[0m[0m
+[stuck_detector.py-9] [WARN] [1795121944.839071313] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.26 m from the axle (Nav2 needs 0.26); moving clear
+[planner_server-16] [INFO] [1795121944.841157548] [clyde.planner_server]: Activating
+[planner_server-16] [INFO] [1795121944.841375582] [clyde.global_costmap.global_costmap]: Activating
+[planner_server-16] [INFO] [1795121944.841447582] [clyde.global_costmap.global_costmap]: Checking transform
+[planner_server-16] [INFO] [1795121944.841812707] [clyde.global_costmap.global_costmap]: start
+[stuck_detector.py-9] [WARN] [1795121944.845805437] [clyde.stuck_detector]: bumper reflex: driving forward 0.02 m
+[startup_map_seeder.py-4] [INFO] [1795121944.863334378] [clyde.startup_map_seeder]: controller_server is ACTIVE; beginning startup map seeding motion
+[startup_map_seeder.py-4] [INFO] [1795121944.871058287] [clyde.startup_map_seeder]: Running seeding segment: forward
+[planner_server-16] [INFO] [1795121944.908185200] [clyde.planner_server]: Activating plugin GridBased of type SmacPlanner2D
+[planner_server-16] [INFO] [1795121944.924070586] [clyde.planner_server]: Creating bond (planner_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795121944.946957390] [clyde.lifecycle_manager_navigation]: [34m[1mActivating behavior_server[0m[0m
+[behavior_server-17] [INFO] [1795121944.949511175] [clyde.behavior_server]: Activating
+[behavior_server-17] [INFO] [1795121944.949655691] [clyde.behavior_server]: Activating spin
+[behavior_server-17] [INFO] [1795121944.949720580] [clyde.behavior_server]: Activating backup
+[behavior_server-17] [INFO] [1795121944.949770523] [clyde.behavior_server]: Activating wait
+[behavior_server-17] [INFO] [1795121944.949825541] [clyde.behavior_server]: Creating bond (behavior_server) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795121944.981980069] [clyde.lifecycle_manager_navigation]: [34m[1mActivating bt_navigator[0m[0m
+[bt_navigator-18] [INFO] [1795121944.982966835] [clyde.bt_navigator]: Activating
+[bt_navigator-18] [INFO] [1795121945.399328988] [clyde.bt_navigator]: Creating bond (bt_navigator) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795121945.435287618] [clyde.lifecycle_manager_navigation]: [34m[1mActivating velocity_smoother[0m[0m
+[velocity_smoother-19] [INFO] [1795121945.436200755] [clyde.velocity_smoother]: Activating
+[velocity_smoother-19] [INFO] [1795121945.436446012] [clyde.velocity_smoother]: Creating bond (velocity_smoother) to lifecycle manager.
+[lifecycle_manager-20] [INFO] [1795121945.454571853] [clyde.lifecycle_manager_navigation]: [34m[1mManaged nodes are active[0m[0m
+[stuck_detector.py-9] [INFO] [1795121945.477198938] [clyde.stuck_detector]: bumper reflex: done (0.02 m)
+[stereo_depth_node.py-14] [INFO] [1795121945.829212203] [clyde.stereo_depth_node]: Stereo rows drifted -1.9 px while driving, over 267 matches: right cy +1.7 px from the file, in memory. A large value means a loose camera mount.
+[stereo_depth_node.py-14] [INFO] [1795121945.993880627] [clyde.stereo_depth_node]: stereo floor_z=0.001 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[startup_map_seeder.py-4] [INFO] [1795121947.910738007] [clyde.startup_map_seeder]: Running seeding segment: stop
+[stereo_depth_node.py-14] [INFO] [1795121948.094622019] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795121948.360510635] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 167 X 170 at 0.050000 m/pix
+[startup_map_seeder.py-4] [INFO] [1795121948.918769796] [clyde.startup_map_seeder]: Startup map seeding complete
+[stuck_detector.py-9] [WARN] [1795121950.845066269] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.21 m from the axle (Nav2 needs 0.26); moving clear
+[stuck_detector.py-9] [WARN] [1795121950.850343817] [clyde.stuck_detector]: bumper reflex: driving forward 0.14 m
+[stereo_depth_node.py-14] [INFO] [1795121950.921914472] [clyde.stereo_depth_node]: stereo floor_z=0.007 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121953.369570115] [clyde.stereo_depth_node]: stereo floor_z=-0.006 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[stuck_detector.py-9] [INFO] [1795121953.426094836] [clyde.stuck_detector]: bumper reflex: done (0.14 m)
+[planner_server-16] [INFO] [1795121955.360387492] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 169 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795121955.731740491] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121958.263475622] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121960.899765148] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121963.460682230] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121966.098325091] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121968.657054928] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121971.297538923] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121973.900059498] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121976.526433346] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121979.139357409] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121981.787413072] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121984.781916908] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121987.333833753] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121989.999602113] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121992.507849588] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121995.170299080] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795121997.728757384] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [ERROR] [1795122001.144687759] [clyde.stereo_depth_node]: No stereo pairs for 2 s (no frames from: neither; pairs do not match in time). Stereo obstacles are OFF; the LiDAR still works. The cameras are restarted automatically; if this repeats, reseat their USB cables.
+[stereo_depth_node.py-14] [INFO] [1795122001.159058051] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122001.600475241] [clyde.stereo_depth_node]: Stereo images are back
+[stereo_depth_node.py-14] [INFO] [1795122004.098493616] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[bt_navigator-18] [INFO] [1795122004.909285798] [clyde.bt_navigator]: Begin navigating from current location (0.55, 0.00) to (1.40, 0.94)
+[controller_server-15] [INFO] [1795122005.116560571] [clyde.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795122005.116870067] [clyde.controller_server]: No goal checker was specified in parameter 'current_goal_checker'. Server will use only plugin loaded general_goal_checker . This warning will appear once.
+[stereo_depth_node.py-14] [INFO] [1795122006.124856050] [clyde.stereo_depth_node]: stereo floor_z=0.035 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=6
+[planner_server-16] [INFO] [1795122008.367193821] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 176 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122008.547442212] [clyde.stereo_depth_node]: stereo floor_z=0.008 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=2
+[normalize_laser_scan.py-2] [INFO] [1795122010.220927032] [clyde.laser_scan_normalizer]: robot tilted more than 1.5 deg: 0 floor beam(s) blanked in this scan, 1 scan(s) so far
+[planner_server-16] [INFO] [1795122010.360361298] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 195 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122010.991827430] [clyde.stereo_depth_node]: stereo floor_z=0.005 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=7
+[planner_server-16] [INFO] [1795122012.360372676] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 206 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122013.358413314] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=13
+[controller_server-15] [INFO] [1795122014.417986701] [clyde.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795122014.810928431] [clyde.bt_navigator]: Goal succeeded
+[live_map_filter.py-11] [INFO] [1795122014.900310848] [clyde.live_map_filter]: 14 stale SLAM obstacle cell(s) cleared in map_live
+[bt_navigator-18] [INFO] [1795122014.902357991] [clyde.bt_navigator]: Begin navigating from current location (1.26, 0.74) to (3.17, 1.38)
+[controller_server-15] [INFO] [1795122015.116543960] [clyde.controller_server]: Received a goal, begin computing control effort.
+[planner_server-16] [INFO] [1795122015.363439021] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 222 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122015.540959204] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=21
+[normalize_laser_scan.py-2] [INFO] [1795122016.914447336] [clyde.laser_scan_normalizer]: robot tilted more than 1.5 deg: 6 floor beam(s) blanked in this scan, 10 scan(s) so far
+[stereo_depth_node.py-14] [INFO] [1795122017.744795025] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122019.719575962] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122019.775950940] [clyde.stereo_depth_node]: stereo floor_z=0.007 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=13
+[planner_server-16] [INFO] [1795122020.362645863] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 222 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122022.106942896] [clyde.stereo_depth_node]: stereo floor_z=-0.000 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=25
+[planner_server-16] [INFO] [1795122024.360409460] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 222 X 170 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122024.500431312] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.53 m drop=no row_error=0.2 px lidar_height_beams=34
+[controller_server-15] [INFO] [1795122026.519446204] [clyde.controller_server]: Passing new path to controller.
+[controller_server-15] [WARN] [1795122026.521130276] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122026.544943307] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122026.545971536] [clyde.stereo_depth_node]: stereo floor_z=-0.013 m obstacle=0.31 m path=0.29 m@-20deg drop=no row_error=0.6 px lidar_height_beams=7
+[controller_server-15] [WARN] [1795122026.621889595] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122026.720154296] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122026.820120254] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122026.920359190] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122027.020040985] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122027.049404377] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [WARN] [1795122027.120198830] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122027.221081463] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122027.221955174] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122027.222478298] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122027.503505434] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[controller_server-15] [INFO] [1795122027.511129010] [clyde.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795122027.617644057] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122027.626172437] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[controller_server-15] [WARN] [1795122027.632200458] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[collision_resolver.py-10] [INFO] [1795122027.642871571] [clyde.collision_resolver]: collision ahead: real (lidar=1 close=1; nearest (+0.20,-0.11) close): backing off 0.10 m for room to turn
+[stuck_detector.py-9] [WARN] [1795122027.655874250] [clyde.stuck_detector]: bumper reflex: driving back 0.10 m
+[controller_server-15] [WARN] [1795122027.720083041] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122027.820079425] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122027.920158567] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.019844269] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.120084150] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.219807315] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.320024288] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122028.320340859] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122028.320746706] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122028.603965168] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[planner_server-16] [INFO] [1795122028.606059754] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[controller_server-15] [INFO] [1795122028.616193022] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122028.693458139] [clyde.stereo_depth_node]: stereo floor_z=0.015 m obstacle=0.76 m drop=no row_error=0.5 px lidar_height_beams=5
+[controller_server-15] [WARN] [1795122028.809967919] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.810578597] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[controller_server-15] [WARN] [1795122028.811380254] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.820447387] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122028.920672435] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stuck_detector.py-9] [INFO] [1795122029.647800601] [clyde.stuck_detector]: bumper reflex: done (0.10 m)
+[stereo_depth_node.py-14] [INFO] [1795122030.980467817] [clyde.stereo_depth_node]: stereo floor_z=0.005 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=9
+[controller_server-15] [WARN] [1795122031.420915025] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122031.519978416] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122031.619803797] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122031.719939046] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122031.819869611] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122031.920287375] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122032.020010165] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122032.120009044] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122032.120265449] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122032.120754128] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122032.503856641] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[controller_server-15] [INFO] [1795122032.515255748] [clyde.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [INFO] [1795122032.625092233] [clyde.local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+[planner_server-16] [INFO] [1795122032.626870342] [clyde.global_costmap.global_costmap]: Received request to clear entirely the global_costmap
+[collision_resolver.py-10] [INFO] [1795122032.646646239] [clyde.collision_resolver]: collision ahead: real (lidar=4 stale=1; nearest (+0.13,-0.17) stale): forgot 1 fake cell(s); cleared the costmap; backing off 0.10 m for room to turn; 2 real blocks here in 60 s: cancelled the navigation goal so the explorer picks another
+[stuck_detector.py-9] [WARN] [1795122032.662634903] [clyde.stuck_detector]: bumper reflex: driving back 0.10 m
+[low_obstacle_memory.py-12] [INFO] [1795122032.698220559] [clyde.low_obstacle_memory]: forgot 0 cell(s) on collision_resolver's verdict
+[controller_server-15] [WARN] [1795122032.809154476] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[controller_server-15] [INFO] [1795122032.809345881] [clyde.controller_server]: Goal was canceled. Stopping the robot.
+[controller_server-15] [INFO] [1795122032.809404992] [clyde.controller_server]: [follow_path] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795122032.811242970] [clyde.bt_navigator]: [navigate_to_pose] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795122032.812260754] [clyde.bt_navigator]: Goal canceled
+[stereo_depth_node.py-14] [INFO] [1795122033.035132818] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.62 m drop=no row_error=1.8 px lidar_height_beams=7
+[stuck_detector.py-9] [INFO] [1795122034.592479762] [clyde.stuck_detector]: bumper reflex: done (0.10 m)
+[stereo_depth_node.py-14] [INFO] [1795122035.337002080] [clyde.stereo_depth_node]: stereo floor_z=0.015 m obstacle=0.75 m drop=no row_error=0.5 px lidar_height_beams=6
+[bt_navigator-18] [INFO] [1795122035.928984377] [clyde.bt_navigator]: Begin navigating from current location (2.61, 0.91) to (2.17, -1.21)
+[controller_server-15] [INFO] [1795122036.134300129] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122037.383078220] [clyde.stereo_depth_node]: stereo floor_z=-0.034 m obstacle=0.35 m drop=no row_error=0.5 px lidar_height_beams=4
+[controller_server-15] [INFO] [1795122039.639600885] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122039.729033092] [clyde.stereo_depth_node]: stereo floor_z=0.006 m obstacle=1.24 m drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122041.738802696] [clyde.stereo_depth_node]: stereo floor_z=-0.008 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122043.745444559] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122045.796003665] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122048.103321343] [clyde.stereo_depth_node]: stereo floor_z=-0.016 m obstacle=1.06 m drop=no row_error=0.3 px lidar_height_beams=1
+[controller_server-15] [INFO] [1795122049.739288177] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122050.190191226] [clyde.stereo_depth_node]: stereo floor_z=-0.004 m obstacle=0.61 m path=0.79 m@-9deg drop=no row_error=0.3 px lidar_height_beams=5
+[stereo_depth_node.py-14] [INFO] [1795122052.593129298] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=0.53 m path=0.52 m@-9deg drop=no row_error=0.3 px lidar_height_beams=7
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122055.007347146] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122055.011318673] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.30 m path=0.29 m@-14deg drop=no row_error=0.5 px lidar_height_beams=4
+[controller_server-15] [WARN] [1795122055.240042076] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122055.339954141] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122055.440113463] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122055.517670940] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [WARN] [1795122055.539787328] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122055.640055352] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122055.741469623] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122055.840010056] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[live_map_filter.py-11] [INFO] [1795122055.886440566] [clyde.live_map_filter]: 24 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [WARN] [1795122055.939868382] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122055.940056639] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122055.940290136] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122056.233546076] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[controller_server-15] [INFO] [1795122056.237780415] [clyde.controller_server]: Received a goal, begin computing control effort.
+[collision_resolver.py-10] [WARN] [1795122056.378220745] [clyde.collision_resolver]: collision ahead: unverified (floor=1 unseen=2 close=5 stale=2; nearest (+0.18,-0.13) close): backing off 0.18 m to look at it with the cameras
+[stuck_detector.py-9] [WARN] [1795122056.395379506] [clyde.stuck_detector]: bumper reflex: driving back 0.18 m
+[controller_server-15] [WARN] [1795122056.410861213] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122056.411596241] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[controller_server-15] [WARN] [1795122056.412189383] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122056.441376539] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122056.540792481] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122056.640870008] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122056.740791444] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122057.152598878] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122057.171631877] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.31 m path=0.28 m@-25deg drop=no row_error=0.5 px lidar_height_beams=2
+[controller_server-15] [INFO] [1795122058.740231577] [clyde.controller_server]: Passing new path to controller.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122059.060819621] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122059.084789987] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122059.366997094] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.36 m path=0.34 m@-19deg drop=no row_error=0.5 px lidar_height_beams=3
+[stuck_detector.py-9] [INFO] [1795122059.653680852] [clyde.stuck_detector]: bumper reflex: done (0.18 m)
+[controller_server-15] [INFO] [1795122059.876405103] [clyde.local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+[collision_resolver.py-10] [INFO] [1795122059.880579943] [clyde.collision_resolver]: collision ahead: real (stereo=6 unseen=4; nearest (+0.31,-0.22) stereo): forgot 4 fake cell(s); remembered 6 real cell(s) for the planner; cleared the costmap
+[low_obstacle_memory.py-12] [INFO] [1795122059.948990490] [clyde.low_obstacle_memory]: forgot 11 cell(s) on collision_resolver's verdict
+[low_obstacle_memory.py-12] [INFO] [1795122059.973704551] [clyde.low_obstacle_memory]: remembered 5 cell(s) on collision_resolver's verdict
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122060.296472700] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122060.477408257] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122061.289207284] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122061.388073454] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.40 m drop=no row_error=0.8 px lidar_height_beams=4
+[controller_server-15] [INFO] [1795122062.140231238] [clyde.controller_server]: Passing new path to controller.
+[controller_server-15] [WARN] [1795122063.040737240] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122063.111148523] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[planner_server-16] [WARN] [1795122063.326989410] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122063.332196552] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.17, -1.21)
+[planner_server-16] [WARN] [1795122063.337781876] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[planner_server-16] [INFO] [1795122063.535193646] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122063.626544794] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122063.850912396] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122063.854551224] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.32 m path=0.29 m@+25deg drop=no row_error=1.1 px lidar_height_beams=10
+[planner_server-16] [WARN] [1795122063.969164820] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122063.972121582] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.17, -1.21)
+[planner_server-16] [WARN] [1795122063.972248840] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[controller_server-15] [WARN] [1795122064.040674165] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [INFO] [1795122064.140473843] [clyde.controller_server]: Goal was canceled. Stopping the robot.
+[controller_server-15] [INFO] [1795122064.140678822] [clyde.controller_server]: [follow_path] [ActionServer] Client requested to cancel the goal. Cancelling.
+[behavior_server-17] [INFO] [1795122064.149281628] [clyde.behavior_server]: Running backup
+[behavior_server-17] [INFO] [1795122064.165457882] [clyde.behavior_server]: DriveOnHeading: no acceleration or deceleration limits set
+[behavior_server-17] [WARN] [1795122064.166462926] [clyde.behavior_server]: Collision Ahead - Exiting DriveOnHeading
+[behavior_server-17] [WARN] [1795122064.166642405] [clyde.behavior_server]: backup failed
+[behavior_server-17] [WARN] [1795122064.166760848] [clyde.behavior_server]: [backup] [ActionServer] Aborting handle.
+[behavior_server-17] [INFO] [1795122064.434006224] [clyde.behavior_server]: Running spin
+[behavior_server-17] [INFO] [1795122064.436458528] [clyde.behavior_server]: Turning 1.57 for spin behavior.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122064.661035869] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122065.346475937] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122065.850249660] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122066.121905947] [clyde.stereo_depth_node]: stereo floor_z=-0.064 m obstacle=none drop=no row_error=1.1 px lidar_height_beams=3
+[behavior_server-17] [INFO] [1795122066.237046592] [clyde.behavior_server]: spin completed successfully
+[planner_server-16] [WARN] [1795122066.613068948] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122066.617506025] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.17, -1.21)
+[planner_server-16] [WARN] [1795122066.622674872] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[planner_server-16] [INFO] [1795122066.733639585] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[planner_server-16] [WARN] [1795122066.944272960] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122066.944494587] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.17, -1.21)
+[planner_server-16] [WARN] [1795122066.944569586] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[planner_server-16] [WARN] [1795122067.170214099] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122067.170431689] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.17, -1.21)
+[planner_server-16] [WARN] [1795122067.170520114] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[bt_navigator-18] [INFO] [1795122067.233035990] [clyde.bt_navigator]: [navigate_to_pose] [ActionServer] Client requested to cancel the goal. Cancelling.
+[bt_navigator-18] [INFO] [1795122067.237453308] [clyde.bt_navigator]: Goal canceled
+[stereo_depth_node.py-14] [INFO] [1795122068.139074241] [clyde.stereo_depth_node]: stereo floor_z=0.003 m obstacle=0.73 m drop=no row_error=0.5 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795122070.391402270] [clyde.global_costmap.global_costmap]: Received request to clear entirely the global_costmap
+[stuck_detector.py-9] [WARN] [1795122070.404159602] [clyde.stuck_detector]: bumper reflex: driving forward 0.15 m
+[stuck_detector.py-9] [WARN] [1795122070.411702828] [clyde.stuck_detector]: plans keep failing with the robot standing still: nudging forward 0.15 m into the more open side
+[stuck_detector.py-9] [WARN] [1795122070.421989855] [clyde.stuck_detector]: 4+ plans failed in 30 s with the robot standing still: clearing the global costmap (stale LiDAR marks)
+[bt_navigator-18] [INFO] [1795122070.423737316] [clyde.bt_navigator]: Begin navigating from current location (1.80, -0.93) to (-0.05, 2.91)
+[controller_server-15] [INFO] [1795122071.026380358] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122071.181513904] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=0.73 m drop=no row_error=0.3 px lidar_height_beams=0
+[stuck_detector.py-9] [INFO] [1795122073.183928613] [clyde.stuck_detector]: bumper reflex: done (0.15 m)
+[stereo_depth_node.py-14] [INFO] [1795122073.351642177] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=0.60 m drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122075.691450418] [clyde.stereo_depth_node]: stereo floor_z=0.000 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122077.739609756] [clyde.stereo_depth_node]: stereo floor_z=-0.027 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122080.099205524] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122082.102281688] [clyde.stereo_depth_node]: stereo floor_z=-0.185 m obstacle=none drop=yes at 0.25 m row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122084.497698775] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122086.499860264] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122088.982234495] [clyde.stereo_depth_node]: stereo floor_z=-0.008 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122091.146790316] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=4
+[live_map_filter.py-11] [INFO] [1795122091.886019029] [clyde.live_map_filter]: 13 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122093.687450195] [clyde.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122095.747620417] [clyde.stereo_depth_node]: stereo floor_z=0.007 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795122097.361293095] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 222 X 172 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122097.822730210] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=3.5 px lidar_height_beams=7
+[planner_server-16] [INFO] [1795122099.360793458] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 228 X 172 at 0.050000 m/pix
+[live_map_filter.py-11] [INFO] [1795122099.889762838] [clyde.live_map_filter]: 28 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122100.149195615] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=1.3 px lidar_height_beams=35
+[planner_server-16] [INFO] [1795122100.360410086] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 172 at 0.050000 m/pix
+[planner_server-16] [INFO] [1795122101.360307507] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122102.492408157] [clyde.stereo_depth_node]: stereo floor_z=-0.028 m obstacle=none drop=no row_error=1.3 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795122104.360381469] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122104.497864637] [clyde.stereo_depth_node]: stereo floor_z=0.013 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122106.327756320] [clyde.controller_server]: Reached the goal!
+[planner_server-16] [INFO] [1795122106.360359142] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122106.700626046] [clyde.stereo_depth_node]: stereo floor_z=-0.011 m obstacle=0.95 m path=1.06 m@+5deg drop=no row_error=0.2 px lidar_height_beams=11
+[bt_navigator-18] [INFO] [1795122106.724829633] [clyde.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795122106.917069808] [clyde.bt_navigator]: Begin navigating from current location (-0.01, 2.65) to (1.18, 4.75)
+[controller_server-15] [INFO] [1795122107.131775793] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122108.890407478] [clyde.stereo_depth_node]: stereo floor_z=-0.004 m obstacle=1.12 m drop=no row_error=0.2 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795122110.985902680] [clyde.stereo_depth_node]: stereo floor_z=-0.000 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=1
+[live_map_filter.py-11] [INFO] [1795122111.885872401] [clyde.live_map_filter]: 39 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122113.364881248] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=4
+[controller_server-15] [INFO] [1795122113.937547746] [clyde.controller_server]: Passing new path to controller.
+[planner_server-16] [INFO] [1795122114.360447405] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122115.403372063] [clyde.stereo_depth_node]: stereo floor_z=-0.017 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122116.887389537] [clyde.live_map_filter]: 60 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795122117.360307406] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 173 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122117.769179840] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122119.834737949] [clyde.stereo_depth_node]: stereo floor_z=-0.000 m obstacle=0.88 m drop=no row_error=0.3 px lidar_height_beams=5
+[planner_server-16] [INFO] [1795122121.360367195] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 176 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122122.409368041] [clyde.stereo_depth_node]: stereo floor_z=0.006 m obstacle=0.60 m drop=no row_error=1.6 px lidar_height_beams=18
+[controller_server-15] [INFO] [1795122124.136965755] [clyde.controller_server]: Reached the goal!
+[stereo_depth_node.py-14] [INFO] [1795122124.602278621] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.47 m path=0.62 m@-7deg drop=no row_error=1.6 px lidar_height_beams=13
+[bt_navigator-18] [INFO] [1795122124.631147802] [clyde.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795122124.959954562] [clyde.bt_navigator]: Begin navigating from current location (0.96, 4.53) to (2.66, 3.73)
+[controller_server-15] [INFO] [1795122125.175821386] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122127.062474960] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.42 m drop=no row_error=0.4 px lidar_height_beams=2
+[stereo_depth_node.py-14] [INFO] [1795122129.398302682] [clyde.stereo_depth_node]: stereo floor_z=0.004 m obstacle=0.97 m drop=no row_error=0.6 px lidar_height_beams=17
+[stereo_depth_node.py-14] [INFO] [1795122131.443471474] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=1.05 m drop=no row_error=0.6 px lidar_height_beams=26
+[planner_server-16] [INFO] [1795122133.360346897] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 179 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122133.759784961] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.64 m drop=no row_error=0.2 px lidar_height_beams=37
+[controller_server-15] [INFO] [1795122134.178896960] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122135.803833766] [clyde.stereo_depth_node]: stereo floor_z=0.005 m obstacle=0.38 m drop=no row_error=0.3 px lidar_height_beams=9
+[planner_server-16] [INFO] [1795122138.360547049] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 229 X 185 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122138.545710695] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.45 m drop=no row_error=0.3 px lidar_height_beams=36
+[live_map_filter.py-11] [INFO] [1795122139.885583431] [clyde.live_map_filter]: 42 stale SLAM obstacle cell(s) cleared in map_live
+[planner_server-16] [INFO] [1795122140.360555943] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 230 X 185 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122140.994269856] [clyde.stereo_depth_node]: stereo floor_z=0.006 m obstacle=0.63 m path=0.62 m@-12deg drop=no row_error=0.3 px lidar_height_beams=34
+[normalize_laser_scan.py-2] [INFO] [1795122141.892997128] [clyde.laser_scan_normalizer]: robot tilted more than 1.5 deg: 0 floor beam(s) blanked in this scan, 100 scan(s) so far
+[controller_server-15] [INFO] [1795122143.079876100] [clyde.controller_server]: Reached the goal!
+[stereo_depth_node.py-14] [INFO] [1795122143.100050938] [clyde.stereo_depth_node]: stereo floor_z=0.006 m obstacle=0.52 m drop=no row_error=0.6 px lidar_height_beams=24
+[bt_navigator-18] [INFO] [1795122143.565766892] [clyde.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795122143.695478984] [clyde.bt_navigator]: Begin navigating from current location (2.40, 3.82) to (-3.33, -1.45)
+[controller_server-15] [INFO] [1795122143.901899863] [clyde.controller_server]: Received a goal, begin computing control effort.
+[planner_server-16] [INFO] [1795122144.360361569] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 230 X 187 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122145.334145536] [clyde.stereo_depth_node]: stereo floor_z=-0.044 m obstacle=0.51 m drop=no row_error=0.3 px lidar_height_beams=10
+[controller_server-15] [INFO] [1795122147.402531315] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122147.427062602] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=1.11 m drop=no row_error=0.3 px lidar_height_beams=0
+[controller_server-15] [WARN] [1795122147.605364755] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122147.703631826] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122147.803951133] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122147.903611966] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.005375626] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.105358641] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.204529998] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.304534956] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.403849553] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122148.404106272] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122148.404443749] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122148.697755148] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[controller_server-15] [INFO] [1795122148.720777527] [clyde.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795122148.806655780] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122148.826364049] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[collision_resolver.py-10] [WARN] [1795122148.874887463] [clyde.collision_resolver]: collision ahead: unverified (close=1; nearest (+0.20,-0.10) close): backing off 0.18 m to look at it with the cameras
+[stuck_detector.py-9] [WARN] [1795122148.880199067] [clyde.stuck_detector]: bumper reflex: driving back 0.18 m
+[controller_server-15] [WARN] [1795122148.932665249] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.026112840] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.126258964] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.226455013] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.326154141] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.426159304] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122149.526093652] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122149.526288002] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122149.526564276] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[stereo_depth_node.py-14] [INFO] [1795122149.755205969] [clyde.stereo_depth_node]: stereo floor_z=-0.000 m obstacle=1.02 m drop=no row_error=0.3 px lidar_height_beams=0
+[behavior_server-17] [INFO] [1795122149.800779509] [clyde.behavior_server]: Running wait
+[behavior_server-17] [INFO] [1795122150.801621771] [clyde.behavior_server]: wait completed successfully
+[controller_server-15] [INFO] [1795122151.113118235] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122151.839890465] [clyde.stereo_depth_node]: stereo floor_z=0.000 m obstacle=1.18 m drop=no row_error=0.4 px lidar_height_beams=0
+[stuck_detector.py-9] [INFO] [1795122152.179529599] [clyde.stuck_detector]: bumper reflex: done (0.18 m)
+[controller_server-15] [INFO] [1795122152.618200314] [clyde.local_costmap.local_costmap]: Received request to clear entirely the local_costmap
+[collision_resolver.py-10] [WARN] [1795122152.624120393] [clyde.collision_resolver]: collision ahead: fake (floor=1; nearest (+0.38,-0.10) floor): forgot 1 fake cell(s); cleared the costmap
+[low_obstacle_memory.py-12] [INFO] [1795122152.683361125] [clyde.low_obstacle_memory]: forgot 0 cell(s) on collision_resolver's verdict
+[controller_server-15] [WARN] [1795122152.807222508] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[stereo_depth_node.py-14] [INFO] [1795122154.457317648] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122156.536667503] [clyde.stereo_depth_node]: stereo floor_z=0.003 m obstacle=none drop=no row_error=0.8 px lidar_height_beams=0
+[planner_server-16] [INFO] [1795122158.360425850] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 230 X 187 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122158.535516551] [clyde.stereo_depth_node]: stereo floor_z=0.006 m obstacle=1.25 m drop=no row_error=0.2 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122159.023335473] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122160.806591076] [clyde.stereo_depth_node]: stereo floor_z=0.004 m obstacle=1.14 m drop=no row_error=0.3 px lidar_height_beams=4
+[planner_server-16] [INFO] [1795122162.360422180] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 230 X 231 at 0.050000 m/pix
+[stereo_depth_node.py-14] [INFO] [1795122162.979895663] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=5
+[stereo_depth_node.py-14] [INFO] [1795122165.005827890] [clyde.stereo_depth_node]: stereo floor_z=-0.008 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122167.157841058] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122169.341817318] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=3
+[stereo_depth_node.py-14] [INFO] [1795122171.372172382] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=4
+[controller_server-15] [INFO] [1795122172.423380643] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122173.691666363] [clyde.stereo_depth_node]: stereo floor_z=0.004 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122175.769751094] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122175.923342160] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122177.847385590] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=5
+[controller_server-15] [INFO] [1795122179.423438861] [clyde.controller_server]: Passing new path to controller.
+[live_map_filter.py-11] [INFO] [1795122179.911242746] [clyde.live_map_filter]: 52 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122180.134767055] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.87 m drop=no row_error=1.3 px lidar_height_beams=11
+[controller_server-15] [INFO] [1795122180.723377249] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122182.173636964] [clyde.stereo_depth_node]: stereo floor_z=0.003 m obstacle=0.84 m drop=no row_error=1.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122184.549372439] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122184.888842678] [clyde.live_map_filter]: 64 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122186.735721746] [clyde.stereo_depth_node]: stereo floor_z=-0.008 m obstacle=none drop=no row_error=1.5 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122188.623324228] [clyde.controller_server]: Passing new path to controller.
+[live_map_filter.py-11] [INFO] [1795122188.917259034] [clyde.live_map_filter]: 75 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122189.090180005] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.94 m drop=no row_error=1.5 px lidar_height_beams=19
+[stereo_depth_node.py-14] [INFO] [1795122191.466723971] [clyde.stereo_depth_node]: stereo floor_z=0.004 m obstacle=0.71 m drop=no row_error=0.5 px lidar_height_beams=28
+[stereo_depth_node.py-14] [INFO] [1795122193.787277161] [clyde.stereo_depth_node]: stereo floor_z=-0.006 m obstacle=0.93 m path=0.93 m@+7deg drop=no row_error=0.8 px lidar_height_beams=9
+[stereo_depth_node.py-14] [INFO] [1795122196.193223118] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=0.67 m path=0.67 m@-1deg drop=no row_error=1.3 px lidar_height_beams=3
+[controller_server-15] [INFO] [1795122196.523315355] [clyde.controller_server]: Passing new path to controller.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122198.165369544] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [WARN] [1795122198.224348655] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122198.324616211] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122198.424371607] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122198.524428574] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_depth_node.py-14] [INFO] [1795122198.583834124] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.30 m path=0.28 m@+19deg drop=no row_error=1.3 px lidar_height_beams=8
+[controller_server-15] [WARN] [1795122198.624363875] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122198.724393434] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122198.824412994] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[live_map_filter.py-11] [INFO] [1795122198.892546943] [clyde.live_map_filter]: 94 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [WARN] [1795122198.924460349] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [ERROR] [1795122198.924662180] [clyde.controller_server]: Controller patience exceeded
+[controller_server-15] [WARN] [1795122198.924989695] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122199.174216705] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [INFO] [1795122199.198435201] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[controller_server-15] [INFO] [1795122199.204689258] [clyde.controller_server]: Received a goal, begin computing control effort.
+[controller_server-15] [WARN] [1795122199.211415810] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122199.312122028] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[planner_server-16] [INFO] [1795122199.360328523] [clyde.global_costmap.global_costmap]: StaticLayer: Resizing costmap to 263 X 231 at 0.050000 m/pix
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122199.398981444] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [WARN] [1795122199.411459132] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122199.513051637] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122199.611762489] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[collision_resolver.py-10] [INFO] [1795122199.629944889] [clyde.collision_resolver]: collision ahead: real (lidar=1 stereo=2 memory=6; nearest (+0.18,+0.11) memory): remembered 2 real cell(s) for the planner; backing off 0.10 m for room to turn
+[stuck_detector.py-9] [WARN] [1795122199.630280200] [clyde.stuck_detector]: bumper reflex: driving back 0.10 m
+[low_obstacle_memory.py-12] [INFO] [1795122199.693005711] [clyde.low_obstacle_memory]: remembered 0 cell(s) on collision_resolver's verdict
+[controller_server-15] [WARN] [1795122199.711827437] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122199.811550185] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122199.911949166] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [INFO] [1795122200.010362967] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122200.608928490] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.31 m path=0.29 m@+21deg drop=no row_error=0.3 px lidar_height_beams=4
+[planner_server-16] [WARN] [1795122201.105551976] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122201.111597757] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (-3.33, -1.45)
+[planner_server-16] [WARN] [1795122201.116016965] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[planner_server-16] [INFO] [1795122201.297932739] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[planner_server-16] [WARN] [1795122201.372938923] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122201.375768353] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (-3.33, -1.45)
+[planner_server-16] [WARN] [1795122201.378065697] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[controller_server-15] [INFO] [1795122201.510359363] [clyde.controller_server]: Goal was canceled. Stopping the robot.
+[controller_server-15] [INFO] [1795122201.510518083] [clyde.controller_server]: [follow_path] [ActionServer] Client requested to cancel the goal. Cancelling.
+[controller_server-15] [INFO] [1795122201.511932418] [clyde.local_costmap.local_costmap]: Received request to clear except a region the local_costmap
+[planner_server-16] [INFO] [1795122201.516313516] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[stuck_detector.py-9] [INFO] [1795122201.588851524] [clyde.stuck_detector]: bumper reflex: done (0.10 m)
+[live_map_filter.py-11] [INFO] [1795122201.889331050] [clyde.live_map_filter]: 108 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [INFO] [1795122202.002090369] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122202.420097435] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122202.482072900] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122202.695202404] [clyde.stereo_depth_node]: stereo floor_z=-0.027 m obstacle=0.28 m path=0.38 m@+19deg drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122203.288680931] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122205.023010677] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122205.033305872] [clyde.stereo_depth_node]: stereo floor_z=-0.009 m obstacle=0.31 m path=0.30 m@+18deg drop=no row_error=0.3 px lidar_height_beams=26
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122205.530058467] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122207.399951841] [clyde.stereo_depth_node]: stereo floor_z=-0.009 m obstacle=0.30 m path=1.03 m@-2deg drop=no row_error=0.9 px lidar_height_beams=8
+[stereo_depth_node.py-14] [INFO] [1795122209.537541474] [clyde.stereo_depth_node]: stereo floor_z=-0.012 m obstacle=0.63 m path=0.63 m@-6deg drop=no row_error=0.2 px lidar_height_beams=11
+[stereo_depth_node.py-14] [INFO] [1795122212.158371414] [clyde.stereo_depth_node]: stereo floor_z=-0.040 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[planner_server-16] [WARN] [1795122212.929244120] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122212.929479265] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (-3.33, -1.45)
+[planner_server-16] [WARN] [1795122212.929555486] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[planner_server-16] [INFO] [1795122213.097923140] [clyde.global_costmap.global_costmap]: Received request to clear except a region the global_costmap
+[controller_server-15] [INFO] [1795122213.502546622] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122214.522986389] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122215.902593907] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122216.630602147] [clyde.stereo_depth_node]: stereo floor_z=-0.018 m obstacle=0.36 m drop=no row_error=0.3 px lidar_height_beams=20
+[controller_server-15] [INFO] [1795122217.202595776] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122218.746309534] [clyde.stereo_depth_node]: stereo floor_z=-0.007 m obstacle=0.95 m drop=no row_error=0.3 px lidar_height_beams=23
+[stereo_depth_node.py-14] [INFO] [1795122220.986440196] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122222.988019836] [clyde.stereo_depth_node]: stereo floor_z=-0.009 m obstacle=none drop=no row_error=1.6 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122225.102546134] [clyde.stereo_depth_node]: stereo floor_z=-0.005 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122227.380502409] [clyde.stereo_depth_node]: stereo floor_z=-0.006 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795122229.383789441] [clyde.stereo_depth_node]: stereo floor_z=0.003 m obstacle=none drop=no row_error=1.0 px lidar_height_beams=13
+[stereo_depth_node.py-14] [INFO] [1795122231.427847604] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=6
+[live_map_filter.py-11] [INFO] [1795122231.885320359] [clyde.live_map_filter]: 118 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [INFO] [1795122232.802563897] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122233.795740282] [clyde.stereo_depth_node]: stereo floor_z=-0.004 m obstacle=1.15 m drop=no row_error=0.3 px lidar_height_beams=27
+[stereo_depth_node.py-14] [INFO] [1795122235.814245986] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=0.65 m drop=no row_error=1.1 px lidar_height_beams=31
+[stereo_depth_node.py-14] [INFO] [1795122237.825931270] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.41 m drop=no row_error=0.3 px lidar_height_beams=26
+[controller_server-15] [INFO] [1795122238.502626589] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122240.110760983] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122242.179144340] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.80 m drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122244.596191531] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=0.54 m drop=no row_error=0.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122246.664506426] [clyde.stereo_depth_node]: stereo floor_z=0.011 m obstacle=none drop=no row_error=0.2 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122247.903912797] [clyde.controller_server]: Reached the goal!
+[bt_navigator-18] [INFO] [1795122248.298152538] [clyde.bt_navigator]: Goal succeeded
+[bt_navigator-18] [INFO] [1795122248.469141615] [clyde.bt_navigator]: Begin navigating from current location (-3.41, -1.20) to (3.17, 0.44)
+[controller_server-15] [INFO] [1795122248.672568254] [clyde.controller_server]: Received a goal, begin computing control effort.
+[live_map_filter.py-11] [INFO] [1795122248.889752786] [clyde.live_map_filter]: 128 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122248.999108367] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=1.8 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122251.076900872] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122251.385942581] [clyde.stereo_depth_node]: stereo floor_z=0.001 m obstacle=0.43 m drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122253.841706093] [clyde.stereo_depth_node]: stereo floor_z=0.011 m obstacle=0.59 m drop=no row_error=1.9 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122256.140780805] [clyde.stereo_depth_node]: stereo floor_z=-0.004 m obstacle=none drop=no row_error=1.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122256.790363647] [clyde.stereo_depth_node]: Stereo rows drifted -1.8 px while driving, over 644 matches: right cy +3.3 px from the file, in memory. A large value means a loose camera mount.
+[stereo_depth_node.py-14] [INFO] [1795122258.172818553] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=none drop=no row_error=1.1 px lidar_height_beams=11
+[stereo_depth_node.py-14] [INFO] [1795122260.311660783] [clyde.stereo_depth_node]: stereo floor_z=-0.002 m obstacle=0.33 m drop=no row_error=1.3 px lidar_height_beams=15
+[stereo_depth_node.py-14] [INFO] [1795122262.574937787] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=none drop=no row_error=1.3 px lidar_height_beams=4
+[live_map_filter.py-11] [INFO] [1795122262.901444753] [clyde.live_map_filter]: 138 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122264.909439470] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.29 m path=0.29 m@+7deg drop=no row_error=0.9 px lidar_height_beams=9
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122265.446785673] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [INFO] [1795122265.576244350] [clyde.controller_server]: Passing new path to controller.
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122266.357744896] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122266.500500454] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122267.023800304] [clyde.stereo_depth_node]: stereo floor_z=0.026 m obstacle=0.32 m path=0.30 m@+22deg drop=no row_error=1.7 px lidar_height_beams=8
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122267.513918804] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122269.696187022] [clyde.stereo_depth_node]: Stereo rows drifted +1.9 px while driving, over 418 matches: right cy +1.6 px from the file, in memory. A large value means a loose camera mount.
+[stereo_depth_node.py-14] [INFO] [1795122269.884401673] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=8
+[stereo_depth_node.py-14] [INFO] [1795122272.103725232] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122274.190085618] [clyde.stereo_depth_node]: stereo floor_z=0.001 m obstacle=1.17 m drop=no row_error=1.0 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122275.677166532] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122276.545139818] [clyde.stereo_depth_node]: stereo floor_z=-0.006 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122279.422044921] [clyde.stereo_depth_node]: stereo floor_z=-0.003 m obstacle=0.76 m path=0.78 m@+8deg drop=no row_error=1.7 px lidar_height_beams=3
+[live_map_filter.py-11] [INFO] [1795122280.896565520] [clyde.live_map_filter]: 128 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [INFO] [1795122281.376221717] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122281.795728883] [clyde.stereo_depth_node]: stereo floor_z=-0.005 m obstacle=0.43 m path=0.41 m@+17deg drop=no row_error=1.7 px lidar_height_beams=12
+[controller_server-15] [WARN] [1795122282.178743756] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122282.279807250] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122282.377537987] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122282.477964118] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [WARN] [1795122282.577312984] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[controller_server-15] [INFO] [1795122282.676254521] [clyde.controller_server]: Passing new path to controller.
+[controller_server-15] [WARN] [1795122282.678508494] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122282.759266468] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[controller_server-15] [WARN] [1795122282.777465254] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122283.268804165] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [INFO] [1795122283.976217492] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122284.154350003] [clyde.stereo_depth_node]: stereo floor_z=0.004 m obstacle=0.46 m drop=no row_error=0.3 px lidar_height_beams=11
+[live_map_filter.py-11] [INFO] [1795122284.891920975] [clyde.live_map_filter]: 114 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122286.648947039] [clyde.stereo_depth_node]: stereo floor_z=-0.006 m obstacle=1.06 m drop=no row_error=1.6 px lidar_height_beams=3
+[stereo_depth_node.py-14] [INFO] [1795122288.984787528] [clyde.stereo_depth_node]: stereo floor_z=-0.005 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122290.677392273] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122291.184640912] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=12
+[live_map_filter.py-11] [INFO] [1795122292.890361798] [clyde.live_map_filter]: 104 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122293.385357989] [clyde.stereo_depth_node]: stereo floor_z=-0.012 m obstacle=none drop=no row_error=0.9 px lidar_height_beams=8
+[stereo_depth_node.py-14] [INFO] [1795122295.428382545] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=5
+[stereo_depth_node.py-14] [INFO] [1795122297.738900840] [clyde.stereo_depth_node]: stereo floor_z=-0.030 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122299.676388147] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122299.829966216] [clyde.stereo_depth_node]: stereo floor_z=0.001 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=4
+[live_map_filter.py-11] [INFO] [1795122299.890155911] [clyde.live_map_filter]: 92 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [INFO] [1795122302.076306809] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122302.093767768] [clyde.stereo_depth_node]: stereo floor_z=0.014 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122304.132730595] [clyde.stereo_depth_node]: stereo floor_z=-0.024 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795122306.494035862] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122308.543582230] [clyde.stereo_depth_node]: stereo floor_z=0.005 m obstacle=none drop=no row_error=1.1 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122311.201452762] [clyde.stereo_depth_node]: stereo floor_z=-0.008 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[controller_server-15] [INFO] [1795122313.276243998] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122313.351922453] [clyde.stereo_depth_node]: stereo floor_z=0.002 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122315.405087019] [clyde.stereo_depth_node]: stereo floor_z=-0.001 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=25
+[stereo_depth_node.py-14] [INFO] [1795122317.690913662] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=0.83 m drop=no row_error=1.2 px lidar_height_beams=15
+[stereo_depth_node.py-14] [INFO] [1795122319.987882358] [clyde.stereo_depth_node]: stereo floor_z=0.007 m obstacle=0.59 m drop=no row_error=1.2 px lidar_height_beams=19
+[live_map_filter.py-11] [INFO] [1795122320.891884093] [clyde.live_map_filter]: 82 stale SLAM obstacle cell(s) cleared in map_live
+[controller_server-15] [INFO] [1795122321.176219188] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122322.194058722] [clyde.stereo_depth_node]: stereo floor_z=0.050 m obstacle=0.43 m path=0.45 m@-14deg drop=no row_error=0.3 px lidar_height_beams=22
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122322.986156542] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122324.495595124] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[controller_server-15] [INFO] [1795122324.676778218] [clyde.controller_server]: Passing new path to controller.
+[controller_server-15] [INFO] [1795122324.681212036] [clyde.controller_server]: Reached the goal!
+[stereo_depth_node.py-14] [INFO] [1795122324.691828336] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.36 m path=0.41 m@+17deg drop=no row_error=0.5 px lidar_height_beams=21
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122325.045622404] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[bt_navigator-18] [INFO] [1795122325.171217879] [clyde.bt_navigator]: Goal succeeded
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122326.749901251] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [WARN] [1795122327.774387411] [clyde.stereo_depth_node]: Stereo floor is +0.090 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[stereo_depth_node.py-14] [INFO] [1795122327.799843072] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.5 px lidar_height_beams=31
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122327.804165910] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122328.318162043] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122329.564305688] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122330.072594555] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122330.983563189] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.7 px lidar_height_beams=30
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122330.983758594] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122331.489320846] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122332.616513752] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122333.124280533] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122334.444410375] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122334.473598140] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.7 px lidar_height_beams=30
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122334.972365713] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122336.987921817] [clyde.stereo_depth_node]: Stereo self-aligned: floor re-fitted, camera height 0.1356 m (+0.001 m), pitch 0.1205 rad (+0.4 deg) from the file, in memory
+[stereo_depth_node.py-14] [INFO] [1795122337.002276499] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m drop=no row_error=0.7 px lidar_height_beams=30
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122339.762772537] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122339.774045755] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.7 px lidar_height_beams=28
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122340.271023312] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122341.147407097] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122341.657625497] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122342.568088155] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_depth_node.py-14] [INFO] [1795122342.573956567] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.6 px lidar_height_beams=29
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122343.074404398] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [WARN] [1795122343.751048345] [clyde.stereo_depth_node]: Stereo floor is +0.090 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122343.793679025] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122344.300383263] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[bt_navigator-18] [INFO] [1795122344.658512835] [clyde.bt_navigator]: Begin navigating from current location (2.91, 0.18) to (2.81, 1.19)
+[controller_server-15] [INFO] [1795122344.863156411] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122345.722477768] [clyde.stereo_depth_node]: stereo floor_z=0.090 m obstacle=0.41 m path=0.40 m@+6deg drop=no row_error=0.8 px lidar_height_beams=30
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122345.723004484] [clyde.stereo_cmd_vel_enforcer]: stereo stop: forward blocked (close_obstacle)
+[stereo_cmd_vel_enforcer.py-8] [INFO] [1795122346.429300895] [clyde.stereo_cmd_vel_enforcer]: stereo stop: released
+[stereo_depth_node.py-14] [INFO] [1795122348.098060940] [clyde.stereo_depth_node]: stereo floor_z=-0.063 m obstacle=0.36 m drop=no row_error=0.8 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122350.526208916] [clyde.stereo_depth_node]: stereo floor_z=0.027 m obstacle=0.94 m drop=no row_error=0.7 px lidar_height_beams=10
+[controller_server-15] [INFO] [1795122351.767787652] [clyde.controller_server]: Passing new path to controller.
+[stereo_depth_node.py-14] [INFO] [1795122352.538621038] [clyde.stereo_depth_node]: stereo floor_z=0.010 m obstacle=0.95 m drop=no row_error=0.5 px lidar_height_beams=13
+[stereo_depth_node.py-14] [INFO] [1795122354.540311664] [clyde.stereo_depth_node]: stereo floor_z=0.017 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=12
+[controller_server-15] [INFO] [1795122356.874676627] [clyde.controller_server]: Reached the goal!
+[stereo_depth_node.py-14] [INFO] [1795122357.039431766] [clyde.stereo_depth_node]: stereo floor_z=0.008 m obstacle=0.66 m path=0.65 m@+12deg drop=no row_error=2.2 px lidar_height_beams=20
+[bt_navigator-18] [INFO] [1795122357.359673525] [clyde.bt_navigator]: Goal succeeded
+[planner_server-16] [WARN] [1795122357.659469991] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[planner_server-16] [WARN] [1795122357.667643727] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.21, -1.39)
+[planner_server-16] [WARN] [1795122357.667750059] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[stereo_depth_node.py-14] [INFO] [1795122359.779114413] [clyde.stereo_depth_node]: stereo floor_z=0.020 m obstacle=0.62 m drop=no row_error=0.6 px lidar_height_beams=15
+[stereo_depth_node.py-14] [INFO] [1795122362.572683342] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.62 m drop=no row_error=0.6 px lidar_height_beams=10
+[stereo_depth_node.py-14] [INFO] [1795122365.390266945] [clyde.stereo_depth_node]: stereo floor_z=0.009 m obstacle=0.62 m drop=no row_error=0.6 px lidar_height_beams=15
+[stereo_depth_node.py-14] [INFO] [1795122368.173724328] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.62 m drop=no row_error=0.6 px lidar_height_beams=9
+[stereo_depth_node.py-14] [INFO] [1795122371.021991454] [clyde.stereo_depth_node]: Stereo self-aligned: disparity was +3.01 px off the LiDAR over 164 samples; right cx moved -2.82 px (-2.82 px from the file, in memory)
+[stereo_depth_node.py-14] [INFO] [1795122371.037844005] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=0.62 m drop=no row_error=0.5 px lidar_height_beams=9
+[stereo_depth_node.py-14] [INFO] [1795122373.734219800] [clyde.stereo_depth_node]: stereo floor_z=-0.020 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122376.537186375] [clyde.stereo_depth_node]: stereo floor_z=-0.018 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122379.018998388] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122382.145306555] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=7
+[stereo_depth_node.py-14] [INFO] [1795122384.535490405] [clyde.stereo_depth_node]: stereo floor_z=-0.020 m obstacle=none drop=no row_error=0.6 px lidar_height_beams=7
+[stereo_depth_node.py-14] [INFO] [1795122387.342091474] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122389.745901142] [clyde.stereo_depth_node]: stereo floor_z=-0.020 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122392.546797464] [clyde.stereo_depth_node]: stereo floor_z=-0.014 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=6
+[stereo_depth_node.py-14] [INFO] [1795122394.992259041] [clyde.stereo_depth_node]: stereo floor_z=-0.018 m obstacle=none drop=no row_error=0.7 px lidar_height_beams=6
+[bt_navigator-18] [INFO] [1795122395.660024307] [clyde.bt_navigator]: Begin navigating from current location (2.63, 1.02) to (0.13, 0.02)
+[controller_server-15] [INFO] [1795122395.869364152] [clyde.controller_server]: Received a goal, begin computing control effort.
+[stereo_depth_node.py-14] [INFO] [1795122397.340734446] [clyde.stereo_depth_node]: stereo floor_z=-0.067 m obstacle=none drop=yes at 0.45 m row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [WARN] [1795122398.525968072] [clyde.stereo_depth_node]: Stereo floor is +0.224 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/clyde
+[stereo_depth_node.py-14] [INFO] [1795122399.415972936] [clyde.stereo_depth_node]: stereo floor_z=0.000 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122402.134663391] [clyde.stereo_depth_node]: stereo floor_z=-0.015 m obstacle=none drop=no row_error=0.3 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122404.485683228] [clyde.stereo_depth_node]: stereo floor_z=-0.009 m obstacle=none drop=no row_error=0.4 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122406.530595822] [clyde.stereo_depth_node]: stereo floor_z=-0.025 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=1
+[stereo_depth_node.py-14] [INFO] [1795122408.923606139] [clyde.stereo_depth_node]: stereo floor_z=-0.025 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122410.976522489] [clyde.stereo_depth_node]: stereo floor_z=-0.030 m obstacle=none drop=no row_error=1.7 px lidar_height_beams=4
+[stereo_depth_node.py-14] [INFO] [1795122413.017960717] [clyde.stereo_depth_node]: stereo floor_z=-0.019 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=2
+[stereo_depth_node.py-14] [INFO] [1795122415.388097011] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=0.5 px lidar_height_beams=3
+[controller_server-15] [INFO] [1795122417.573729902] [clyde.controller_server]: Reached the goal!
+[stereo_depth_node.py-14] [INFO] [1795122417.730067031] [clyde.stereo_depth_node]: stereo floor_z=-0.010 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122417.890603813] [clyde.live_map_filter]: 92 stale SLAM obstacle cell(s) cleared in map_live
+[bt_navigator-18] [INFO] [1795122417.963746548] [clyde.bt_navigator]: Goal succeeded
+[stereo_depth_node.py-14] [INFO] [1795122420.520677198] [clyde.stereo_depth_node]: stereo floor_z=-0.035 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122422.952065388] [clyde.stereo_depth_node]: stereo floor_z=0.031 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122423.886166132] [clyde.live_map_filter]: 102 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122425.729845228] [clyde.stereo_depth_node]: stereo floor_z=-0.024 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122428.125456402] [clyde.stereo_depth_node]: stereo floor_z=-0.034 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122429.885735403] [clyde.live_map_filter]: 112 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122430.925265459] [clyde.stereo_depth_node]: stereo floor_z=-0.035 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122433.323512083] [clyde.stereo_depth_node]: stereo floor_z=-0.028 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122436.102199134] [clyde.stereo_depth_node]: stereo floor_z=-0.030 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122438.509806905] [clyde.stereo_depth_node]: stereo floor_z=-0.012 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122441.337490999] [clyde.stereo_depth_node]: stereo floor_z=-0.023 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122443.726645194] [clyde.stereo_depth_node]: stereo floor_z=-0.031 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122446.520652321] [clyde.stereo_depth_node]: stereo floor_z=-0.030 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122448.933657972] [clyde.stereo_depth_node]: stereo floor_z=-0.020 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122451.711976398] [clyde.stereo_depth_node]: stereo floor_z=-0.033 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[live_map_filter.py-11] [INFO] [1795122453.885871337] [clyde.live_map_filter]: 124 stale SLAM obstacle cell(s) cleared in map_live
+[stereo_depth_node.py-14] [INFO] [1795122454.143943099] [clyde.stereo_depth_node]: stereo floor_z=-0.021 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122456.952997713] [clyde.stereo_depth_node]: stereo floor_z=-0.027 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122459.332342285] [clyde.stereo_depth_node]: stereo floor_z=-0.037 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122462.136031481] [clyde.stereo_depth_node]: stereo floor_z=-0.029 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122464.498406794] [clyde.stereo_depth_node]: stereo floor_z=-0.036 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122467.340129146] [clyde.stereo_depth_node]: stereo floor_z=-0.038 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122469.722406016] [clyde.stereo_depth_node]: stereo floor_z=-0.024 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122472.521958947] [clyde.stereo_depth_node]: stereo floor_z=-0.028 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122474.997811345] [clyde.stereo_depth_node]: stereo floor_z=-0.035 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+[stereo_depth_node.py-14] [INFO] [1795122478.134194374] [clyde.stereo_depth_node]: Stereo self-aligned: disparity was -0.74 px off the LiDAR over 154 samples; right cx moved +0.70 px (-2.12 px from the file, in memory)
+[stereo_depth_node.py-14] [INFO] [1795122478.142925639] [clyde.stereo_depth_node]: stereo floor_z=-0.031 m obstacle=none drop=no row_error=1.2 px lidar_height_beams=0
+Connection to clyde closed.
