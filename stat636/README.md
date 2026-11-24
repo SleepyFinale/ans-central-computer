@@ -205,9 +205,9 @@ alignment. Which AKAZE estimates may confirm is the variable. All nine runs, 478
 | Cross-check, AKAZE inliers + scale only | 320 | 5 (3) | 2 | earlier in 7/9, median -30 s |
 
 - With AKAZE's own gates kept, cross-checking is safe on these runs and answers a little earlier.
-- Loosening AKAZE's gates brings the hall2 error back: at 165 s the ungated AKAZE estimate makes
-  the same ~180 deg corridor error as FAQ (17.5 m off), and only its confidence (0.56 < 0.65) and
-  scale (7% off) gates rejected it. The two methods are not independent in a symmetric corridor.
+- Loosening AKAZE's gates brings the hall2 error back: from 120 to 375 s the ungated AKAZE estimate
+  makes the same ~90 deg corridor error as FAQ (about 17.5 m off), and only its confidence (mostly
+  0.45-0.59 < 0.65) and scale (5-12% off) gates rejected it. The two methods are not independent in a symmetric corridor.
 - Can FAQ flag its own ambiguity? `rival_ratio.py` compares the best candidate's map-agreement score
   with the best candidate that disagrees with it. Wrong hall2 answers have rivals at 0.84-0.97 of the
   best, but right hallway answers also do (0.79-0.88 in hall3 and hall5, 0.88 in hall2 at 600 s).
@@ -229,8 +229,8 @@ counts how many restarts land on the winning alignment (0.5 m and 8 deg at Clyde
 | right | 285 | 5 |
 | wrong | 57 | 1 |
 
-44 of the 57 wrong answers came from a single restart that the others did not reproduce, the hall2
-corridor errors included (mostly 1/8). The score gap to the rival is small (`rival_ratio.py`), but
+29 of the 57 wrong answers came from a single restart that the others did not reproduce, and 48
+from three or fewer; the hall2 corridor errors were mostly 1/8. The score gap to the rival is small (`rival_ratio.py`), but
 the wrong answer is found from far fewer starting points. Adding "at least 3 of 8 restarts agree"
 to the gate and replaying map_merge's confirmation rule:
 
