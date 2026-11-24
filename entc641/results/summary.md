@@ -70,6 +70,15 @@ Average 98.0 s. Pooled variance Sp² = 735.8 (8 dof), S²_effect = 4·Sp²/N = 1
 
 Residual standard deviation 27.1 s. Normalized residuals beyond ±2: R02 (+2.9).
 
+### Prediction for a new run
+
+95% prediction interval for one new run at each level of the significant effect(s): ŷ ± t(α/2, 8)·√(Sp²·(1 + h)), h = (1 + number of model terms)/N.
+
+| Setting | ŷ (s) | Half width | 95% interval |
+| --- | --- | --- | --- |
+| B = same room | 119.1 | ± 66.3 | 52.7 to 185.4 |
+| B = different rooms | 76.9 | ± 66.3 | 10.5 to 143.2 |
+
 ### Centre points
 
 Centre runs (A, C, D = 0) against the model at the same setting. A gap well beyond the residual SD (27.1 s) would mean the response curves between the levels and a straight-line model is not enough.
@@ -123,6 +132,15 @@ Average 217.8 s. Pooled variance Sp² = 2813.6 (8 dof), S²_effect = 4·Sp²/N =
 ![Residuals](residuals_run_length_s.png)
 
 Residual standard deviation 52.5 s. Normalized residuals beyond ±2: R16 (+2.7).
+
+### Prediction for a new run
+
+95% prediction interval for one new run at each level of the significant effect(s): ŷ ± t(α/2, 8)·√(Sp²·(1 + h)), h = (1 + number of model terms)/N.
+
+| Setting | ŷ (s) | Half width | 95% interval |
+| --- | --- | --- | --- |
+| D = 0.15 m/s | 248.6 | ± 129.7 | 118.8 to 378.3 |
+| D = 0.22 m/s | 187.1 | ± 129.7 | 57.4 to 316.8 |
 
 ### Centre points
 

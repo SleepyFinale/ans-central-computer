@@ -23,6 +23,7 @@ Steps (course method, lectures 13-15):
 
 import argparse
 import csv
+from itertools import product
 
 import matplotlib
 matplotlib.use('Agg')
@@ -226,6 +227,22 @@ def analyze_response(out, fact, centre, col, label, unit):
         + (f'Normalized residuals beyond ±2: {", ".join(big)}.' if big
            else 'No normalized residual beyond ±2.'))
     say()
+
+    if res.significant:
+        say('### Prediction for a new run')
+        say()
+        say('95% prediction interval for one new run at each level of the significant '
+            f'effect(s): ŷ ± t(α/2, {res.dof})·√(Sp²·(1 + h)), h = (1 + number of model terms)/N.')
+        say()
+        rows = []
+        sig_factors = sorted({ch for k in res.significant for ch in k})
+        for levels in product((-1, 1), repeat=len(sig_factors)):
+            fixed = dict(zip(sig_factors, levels))
+            signs = design.columns(*[fixed.get(f, 0) for f in design.FACTORS])
+            pred, half = res.predict(signs), res.prediction_interval(signs)
+            rows.append([', '.join(f'{f} = {LEVEL_NAMES[f][v]}' for f, v in fixed.items()),
+                         f'{pred:.1f}', f'± {half:.1f}', f'{pred - half:.1f} to {pred + half:.1f}'])
+        table(['Setting', f'ŷ ({unit})', 'Half width', '95% interval'], rows)
 
     cpts = [r for r in centre if num(r, col) is not None]
     if cpts:
