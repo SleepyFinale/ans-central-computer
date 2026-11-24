@@ -1,0 +1,407 @@
+Robot: Inky  ROBOT_SSH=inky@inky  (network: tamu/tailscale)
+Robot: Clyde  ROBOT_SSH=clyde@clyde  (network: tamu/tailscale)
+Logs: /home/schen08/central-computer/entc641/data/runs/R18/fleet/20261124-112339-40623
+Fleet bringup
+  robots:       inky clyde
+  filter:       -ic
+  central host: reverie
+  rviz:         off
+  output:       warnings and errors
+  ssh:
+    inky -> inky@inky
+    clyde -> clyde@clyde
+Stages:
+  1. ./scripts/comms/start_zenoh_central.sh -ic
+     wait for each robot: Route Subscriber (Zenoh:<robot>/tf_zenoh -> ROS:/<robot>/tf_zenoh) created
+  2. on each robot, in parallel:
+       source scripts/env/ros_robot_env.bash
+       export TURTLEBOT3_MODEL=burger
+       export LDS_MODEL=LDS-02
+       ros2 launch turtlebot3_bringup robot.launch.py
+     wait for: [<robot>.diff_drive_controller]: Run!
+  3. on each robot, in parallel:
+       ros2 launch turtlebot3_navigation2 navigation2_slam.launch.py
+     wait for: [<robot>.startup_map_seeder]: Startup map seeding complete
+  4. on each robot, in parallel:
+       ./scripts/comms/start_zenoh_robot.sh reverie
+     wait for: TF zenoh publish: /<robot>/tf -> /<robot>/tf_zenoh
+     and both Nav2 action servers discovered (restarted once if not)
+  5. ./scripts/core/start_central.sh -ic
+     wait for: All services running.  Press Ctrl+C to stop.
+
+=== zenoh-central ===
+Ready: central Zenoh
+=== inky: bringup ===
+=== clyde: bringup ===
+Ready: inky bringup
+Ready: clyde bringup
+=== inky: slam ===
+=== clyde: slam ===
+[inky:slam] [component_container-13] [ERROR] [1795541040.715334513] [v4l2_camera]: Failed opening device /dev/video0: Device or resource busy (16)
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541047.370789358] [inky.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541047.417439667] [inky.stuck_detector]: bumper reflex: driving forward 0.08 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541048.343683181] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle (Nav2 needs 0.26); moving clear
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541048.414345066] [clyde.stuck_detector]: bumper reflex: driving forward 0.08 m
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541052.352975081] [inky.stuck_detector]: too close to stand and plan: LiDAR return 0.25 m from the axle (Nav2 needs 0.26); moving clear
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541052.361611997] [inky.stuck_detector]: bumper reflex: driving forward 0.02 m
+Ready: inky slam
+Ready: clyde slam
+=== inky: after-slam hook ===
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541060.344827254] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.20 m from the axle (Nav2 needs 0.26); moving clear
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541060.349820773] [clyde.stuck_detector]: bumper reflex: driving forward 0.13 m
+Ready: inky after-slam hook
+=== clyde: after-slam hook ===
+[inky:slam] [stereo_depth_node.py-14] [ERROR] [1795541090.513715835] [inky.stereo_depth_node]: No stereo pairs for 2 s (no frames from: left, right). Stereo obstacles are OFF; the LiDAR still works. The cameras are restarted automatically; if this repeats, reseat their USB cables.
+[inky:slam] [stereo_depth_node.py-14] [WARN] [1795541096.572925659] [inky.stereo_depth_node]: No frames from left, right for 8 s: restarting the cameras (restart 1 this run)
+Ready: clyde after-slam hook
+=== inky: zenoh ===
+=== clyde: zenoh ===
+[inky:slam] [WARNING] [component_container-22]: there are now at least 2 nodes with the name /inky/stereo_container created within this launch context
+[inky:slam] [WARNING] [/inky/stereo_container]: there are now at least 2 nodes with the name /inky/stereo_left/v4l2_camera created within this launch context
+[inky:slam] [WARNING] [/inky/stereo_container]: there are now at least 2 nodes with the name /inky/stereo_right/v4l2_camera created within this launch context
+[inky:slam] [WARNING] [/inky/stereo_container]: there are now at least 2 nodes with the name /inky/stereo_pair_throttle created within this launch context
+Ready: inky zenoh
+[clyde:slam] [stereo_depth_node.py-14] [ERROR] [1795541105.823913224] [clyde.stereo_depth_node]: No stereo pairs for 2 s (no frames from: neither; pairs do not match in time). Stereo obstacles are OFF; the LiDAR still works. The cameras are restarted automatically; if this repeats, reseat their USB cables.
+Ready: inky Nav2 actions over Zenoh
+Ready: clyde zenoh
+Ready: clyde Nav2 actions over Zenoh
+=== central ===
+Ready: central stack
+
+Fleet is up. Press Ctrl+C to stop.
+[central] [33m[WARN] [1795541118.017848785] [multi_robot_explorer]: [inky] Arrival probe failed map check: bad_frac=1.00>0.35 max_cell=100[0m
+[central] [33m[WARN] [1795541118.018004574] [multi_robot_explorer]: [inky] Arrival probe failed — blacklisting goal and cancelling[0m
+[inky:slam] [stereo_depth_node.py-14] [WARN] [1795541121.207380759] [inky.stereo_depth_node]: Stereo floor is +0.040 m from where the mount fields put it; drops are OFF until it is back. A large object filling the view does this and needs nothing. If it happens on open flat floor, refit with: ros2 run turtlebot3_navigation2 stereo_fit_floor.py --ros-args -r __ns:=/inky
+[clyde:slam] [controller_server-15] [WARN] [1795541124.630936876] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541124.731648681] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541124.831561031] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541124.931242328] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.031071420] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.133529206] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.231171692] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.332245511] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541125.332505508] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541125.333519849] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541125.744110741] [clyde.stuck_detector]: bumper reflex: driving back 0.17 m
+[clyde:slam] [collision_resolver.py-10] [WARN] [1795541125.746023480] [clyde.collision_resolver]: collision ahead: unverified (close=1; nearest (+0.22,+0.05) close): backing off 0.17 m to look at it with the cameras
+[clyde:slam] [controller_server-15] [WARN] [1795541125.870182972] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.870858279] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541125.876601642] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541125.979618162] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541126.083233620] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541126.186601210] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541126.300449315] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541126.404755692] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541126.513118320] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541126.513292170] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541126.513631833] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541127.072103976] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541127.081095507] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541127.094639285] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541127.200545440] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [collision_resolver.py-10] [WARN] [1795541129.247961407] [clyde.collision_resolver]: collision ahead: fake (unseen=1; nearest (+0.40,+0.05) unseen): forgot 1 fake cell(s); cleared the costmap
+[clyde:slam] [controller_server-15] [WARN] [1795541129.471478404] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [planner_server-16] [WARN] [1795541160.679226994] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541160.686152140] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541160.693347284] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541161.080230287] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541161.084387020] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541161.092269711] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541164.670577913] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541164.674451704] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541164.676146926] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541165.079846246] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541165.082461551] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541165.082573050] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541167.465258438] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541167.467977556] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541167.471172299] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541168.078524722] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541168.079142567] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541168.079234214] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541169.549666352] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541169.549901646] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541169.549987904] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541170.076541952] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541170.076748913] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.11, 1.35)
+[clyde:slam] [planner_server-16] [WARN] [1795541170.076823542] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541170.091984561] [clyde.stuck_detector]: bumper reflex: driving forward 0.15 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541170.095945851] [clyde.stuck_detector]: plans keep failing with the robot standing still: nudging forward 0.15 m into the more open side
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541170.101773398] [clyde.stuck_detector]: 4+ plans failed in 30 s with the robot standing still: clearing the global costmap (stale LiDAR marks)
+[central] [33m[WARN] [1795541170.330660264] [multi_robot_explorer]: [clyde] Goal aborted — blacklisting (pose_dist_m=2.4057883726602993, distance_remaining=0.0; tacit: pose≤0.15m or remain≤0.15m)[0m
+[clyde:slam] [bt_navigator-18] [WARN] [1795541170.323657765] [clyde.bt_navigator]: [navigate_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [bt_navigator-18] [ERROR] [1795541170.324681698] [clyde.bt_navigator]: Goal failed
+[clyde:slam] [planner_server-16] [WARN] [1795541173.569815660] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541173.575239545] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.86, 2.95)
+[central] [33m[WARN] [1795541173.584499339] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[clyde:slam] [planner_server-16] [WARN] [1795541173.576179794] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541175.042898532] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[clyde:slam] [planner_server-16] [WARN] [1795541175.036040436] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541175.036257341] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.33, 4.16)
+[clyde:slam] [planner_server-16] [WARN] [1795541175.036327766] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [controller_server-15] [WARN] [1795541177.811578541] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541177.911557122] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541178.011439575] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541179.511696397] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541179.611405797] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541179.711966481] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541179.814246438] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541179.911514705] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.011710320] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.111795808] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.211569966] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [ERROR] [1795541180.211778055] [inky.controller_server]: Controller patience exceeded
+[inky:slam] [controller_server-15] [WARN] [1795541180.216153161] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[inky:slam] [collision_resolver.py-10] [WARN] [1795541180.572180730] [inky.collision_resolver]: collision ahead: unverified (close=3 stale=4; nearest (-0.03,-0.20) stale): backing off 0.19 m to look at it with the cameras
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541180.576151786] [inky.stuck_detector]: bumper reflex: driving back 0.19 m
+[inky:slam] [controller_server-15] [WARN] [1795541180.589976148] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.610347973] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.710543959] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.810037325] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541180.909811539] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541181.010556165] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541181.110675133] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541181.210094296] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541181.310223171] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [ERROR] [1795541181.310422632] [inky.controller_server]: Controller patience exceeded
+[inky:slam] [controller_server-15] [WARN] [1795541181.310754645] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541191.432673108] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541191.436278131] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (4.24, 3.13)
+[inky:slam] [planner_server-16] [WARN] [1795541191.439654658] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [controller_server-15] [WARN] [1795541193.009646226] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541193.108637265] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541193.209834885] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541193.308677075] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.222835327] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.310128901] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.408838852] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.508706268] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.608701905] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.709524252] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.808543161] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541194.908768647] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.008638211] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [ERROR] [1795541195.008866634] [inky.controller_server]: Controller patience exceeded
+[inky:slam] [controller_server-15] [WARN] [1795541195.009307072] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541195.352535839] [inky.stuck_detector]: bumper reflex: driving back 0.10 m
+[inky:slam] [controller_server-15] [WARN] [1795541195.390397790] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.452286720] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.544698796] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.643993461] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.744071707] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.844054548] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541195.944076554] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541196.044157560] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541196.144665375] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [ERROR] [1795541196.153253421] [inky.controller_server]: Controller patience exceeded
+[inky:slam] [controller_server-15] [WARN] [1795541196.154117409] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[inky:slam] [controller_server-15] [WARN] [1795541196.592635638] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541196.595495190] [inky.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[inky:slam] [controller_server-15] [WARN] [1795541196.599724150] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541198.670037802] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541198.771928098] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541198.873427713] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541198.974895588] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541199.078736949] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541199.180441747] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541199.282467818] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [WARN] [1795541199.387389552] [inky.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [controller_server-15] [ERROR] [1795541199.387682418] [inky.controller_server]: Controller patience exceeded
+[inky:slam] [controller_server-15] [WARN] [1795541199.388352224] [inky.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541202.412592255] [multi_robot_explorer]: [inky] Goal canceled far from target; blacklisting (reason=robot_side, pose_dist_m=0.8134540336307375, thresh_m=0.30)[0m
+[inky:slam] [planner_server-16] [WARN] [1795541240.887401501] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541240.889529268] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541240.890394922] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541241.018309751] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541241.024205742] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.08, -1.33)
+[clyde:slam] [planner_server-16] [WARN] [1795541241.027601797] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541241.039560148] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[inky:slam] [planner_server-16] [WARN] [1795541241.197334901] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541241.197626768] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541241.197834913] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541242.516789103] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541242.519468814] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (1.96, -1.04)
+[clyde:slam] [planner_server-16] [WARN] [1795541242.522227784] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541242.532051747] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[inky:slam] [planner_server-16] [WARN] [1795541242.892460846] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541242.892681084] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541242.892757527] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541244.017954222] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541244.019072728] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.03, 0.93)
+[clyde:slam] [planner_server-16] [WARN] [1795541244.019479520] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541244.030891565] [multi_robot_explorer]: [clyde] No path to 3 different goals with the robot in place; checking with a plan to an open point 1.6 m away whether the robot or the goals are the problem[0m
+[central] [33m[WARN] [1795541244.050981328] [multi_robot_explorer]: [clyde] The robot can plan to open space next to it, so it is not boxed in: blacklisting the 3 goal(s) it could not reach[0m
+[inky:slam] [planner_server-16] [WARN] [1795541244.496023314] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541244.497590551] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541244.497778993] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541245.504669860] [multi_robot_explorer]: No frontier assigned: 1 idle, 6 frontier(s). Sample robot=clyde vs frontier[0]: goal=(2.15,-4.10) dist_to_goal=4.299m min_sep=0.4 issues=[goal_blacklisted][0m
+[inky:slam] [planner_server-16] [WARN] [1795541246.498529083] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541246.518567987] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541246.522409193] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541248.505327456] [multi_robot_explorer]: [clyde] Idle 3s with only blacklisted frontiers; clearing 10 blacklist point(s) and retrying (reset 1/1 since last success)[0m
+[clyde:slam] [planner_server-16] [WARN] [1795541250.019111883] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541250.019325677] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (2.98, 1.44)
+[clyde:slam] [planner_server-16] [WARN] [1795541250.019404324] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541250.034655255] [multi_robot_explorer]: [clyde] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541250.036367099] [clyde.stuck_detector]: bumper reflex: driving back 0.15 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541250.046157695] [clyde.stuck_detector]: plans keep failing with the robot standing still: nudging back 0.15 m into the more open side
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541250.049298123] [clyde.stuck_detector]: plans still fail after clearing the costmap: global robot_radius 0.18 -> 0.15 m (the controller's) until the robot has moved 0.8 m or 60 s
+[inky:slam] [planner_server-16] [WARN] [1795541252.235438847] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541252.236585794] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541252.236797976] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541255.104049320] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541255.107848359] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541255.108054949] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541255.686247925] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541255.688972832] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541255.689065960] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541258.698144799] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541258.704630300] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541258.708083604] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541259.193578249] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541259.203702644] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541259.207723384] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541261.493188672] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541261.495684544] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541261.495804413] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541262.190182466] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541262.193422420] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541262.197094573] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541263.682104423] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541263.682319901] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541263.682394660] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [planner_server-16] [WARN] [1795541264.185053509] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541264.185311672] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.79, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541264.185402819] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541264.198623856] [inky.stuck_detector]: bumper reflex: driving forward 0.15 m
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541264.202842482] [inky.stuck_detector]: plans keep failing with the robot standing still: nudging forward 0.15 m into the more open side
+[inky:slam] [stuck_detector.py-9] [WARN] [1795541264.207226439] [inky.stuck_detector]: 4+ plans failed in 30 s with the robot standing still: clearing the global costmap (stale LiDAR marks)
+[central] [33m[WARN] [1795541264.476279344] [multi_robot_explorer]: [inky] Goal aborted — blacklisting (pose_dist_m=1.4319788767371187, distance_remaining=0.0; tacit: pose≤0.15m or remain≤0.15m)[0m
+[inky:slam] [bt_navigator-18] [WARN] [1795541264.467880085] [inky.bt_navigator]: [navigate_to_pose] [ActionServer] Aborting handle.
+[inky:slam] [bt_navigator-18] [ERROR] [1795541264.468837886] [inky.bt_navigator]: Goal failed
+[clyde:slam] [controller_server-15] [WARN] [1795541267.456245870] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [planner_server-16] [WARN] [1795541267.544053854] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541267.546393395] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.59, -0.03)
+[inky:slam] [planner_server-16] [WARN] [1795541267.553980326] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541267.556426707] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[central] [33m[WARN] [1795541267.575007722] [multi_robot_explorer]: [inky] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[clyde:slam] [controller_server-15] [WARN] [1795541267.655945921] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541267.755932593] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541267.855987319] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541267.955969362] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.056382899] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.156606920] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541268.156877528] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541268.158916302] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541268.507169524] [clyde.stuck_detector]: bumper reflex: driving back 0.14 m
+[clyde:slam] [collision_resolver.py-10] [WARN] [1795541268.513921320] [clyde.collision_resolver]: collision ahead: unverified (close=2 stale=6; nearest (+0.12,+0.17) stale): backing off 0.14 m to look at it with the cameras
+[clyde:slam] [controller_server-15] [WARN] [1795541268.667590361] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.669734911] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541268.672718730] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.776852356] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.879741237] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541268.983752938] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[inky:slam] [planner_server-16] [WARN] [1795541269.028583044] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[central] [33m[WARN] [1795541269.038146035] [multi_robot_explorer]: [inky] Path precheck hard failure -> blacklist (precheck_hard_abort_robot_clear (precheck_transient_non_explicit (status=ABORTED, error=NONE)))[0m
+[inky:slam] [planner_server-16] [WARN] [1795541269.028817911] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.89, -0.43)
+[inky:slam] [planner_server-16] [WARN] [1795541269.028901095] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541269.109022201] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541269.212168690] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541269.314808184] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541269.315030608] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541269.316624738] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541269.869375069] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[central] [33m[WARN] [1795541270.498793056] [multi_robot_explorer]: No frontier assigned: 1 idle, 4 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.23,-1.92) dist_to_goal=0.931m min_sep=0.4 issues=[safety(clear=0.11m cost=0)][0m
+[clyde:slam] [controller_server-15] [WARN] [1795541271.865187420] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541271.865935615] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541271.876040226] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541271.985158223] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[central] [33m[WARN] [1795541272.032531842] [multi_robot_explorer]: [inky] No path to 3 different goals with the robot in place; checking with a plan to an open point 1.3 m away whether the robot or the goals are the problem[0m
+[inky:slam] [planner_server-16] [WARN] [1795541272.024786674] [inky.planner_server]: GridBased: failed to create plan, no valid path found.
+[inky:slam] [planner_server-16] [WARN] [1795541272.025036097] [inky.planner_server]: Planning algorithm GridBased failed to generate a valid path to (6.49, 0.17)
+[inky:slam] [planner_server-16] [WARN] [1795541272.025151447] [inky.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541272.047214641] [multi_robot_explorer]: [inky] The robot can plan to open space next to it, so it is not boxed in: blacklisting the 3 goal(s) it could not reach[0m
+[clyde:slam] [controller_server-15] [WARN] [1795541272.192040360] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.295037943] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.397949824] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.503069439] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.605872728] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.709143011] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.817455424] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541272.919634720] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541272.919792459] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541272.920143344] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541273.058317890] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.158450893] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.258516342] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.358791770] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.459106864] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.558526746] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.658429419] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.758869401] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541273.858872517] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541273.859086440] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541273.859485751] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [controller_server-15] [WARN] [1795541274.268634114] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.269376013] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541274.271967096] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.374596053] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.477221622] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.579990004] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.683115585] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.785860597] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541274.889316731] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541274.889541969] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541274.890041149] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541276.499366994] [multi_robot_explorer]: [inky] Idle 3s with only blacklisted frontiers; clearing 8 blacklist point(s) and retrying (reset 1/1 since last success)[0m
+[clyde:slam] [collision_resolver.py-10] [WARN] [1795541277.747322990] [clyde.collision_resolver]: collision ahead: fake (floor=2; nearest (+0.33,+0.15) floor): forgot 2 fake cell(s); cleared the costmap
+[central] [33m[WARN] [1795541280.999383921] [multi_robot_explorer]: [inky] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[central] [33m[WARN] [1795541286.998806765] [multi_robot_explorer]: No frontier assigned: 1 idle, 5 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.00,-1.65) dist_to_goal=0.967m min_sep=0.4 issues=[goal_blacklisted][0m
+[clyde:slam] [controller_server-15] [WARN] [1795541299.210355634] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[central] [33m[WARN] [1795541303.500389613] [multi_robot_explorer]: No frontier assigned: 1 idle, 6 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.23,-1.94) dist_to_goal=0.931m min_sep=0.4 issues=[safety(clear=0.11m cost=0)][0m
+[central] [33m[WARN] [1795541326.499046496] [multi_robot_explorer]: No frontier assigned: 1 idle, 6 frontier(s). Sample robot=inky vs frontier[0]: goal=(3.00,-1.70) dist_to_goal=0.999m min_sep=0.4 issues=[centroid_near_blacklist,goal_blacklisted][0m
+[central] [33m[WARN] [1795541329.498350546] [multi_robot_explorer]: [inky] Frontiers left are ones already reached or with no path; treating them as unreachable[0m
+[clyde:slam] [planner_server-16] [WARN] [1795541332.675509806] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541332.678973990] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.03, 0.19)
+[clyde:slam] [planner_server-16] [WARN] [1795541332.683533273] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541334.430356026] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541334.430573357] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.03, 0.19)
+[clyde:slam] [planner_server-16] [WARN] [1795541334.430664060] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541335.097674515] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541335.101728285] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.03, 0.19)
+[clyde:slam] [planner_server-16] [WARN] [1795541335.103521210] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[clyde:slam] [planner_server-16] [WARN] [1795541337.023438919] [clyde.planner_server]: GridBased: failed to create plan, no valid path found.
+[clyde:slam] [planner_server-16] [WARN] [1795541337.028072646] [clyde.planner_server]: Planning algorithm GridBased failed to generate a valid path to (3.03, 0.22)
+[clyde:slam] [planner_server-16] [WARN] [1795541337.030816078] [clyde.planner_server]: [compute_path_to_pose] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541337.042036209] [multi_robot_explorer]: [clyde] Arrival probe failed — blacklisting goal and cancelling[0m
+[central] [33m[WARN] [1795541341.748790557] [multi_robot_explorer]: No frontier assigned: 2 idle, 5 frontier(s). Sample robot=inky vs frontier[0]: goal=(2.95,-1.53) dist_to_goal=1.083m min_sep=0.4 issues=[centroid_near_blacklist,goal_blacklisted][0m
+[central] [33m[WARN] [1795541343.250287116] [multi_robot_explorer]: [clyde] Frontiers left are still unreachable after 1 blacklist reset(s); treating them as unreachable[0m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541344.780319216] [clyde.stuck_detector]: bumper reflex: driving forward 0.15 m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541344.784747908] [clyde.stuck_detector]: plans keep failing with the robot standing still: nudging forward 0.15 m into the more open side
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541344.794708205] [clyde.stuck_detector]: 4+ plans failed in 30 s with the robot standing still: clearing the global costmap (stale LiDAR marks)
+[clyde:slam] [controller_server-15] [WARN] [1795541356.728946842] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541356.829216764] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541356.928834656] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541357.028856600] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541357.128892525] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541357.228694508] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541357.328638896] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541357.429021262] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541357.429295925] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541357.437032858] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[clyde:slam] [collision_resolver.py-10] [WARN] [1795541357.759600105] [clyde.collision_resolver]: collision ahead: fake (stale=1; nearest (+0.15,+0.17) stale): forgot 1 fake cell(s); cleared the costmap
+[clyde:slam] [controller_server-15] [WARN] [1795541357.863745280] [clyde.controller_server]: Control loop missed its desired rate of 10.0000Hz
+[clyde:slam] [controller_server-15] [WARN] [1795541358.431681817] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541358.531632650] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541358.632307383] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541358.731683926] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541358.831741184] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541358.931553704] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541359.031567647] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [WARN] [1795541359.131709423] [clyde.controller_server]: RegulatedPurePursuitController detected collision ahead!
+[clyde:slam] [controller_server-15] [ERROR] [1795541359.131940309] [clyde.controller_server]: Controller patience exceeded
+[clyde:slam] [controller_server-15] [WARN] [1795541359.132877225] [clyde.controller_server]: [follow_path] [ActionServer] Aborting handle.
+[central] [33m[WARN] [1795541380.347101195] [multi_robot_explorer]: [clyde] Nav2 reports lethal-space state; holding current goal[0m
+[clyde:slam] [stuck_detector.py-9] [WARN] [1795541380.350318967] [clyde.stuck_detector]: too close to stand and plan: LiDAR return 0.19 m from the axle, alongside; turning -84 deg to move away from it
+
+Stopping fleet...

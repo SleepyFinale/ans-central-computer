@@ -218,6 +218,32 @@ alignment. Which AKAZE estimates may confirm is the variable. All nine runs, 478
 - **Decision: map_merge is not changed.** The gain (median 15 s) is too small, and too post hoc, to
   justify running FAQ inside the live merger. A new hallway run would be needed to test it.
 
+## Do FAQ's restarts agree with each other? (2026-11-24, offline, asked after the talk)
+
+FAQ is run from 8 starting points (restart 0 from the flat matrix, 7 from random perturbations).
+`restart_agreement.py` reruns them exactly as `eval_twobot.py` does (all 478 points reproduce) and
+counts how many restarts land on the winning alignment (0.5 m and 8 deg at Clyde's grid centre).
+
+| Answers that pass the conflict gate | n | Median restarts agreeing (of 8) |
+|---|---|---|
+| right | 285 | 5 |
+| wrong | 57 | 1 |
+
+44 of the 57 wrong answers came from a single restart that the others did not reproduce, the hall2
+corridor errors included (mostly 1/8). The score gap to the rival is small (`rival_ratio.py`), but
+the wrong answer is found from far fewer starting points. Adding "at least 3 of 8 restarts agree"
+to the gate and replaying map_merge's confirmation rule:
+
+| Rule | Right | Wrong (gross) | Runs with any wrong | First right vs AKAZE |
+|---|---|---|---|---|
+| FAQ, conflict gate (as presented) | 310 | 44 (35) | 3 | earlier 7/9, median -60 s |
+| FAQ, gate + 3 of 8 agree | 300 | 7 (0) | 2 | earlier 7/9, median -30 s |
+| FAQ, gate + 4 of 8 agree | 275 | 5 (0) | 2 | earlier 3/9, median 0 s |
+| AKAZE | 297 | 0 (0) | 0 | - |
+
+Caveats: the threshold was picked after seeing all nine runs, so this is not held out; 8 restarts is
+a coarse count; the 7 remaining wrong time points are 0.3-2 m off, not gross.
+
 ## What we learned
 
 1. **Adjacency alone fails.** FAQ on adjacency got 13% of nodes right on an exact shuffled copy of a
@@ -277,6 +303,7 @@ python3 eval_twobot.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 
 python3 confirm_rule.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
 python3 cross_check.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
 python3 rival_ratio.py
+python3 restart_agreement.py twobot1 twobot4 small1 linktest1 hall1 hall2 hall3 hall4 hall5
 python3 akaze_gates.py hall1
 python3 check_discrepancies.py
 python3 rotation_sweep.py

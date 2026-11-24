@@ -26,7 +26,7 @@ Centre points use A = 0.5, C = 1.5 : 1.5, D = 0.185 m/s. Levels live in
 | `extract.py` | one row of responses per run into `data/responses.csv` |
 | `doe.py` | effects, pooled variance, t-tests, model and prediction interval (course method) |
 | `check_example20.py` | checks `doe.py` against class Example 20 |
-| `analyze.py` | every table and figure into `results/summary.md` |
+| `analyze.py` | standardized-method analysis of T90 and time to exploration complete into `results/summary.md` |
 
 Two small additions outside this folder: `scripts/core/start_central.sh` takes
 `EXPLORER_EXTRA_PARAMS="name:=value ..."` and `scripts/core/start_fleet.sh`
@@ -82,14 +82,18 @@ Open each `data/runs/<id>/registration.png`: the robots' walls must line up
 with the reference. A weak alignment is flagged in the `flags` column.
 `results/summary.md` has every table and links the figures.
 
-After the 16 factorial runs, `analyze.py` prints the best setting and the
-command that adds three confirmation pairs (best vs current default), e.g.:
+The analysis follows the course's standardized method for two responses,
+T90 and time to exploration complete: input data, main-effect and interaction
+plots, calculation matrix and effects, Pareto chart, t-test of each effect from
+the pooled variance, model of the significant effects, residual plots, and the
+centre runs against the model. Other measures (idle time, separation, goal
+success, distance) are only summarized by coordination level.
+
+To see how much one run drives the result, leave it out:
 
 ```bash
-python3 entc641/plan.py add-confirm --best 1 1 -1 0.53
+python3 entc641/analyze.py --exclude R02     # writes results/excluding-R02/
 ```
-
-Run those like any other run, then extract and analyze again.
 
 ## How responses are measured
 
